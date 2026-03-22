@@ -16,36 +16,43 @@ export function PipelineProgress() {
   const activeIdx = stageIndex(pipelineStage)
 
   return (
-    <div className="flex items-center justify-center gap-0 py-3 px-8 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+    <div className="flex items-center justify-center py-3 px-8 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {STAGES.map((stage, i) => {
         const isActive = i === activeIdx
         const isPast = i < activeIdx
 
         return (
           <div key={stage.key} className="flex items-center">
+            {/* Connector line before this node (skip first) */}
             {i > 0 && (
               <div
                 className={cn(
-                  'w-24 h-px mx-1',
-                  isPast ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]',
+                  'w-20 h-0.5 rounded-full',
+                  isPast || isActive
+                    ? 'bg-[var(--color-accent)]'
+                    : 'bg-[var(--color-text-muted)]/25',
                 )}
               />
             )}
-            <div className="flex flex-col items-center gap-1">
+
+            {/* Node + label stacked vertically */}
+            <div className="flex flex-col items-center gap-1 px-1">
               <div
                 className={cn(
-                  'rounded-full border-2 transition-all',
-                  isActive && 'w-4 h-4 border-[var(--color-accent)] bg-[var(--color-accent)]',
-                  isPast && 'w-3 h-3 border-[var(--color-accent)] bg-[var(--color-accent)]',
-                  !isActive && !isPast && 'w-3 h-3 border-[var(--color-border)] bg-transparent',
+                  'rounded-full transition-all',
+                  isActive && 'w-4 h-4 bg-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/30',
+                  isPast && 'w-3 h-3 bg-[var(--color-accent)]',
+                  !isActive && !isPast && 'w-3 h-3 bg-[var(--color-text-muted)]/30 border-2 border-[var(--color-text-muted)]/50',
                 )}
               />
               <span
                 className={cn(
-                  'text-xs',
+                  'text-xs whitespace-nowrap',
                   isActive
                     ? 'text-[var(--color-text-primary)] font-semibold'
-                    : 'text-[var(--color-text-muted)]',
+                    : isPast
+                      ? 'text-[var(--color-text-secondary)]'
+                      : 'text-[var(--color-text-muted)]',
                 )}
               >
                 {stage.label}

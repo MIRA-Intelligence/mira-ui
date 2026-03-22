@@ -2,18 +2,18 @@ import { create } from 'zustand'
 
 interface UiState {
   sidebarCollapsed: boolean
-  chatOpen: boolean
+  agentPanelCollapsed: boolean
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
-  toggleChat: () => void
-  setChatOpen: (v: boolean) => void
+  toggleAgentPanel: () => void
+  setAgentPanelCollapsed: (v: boolean) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
   sidebarCollapsed: false,
-  chatOpen: false,
+  agentPanelCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
-  toggleChat: () => set((s) => ({ chatOpen: !s.chatOpen })),
-  setChatOpen: (v) => set({ chatOpen: v }),
+  toggleAgentPanel: () => set((s) => ({ agentPanelCollapsed: !s.agentPanelCollapsed })),
+  setAgentPanelCollapsed: (v) => set({ agentPanelCollapsed: v }),
 }))

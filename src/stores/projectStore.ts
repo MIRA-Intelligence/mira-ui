@@ -16,7 +16,12 @@ interface ProjectState {
   setMode: (mode: 'manual' | 'auto') => void
   setPipelineStage: (stage: PipelineStage) => void
   refreshPlan: () => Promise<void>
+  renameTask: (id: string, label: string) => void
+  deleteTask: (id: string) => void
+  duplicateTask: (id: string) => void
 }
+
+let dupCounter = 0
 
 function planToTask(plan: TaskPlan): ProjectTask {
   return {
@@ -62,6 +67,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   setMode: (mode) => set({ mode }),
   setPipelineStage: (stage) => set({ pipelineStage: stage }),
+
+  renameTask: (id, label) => {
+    set((state) => ({
+      tasks: state.tasks.map((t) => (t.id === id ? { ...t, label } : t)),
+    }))
+  },
+
+  deleteTask: (id) => {
+    const { tasks, selectedTaskId } = get()
+    const filtered = tasks.filter((t) => t.id !== id)
+    set({
+      tasks: filtered,
+      selectedTaskId: selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId,
+    })
+  },
+
+  duplicateTask: (id) => {
+    const { tasks } = get()
+    const source = tasks.find((t) => t.id === id)
+    if (!source) return
+    const newId = `${source.id}-dup${++dupCounter}`
+    const copy: ProjectTask = {
+      ...structuredClone(source),
+      id: newId,
+      label: `${source.label} (copy)`,
+      status: 'in_progress',
+      startedAt: new Date().toISOString(),
+    }
+    const idx = tasks.indexOf(source)
+    const updated = [...tasks]
+    updated.splice(idx + 1, 0, copy)
+    set({ tasks: updated, selectedTaskId: newId })
+  },
 
   refreshPlan: async () => {
     const plan = await fetchPlan()
