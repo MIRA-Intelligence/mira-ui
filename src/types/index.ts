@@ -11,12 +11,19 @@ export interface Phase {
   description?: string
 }
 
+export interface StepResults {
+  metrics?: Record<string, number | string>
+  findings?: string
+  artifacts?: string[]
+}
+
 export interface Step {
   id: string
   number: number
   title: string
   status: TaskStatus
   phases?: Phase[]
+  results?: StepResults
 }
 
 export interface ProjectTask {
@@ -66,11 +73,18 @@ export interface TaskPlan {
   steps: TaskPlanStep[]
 }
 
+export interface TaskPlanResults {
+  metrics?: Record<string, number | string>
+  findings?: string
+  artifacts?: string[]
+}
+
 export interface TaskPlanStep {
   number: number
   title: string
   status: TaskStatus
   phases?: TaskPlanPhase[]
+  results?: TaskPlanResults
 }
 
 export interface TaskPlanPhase {

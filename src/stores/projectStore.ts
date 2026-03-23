@@ -36,6 +36,7 @@ function planToTask(plan: TaskPlan): ProjectTask {
       number: s.number,
       title: s.title,
       status: s.status,
+      results: s.results,
       phases: s.phases?.map((p, j) => ({
         id: `live-s${i}-p${j}`,
         label: p.label,
@@ -48,11 +49,11 @@ function planToTask(plan: TaskPlan): ProjectTask {
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: mockTasks,
-  selectedTaskId: mockTasks[2]?.id ?? null,
-  pipelineStage: 'experiment',
+  selectedTaskId: null,
+  pipelineStage: 'ideation',
   mode: 'auto',
   stats: mockStats,
-  startedAt: Date.now() - 35 * 3600_000 - 44 * 60_000 - 7_000,
+  startedAt: Date.now(),
   livePlan: null,
 
   selectTask: (id) => {
