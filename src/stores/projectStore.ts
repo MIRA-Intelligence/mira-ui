@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProjectTask, PipelineStage, Stats, TaskPlan } from '@/types'
+import type { ProjectTask, PipelineStage, Stats, TaskPlan, NewProjectInput } from '@/types'
 import { mockTasks, mockStats } from '@/stores/mockData'
 import { fetchPlan } from '@/services/api'
 
@@ -19,9 +19,11 @@ interface ProjectState {
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string) => void
   duplicateTask: (id: string) => void
+  createProject: (input: NewProjectInput) => string
 }
 
 let dupCounter = 0
+let projectCounter = 0
 
 function planToTask(plan: TaskPlan): ProjectTask {
   return {
@@ -100,6 +102,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const updated = [...tasks]
     updated.splice(idx + 1, 0, copy)
     set({ tasks: updated, selectedTaskId: newId })
+  },
+
+  createProject: (input) => {
+    const id = `PRJ-${String(++projectCounter).padStart(4, '0')}`
+    const label = input.title?.trim() || id
+    const task: ProjectTask = {
+      id,
+      label,
+      status: 'in_progress',
+      pipelineStage: 'ideation',
+      title: input.description.slice(0, 120),
+      steps: [],
+      startedAt: new Date().toISOString(),
+    }
+    set((state) => ({
+      tasks: [task, ...state.tasks],
+      selectedTaskId: id,
+      pipelineStage: 'ideation',
+      startedAt: Date.now(),
+    }))
+    return id
   },
 
   refreshPlan: async () => {

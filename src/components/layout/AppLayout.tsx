@@ -5,6 +5,7 @@ import { ProjectQueue } from '@/components/queue/ProjectQueue'
 import { TaskDetail } from '@/components/task/TaskDetail'
 import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
+import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { useUiStore } from '@/stores/uiStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,7 @@ export function AppLayout() {
 
       <StatusBar />
       <SettingsModal />
+      <NewProjectModal />
     </div>
   )
 }
