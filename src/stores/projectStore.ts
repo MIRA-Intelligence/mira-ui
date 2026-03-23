@@ -36,6 +36,7 @@ function planToTask(plan: TaskPlan): ProjectTask {
       number: s.number,
       title: s.title,
       status: s.status,
+      results: s.results,
       phases: s.phases?.map((p, j) => ({
         id: `live-s${i}-p${j}`,
         label: p.label,

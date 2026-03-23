@@ -11,9 +11,21 @@ export const mockTasks: ProjectTask[] = [
     title: 'Prefix-Ratio GRPO for High-Staleness Rollout Replay (ECHO-2 Follow-up)',
     startedAt: new Date(Date.now() - 35 * 3600_000).toISOString(),
     steps: [
-      { id: 's1', number: 1, title: 'Dependencies Installation and Project Structure Initialization', status: 'completed', phases: [] },
+      {
+        id: 's1', number: 1, title: 'Dependencies Installation and Project Structure Initialization', status: 'completed', phases: [],
+        results: {
+          metrics: { 'setup_time': '4m 32s', 'packages': 47, 'gpu_detected': 'A100-80G ×2' },
+          findings: 'All dependencies resolved. vLLM, trl, and transformers installed from source for GRPO compatibility. CUDA 12.4 confirmed.',
+          artifacts: ['requirements.txt', 'configs/base_config.yaml'],
+        },
+      },
       {
         id: 's2', number: 2, title: 'Vanilla GRPO Sanity Check at S=6 and Core Infrastructure Implementation', status: 'running',
+        results: {
+          metrics: { 'accuracy': 0.4200, 'pg_loss': 0.0312, 'reward_mean': -0.58, 'steps_done': '7/10', 'wall_time': '5h 50m', 'gpu_hours': 11.7 },
+          findings: 'GRPO advantages became non-zero at step 3. Base model (Qwen3-8B) initially produces all-wrong answers (reward=-1.0), causing zero advantage. By step 7, accuracy reached 42% on AIME24. pg_loss shows healthy gradient signal after warmup.',
+          artifacts: ['plots/loss_curve_s6.png', 'plots/reward_distribution.png', 'results/sanity_check_partial.csv'],
+        },
         phases: [
           { id: 'p2a', label: 'Phases 1-5: Data prep, staleness buffer, staleness trainer, stability monitor, AIME24 eval, config', status: 'completed' },
           { id: 'p2b', label: 'Phase 6a: Fix bugs from debug run (reward fn kwargs, IS weights zeroing, monitor metric keys)', status: 'completed' },
