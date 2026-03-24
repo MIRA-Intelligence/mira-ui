@@ -5,9 +5,8 @@ export const mockTasks: ProjectTask[] = []
 export const mockLogs: LogEntry[] = []
 
 export const mockStats: Stats = {
-  hypotheses: 0,
-  papers: 0,
-  tokens: 0,
-  cost: 0,
-  stages: [],
+  experiments: 0,
+  completed: 0,
+  failed: 0,
+  running: 0,
 }

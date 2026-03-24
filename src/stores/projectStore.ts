@@ -1,24 +1,21 @@
 import { create } from 'zustand'
 import type {
-  ProjectTask, PipelineStage, Stats, TaskStatus, PhaseStatus,
-  StepResults, StageData, NewProjectInput,
+  ProjectTask, Experiment, ExperimentStatus,
+  NewProjectInput, Stats, TaskPlan,
 } from '@/types'
-import { mockTasks, mockStats } from '@/stores/mockData'
 import { fetchPlan } from '@/services/api'
 
 interface ProjectState {
   tasks: ProjectTask[]
   selectedTaskId: string | null
-  pipelineStage: PipelineStage
-  viewingStage: PipelineStage | null
+  selectedExpId: string | null
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
 
   selectTask: (id: string) => void
+  selectExperiment: (id: string | null) => void
   setMode: (mode: 'manual' | 'auto') => void
-  setPipelineStage: (stage: PipelineStage) => void
-  setViewingStage: (stage: PipelineStage | null) => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string) => void
@@ -29,80 +26,77 @@ interface ProjectState {
 let dupCounter = 0
 let projectCounter = 0
 
-const STAGE_NORMALIZE: Record<string, PipelineStage> = {
-  ideation: 'research',
-  research: 'research',
-  planning: 'planning',
-  experiment: 'experiment',
-  writing: 'writing',
-}
-
-function normalizeStage(s: string | undefined | null): PipelineStage {
-  if (!s) return 'research'
-  return STAGE_NORMALIZE[s] ?? 'research'
-}
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
-  const steps: any[] = Array.isArray(raw.steps) ? raw.steps : []
-
-  const stageData: StageData = {}
-  const sd = raw.stage_data
-  if (sd) {
-    if (sd.research) stageData.research = sd.research
-    if (sd.writing) stageData.writing = sd.writing
+function parseExperiment(raw: any, fallbackIdx: number): Experiment {
+  return {
+    id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
+    title: (raw.title as string) ?? 'Untitled experiment',
+    status: (raw.status as ExperimentStatus) ?? 'pending',
+    question: raw.question as string | undefined,
+    hypothesis: raw.hypothesis as string | undefined,
+    prediction: raw.prediction as string | undefined,
+    method: raw.method as string | undefined,
+    results: raw.results ?? undefined,
+    conclusion: raw.conclusion as string | undefined,
+    next: raw.next as string | undefined,
+    commit: raw.commit as string | undefined,
+    progress: raw.progress ?? undefined,
+    parent: raw.parent as string | undefined,
   }
+}
+
+function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
+  const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
+  const knowledge: string[] = Array.isArray(raw.knowledge) ? raw.knowledge : task.knowledge
 
   return {
     ...task,
     status: raw.status === 'completed' ? 'completed' : 'in_progress',
-    pipelineStage: normalizeStage(raw.pipeline_stage),
     title: raw.title ?? task.title,
+    coreQuestion: raw.core_question ?? task.coreQuestion,
+    currentExperiment: raw.current_experiment ?? task.currentExperiment,
     startedAt: raw.started_at ?? task.startedAt,
-    stageData: Object.keys(stageData).length > 0 ? stageData : task.stageData,
-    steps: steps.map((s: any, i: number) => ({
-      id: `${task.id}-s${i}`,
-      number: (s.number as number) ?? i + 1,
-      title: (s.title as string) ?? `Step ${i + 1}`,
-      status: (s.status as TaskStatus) ?? 'pending',
-      stage: normalizeStage(s.stage),
-      results: s.results as StepResults | undefined,
-      phases: Array.isArray(s.phases)
-        ? s.phases.map((p: any, j: number) => ({
-            id: `${task.id}-s${i}-p${j}`,
-            label: (p.label as string) ?? `Phase ${j + 1}`,
-            status: (p.status as PhaseStatus) ?? 'pending',
-            description: p.detail as string | undefined,
-          }))
-        : undefined,
-    })),
+    experiments: exps.map((e, i) => parseExperiment(e, i)),
+    knowledge,
   }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
+function computeStats(tasks: ProjectTask[]): Stats {
+  let experiments = 0, completed = 0, failed = 0, running = 0
+  for (const t of tasks) {
+    for (const e of t.experiments) {
+      experiments++
+      if (e.status === 'completed') completed++
+      else if (e.status === 'failed') failed++
+      else if (e.status === 'running') running++
+    }
+  }
+  return { experiments, completed, failed, running }
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
-  tasks: mockTasks,
+  tasks: [],
   selectedTaskId: null,
-  pipelineStage: 'research',
-  viewingStage: null,
+  selectedExpId: null,
   mode: 'auto',
-  stats: mockStats,
+  stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
 
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
+    const activeExp = task?.currentExperiment ?? task?.experiments.find((e) => e.status === 'running')?.id ?? null
     set({
       selectedTaskId: id,
-      viewingStage: null,
-      pipelineStage: task?.pipelineStage ?? get().pipelineStage,
+      selectedExpId: activeExp,
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
     })
   },
+
+  selectExperiment: (id) => set({ selectedExpId: id }),
   setMode: (mode) => set({ mode }),
-  setPipelineStage: (stage) => set({ pipelineStage: stage }),
-  setViewingStage: (stage) => set({ viewingStage: stage }),
 
   renameTask: (id, label) => {
     set((state) => ({
@@ -116,6 +110,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       tasks: filtered,
       selectedTaskId: selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId,
+      selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
     })
   },
 
@@ -144,23 +139,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       id,
       label,
       status: 'in_progress',
-      pipelineStage: 'research',
       title: input.description.slice(0, 120),
-      steps: [],
+      coreQuestion: input.description,
+      experiments: [],
+      knowledge: [],
       startedAt: new Date().toISOString(),
     }
     set((state) => ({
       tasks: [task, ...state.tasks],
       selectedTaskId: id,
-      pipelineStage: 'research',
-      viewingStage: null,
+      selectedExpId: null,
       startedAt: Date.now(),
     }))
     return id
   },
 
   refreshPlan: async (projectId: string) => {
-    const plan = await fetchPlan(projectId)
+    const plan = await fetchPlan(projectId) as TaskPlan | null
     if (!plan) return
 
     const { tasks, selectedTaskId } = get()
@@ -174,8 +169,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const applied = updated[idx]
     set({
       tasks: updated,
+      stats: computeStats(updated),
       ...(isSelected && {
-        pipelineStage: applied.pipelineStage,
+        selectedExpId: applied.currentExperiment ?? get().selectedExpId,
         startedAt: applied.startedAt
           ? new Date(applied.startedAt).getTime()
           : get().startedAt,

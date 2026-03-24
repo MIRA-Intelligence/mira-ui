@@ -1,47 +1,47 @@
 import { useProjectStore } from '@/stores/projectStore'
-import { ResearchView } from '../stages/ResearchView'
-import { PlanningView } from '../stages/PlanningView'
-import { ExperimentView } from '../stages/ExperimentView'
-import { WritingView } from '../stages/WritingView'
-import type { PipelineStage, Step } from '@/types'
-
-const STAGE_ORDER: PipelineStage[] = ['research', 'planning', 'experiment', 'writing']
-
-function stepsForStage(steps: Step[], stage: PipelineStage, activeStage: PipelineStage): Step[] {
-  const tagged = steps.filter((s) => s.stage === stage)
-  if (tagged.length > 0) return tagged
-
-  const activeIdx = STAGE_ORDER.indexOf(activeStage)
-  const stageIdx = STAGE_ORDER.indexOf(stage)
-  if (stageIdx === activeIdx) return steps
-  return []
-}
+import { ExperimentDetail } from '../experiment/ExperimentDetail'
+import { KnowledgePanel } from '../experiment/KnowledgePanel'
 
 export function TaskDetail() {
-  const { tasks, selectedTaskId, pipelineStage, viewingStage } = useProjectStore()
+  const { tasks, selectedTaskId, selectedExpId } = useProjectStore()
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
     return (
-      <div className="flex items-center justify-center h-full text-[var(--color-text-muted)]">
-        Select a project from the list
+      <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-sm">
+        Select a project to get started
       </div>
     )
   }
 
-  const displayStage = viewingStage ?? pipelineStage
-  const stageSteps = stepsForStage(task.steps, displayStage, pipelineStage)
-
-  switch (displayStage) {
-    case 'research':
-      return <ResearchView steps={stageSteps} data={task.stageData?.research} />
-    case 'planning':
-      return <PlanningView steps={stageSteps} />
-    case 'experiment':
-      return <ExperimentView steps={stageSteps} />
-    case 'writing':
-      return <WritingView steps={stageSteps} data={task.stageData?.writing} />
-    default:
-      return <PlanningView steps={stageSteps} />
+  if (selectedExpId === '__knowledge__') {
+    return <KnowledgePanel knowledge={task.knowledge} coreQuestion={task.coreQuestion} />
   }
+
+  const experiment = task.experiments.find((e) => e.id === selectedExpId)
+
+  if (!experiment) {
+    if (task.experiments.length === 0) {
+      return (
+        <div className="h-full flex flex-col items-center justify-center text-center px-8">
+          <div className="text-2xl mb-3">🔬</div>
+          <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
+            Ready to start
+          </h3>
+          <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
+            Send a message to the agent to begin the first experiment.
+            The agent will follow the scientific method: Question → Hypothesis → Experiment → Analysis.
+          </p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
+        Select an experiment from the timeline
+      </div>
+    )
+  }
+
+  return <ExperimentDetail experiment={experiment} />
 }

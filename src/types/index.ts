@@ -1,89 +1,57 @@
-export type PipelineStage = 'research' | 'planning' | 'experiment' | 'writing'
+/* ── Experiment status ──────────────────────────── */
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
 
-export type PhaseStatus = 'pending' | 'running' | 'completed'
+/* ── Experiment result ─────────────────────────── */
 
-export interface Phase {
-  id: string
-  label: string
-  status: PhaseStatus
-  description?: string
-}
-
-export interface StepResults {
+export interface ExperimentResult {
   metrics?: Record<string, number | string>
   findings?: string
   artifacts?: string[]
 }
 
-export interface Step {
-  id: string
-  number: number
-  title: string
-  status: TaskStatus
-  stage?: PipelineStage
-  phases?: Phase[]
-  results?: StepResults
+/* ── Training / execution progress ─────────────── */
+
+export interface ExperimentProgress {
+  epoch?: number
+  total_epochs?: number
+  current_metric?: string
+  current_value?: number
 }
 
-/* ── Research stage data ──────────────────────────── */
+/* ── Single experiment ─────────────────────────── */
 
-export interface PaperReference {
-  id: string
-  title: string
-  authors: string
-  year?: number | string
-  venue?: string
-  doi?: string
-  url?: string
-  abstract?: string
-  relevance?: string
-  tags?: string[]
-}
-
-export interface ResearchData {
-  papers?: PaperReference[]
-  gaps?: string[]
-  key_findings?: string[]
-  summary?: string
-}
-
-/* ── Writing stage data ───────────────────────────── */
-
-export interface DocumentSection {
+export interface Experiment {
   id: string
   title: string
-  status: PhaseStatus
-  word_count?: number
-  preview?: string
+  status: ExperimentStatus
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: ExperimentResult
+  conclusion?: string
+  next?: string
+  commit?: string
+  progress?: ExperimentProgress
+  parent?: string
 }
 
-export interface WritingData {
-  outline?: DocumentSection[]
-  total_words?: number
-  target_words?: number
-}
-
-/* ── Stage-specific data container ────────────────── */
-
-export interface StageData {
-  research?: ResearchData
-  writing?: WritingData
-}
-
-/* ── Project task ─────────────────────────────────── */
+/* ── Project task (one project = many experiments) ── */
 
 export interface ProjectTask {
   id: string
   label: string
-  status: 'in_progress' | 'completed'
-  pipelineStage: PipelineStage
+  status: 'in_progress' | 'completed' | 'pending'
   title: string
-  steps: Step[]
+  coreQuestion?: string
+  currentExperiment?: string
+  experiments: Experiment[]
+  knowledge: string[]
   startedAt: string
-  stageData?: StageData
 }
+
+/* ── Agent log entry ───────────────────────────── */
 
 export interface LogEntry {
   id: string
@@ -94,54 +62,50 @@ export interface LogEntry {
   collapsed?: boolean
 }
 
-export interface JobMonitorInfo {
-  id: string
-  label: string
-  service?: string
-}
+/* ── Stats (status bar) ────────────────────────── */
 
 export interface Stats {
-  hypotheses: number
-  papers: number
-  tokens: number
-  cost: number
-  stages: { label: string; active: boolean }[]
+  experiments: number
+  completed: number
+  failed: number
+  running: number
 }
 
-/**
- * task_plan.json schema — the contract between agent and UI.
- */
+/* ── task_plan.json — contract between agent & UI ── */
+
 export interface TaskPlan {
   title: string
-  pipeline_stage: PipelineStage
+  core_question?: string
   status: 'in_progress' | 'completed' | 'failed'
-  started_at: string
-  steps: TaskPlanStep[]
-  stage_data?: {
-    research?: ResearchData
-    writing?: WritingData
-  }
+  started_at?: string
+  current_experiment?: string
+  experiments: TaskPlanExperiment[]
+  knowledge?: string[]
 }
 
-export interface TaskPlanResults {
-  metrics?: Record<string, number | string>
-  findings?: string
-  artifacts?: string[]
-}
-
-export interface TaskPlanStep {
-  number: number
+export interface TaskPlanExperiment {
+  id: string
   title: string
-  status: TaskStatus
-  stage?: PipelineStage
-  phases?: TaskPlanPhase[]
-  results?: TaskPlanResults
-}
-
-export interface TaskPlanPhase {
-  label: string
-  status: PhaseStatus
-  detail?: string
+  status: string
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: {
+    metrics?: Record<string, number | string>
+    findings?: string
+    artifacts?: string[]
+  }
+  conclusion?: string
+  next?: string
+  commit?: string
+  progress?: {
+    epoch?: number
+    total_epochs?: number
+    current_metric?: string
+    current_value?: number
+  }
+  parent?: string
 }
 
 /* ── New Project creation ────────────────────────── */
