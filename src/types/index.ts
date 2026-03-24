@@ -1,4 +1,4 @@
-export type PipelineStage = 'ideation' | 'planning' | 'experiment' | 'writing'
+export type PipelineStage = 'research' | 'planning' | 'experiment' | 'writing'
 
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -22,9 +22,57 @@ export interface Step {
   number: number
   title: string
   status: TaskStatus
+  stage?: PipelineStage
   phases?: Phase[]
   results?: StepResults
 }
+
+/* ── Research stage data ──────────────────────────── */
+
+export interface PaperReference {
+  id: string
+  title: string
+  authors: string
+  year?: number | string
+  venue?: string
+  doi?: string
+  url?: string
+  abstract?: string
+  relevance?: string
+  tags?: string[]
+}
+
+export interface ResearchData {
+  papers?: PaperReference[]
+  gaps?: string[]
+  key_findings?: string[]
+  summary?: string
+}
+
+/* ── Writing stage data ───────────────────────────── */
+
+export interface DocumentSection {
+  id: string
+  title: string
+  status: PhaseStatus
+  word_count?: number
+  preview?: string
+}
+
+export interface WritingData {
+  outline?: DocumentSection[]
+  total_words?: number
+  target_words?: number
+}
+
+/* ── Stage-specific data container ────────────────── */
+
+export interface StageData {
+  research?: ResearchData
+  writing?: WritingData
+}
+
+/* ── Project task ─────────────────────────────────── */
 
 export interface ProjectTask {
   id: string
@@ -34,6 +82,7 @@ export interface ProjectTask {
   title: string
   steps: Step[]
   startedAt: string
+  stageData?: StageData
 }
 
 export interface LogEntry {
@@ -61,9 +110,6 @@ export interface Stats {
 
 /**
  * task_plan.json schema — the contract between agent and UI.
- *
- * The agent maintains this file in its workspace via write_file.
- * The UI fetches it via GET /api/plan?session=xxx after each response.
  */
 export interface TaskPlan {
   title: string
@@ -71,6 +117,10 @@ export interface TaskPlan {
   status: 'in_progress' | 'completed' | 'failed'
   started_at: string
   steps: TaskPlanStep[]
+  stage_data?: {
+    research?: ResearchData
+    writing?: WritingData
+  }
 }
 
 export interface TaskPlanResults {
@@ -83,6 +133,7 @@ export interface TaskPlanStep {
   number: number
   title: string
   status: TaskStatus
+  stage?: PipelineStage
   phases?: TaskPlanPhase[]
   results?: TaskPlanResults
 }

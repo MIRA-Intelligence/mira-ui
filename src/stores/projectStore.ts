@@ -1,5 +1,8 @@
 import { create } from 'zustand'
-import type { ProjectTask, PipelineStage, Stats, TaskPlan, TaskStatus, PhaseStatus, StepResults, NewProjectInput } from '@/types'
+import type {
+  ProjectTask, PipelineStage, Stats, TaskStatus, PhaseStatus,
+  StepResults, StageData, NewProjectInput,
+} from '@/types'
 import { mockTasks, mockStats } from '@/stores/mockData'
 import { fetchPlan } from '@/services/api'
 
@@ -7,6 +10,7 @@ interface ProjectState {
   tasks: ProjectTask[]
   selectedTaskId: string | null
   pipelineStage: PipelineStage
+  viewingStage: PipelineStage | null
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
@@ -14,6 +18,7 @@ interface ProjectState {
   selectTask: (id: string) => void
   setMode: (mode: 'manual' | 'auto') => void
   setPipelineStage: (stage: PipelineStage) => void
+  setViewingStage: (stage: PipelineStage | null) => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string) => void
@@ -24,21 +29,43 @@ interface ProjectState {
 let dupCounter = 0
 let projectCounter = 0
 
+const STAGE_NORMALIZE: Record<string, PipelineStage> = {
+  ideation: 'research',
+  research: 'research',
+  planning: 'planning',
+  experiment: 'experiment',
+  writing: 'writing',
+}
+
+function normalizeStage(s: string | undefined | null): PipelineStage {
+  if (!s) return 'research'
+  return STAGE_NORMALIZE[s] ?? 'research'
+}
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const steps: any[] = Array.isArray(raw.steps) ? raw.steps : []
 
+  const stageData: StageData = {}
+  const sd = raw.stage_data
+  if (sd) {
+    if (sd.research) stageData.research = sd.research
+    if (sd.writing) stageData.writing = sd.writing
+  }
+
   return {
     ...task,
     status: raw.status === 'completed' ? 'completed' : 'in_progress',
-    pipelineStage: raw.pipeline_stage ?? task.pipelineStage ?? 'ideation',
+    pipelineStage: normalizeStage(raw.pipeline_stage),
     title: raw.title ?? task.title,
     startedAt: raw.started_at ?? task.startedAt,
+    stageData: Object.keys(stageData).length > 0 ? stageData : task.stageData,
     steps: steps.map((s: any, i: number) => ({
       id: `${task.id}-s${i}`,
       number: (s.number as number) ?? i + 1,
       title: (s.title as string) ?? `Step ${i + 1}`,
       status: (s.status as TaskStatus) ?? 'pending',
+      stage: normalizeStage(s.stage),
       results: s.results as StepResults | undefined,
       phases: Array.isArray(s.phases)
         ? s.phases.map((p: any, j: number) => ({
@@ -56,7 +83,8 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: mockTasks,
   selectedTaskId: null,
-  pipelineStage: 'ideation',
+  pipelineStage: 'research',
+  viewingStage: null,
   mode: 'auto',
   stats: mockStats,
   startedAt: Date.now(),
@@ -65,6 +93,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const task = get().tasks.find((t) => t.id === id)
     set({
       selectedTaskId: id,
+      viewingStage: null,
       pipelineStage: task?.pipelineStage ?? get().pipelineStage,
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
@@ -73,6 +102,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   setMode: (mode) => set({ mode }),
   setPipelineStage: (stage) => set({ pipelineStage: stage }),
+  setViewingStage: (stage) => set({ viewingStage: stage }),
 
   renameTask: (id, label) => {
     set((state) => ({
@@ -114,7 +144,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       id,
       label,
       status: 'in_progress',
-      pipelineStage: 'ideation',
+      pipelineStage: 'research',
       title: input.description.slice(0, 120),
       steps: [],
       startedAt: new Date().toISOString(),
@@ -122,7 +152,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((state) => ({
       tasks: [task, ...state.tasks],
       selectedTaskId: id,
-      pipelineStage: 'ideation',
+      pipelineStage: 'research',
+      viewingStage: null,
       startedAt: Date.now(),
     }))
     return id
