@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ProjectTask, PipelineStage, Stats, TaskPlan, NewProjectInput } from '@/types'
+import type { ProjectTask, PipelineStage, Stats, TaskPlan, TaskStatus, PhaseStatus, StepResults, NewProjectInput } from '@/types'
 import { mockTasks, mockStats } from '@/stores/mockData'
 import { fetchPlan } from '@/services/api'
 
@@ -10,12 +10,11 @@ interface ProjectState {
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
-  livePlan: TaskPlan | null
 
   selectTask: (id: string) => void
   setMode: (mode: 'manual' | 'auto') => void
   setPipelineStage: (stage: PipelineStage) => void
-  refreshPlan: () => Promise<void>
+  refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string) => void
   duplicateTask: (id: string) => void
@@ -25,29 +24,34 @@ interface ProjectState {
 let dupCounter = 0
 let projectCounter = 0
 
-function planToTask(plan: TaskPlan): ProjectTask {
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
+  const steps: any[] = Array.isArray(raw.steps) ? raw.steps : []
+
   return {
-    id: '_live',
-    label: 'LIVE',
-    status: plan.status === 'completed' ? 'completed' : 'in_progress',
-    pipelineStage: plan.pipeline_stage,
-    title: plan.title,
-    startedAt: plan.started_at,
-    steps: plan.steps.map((s, i) => ({
-      id: `live-s${i}`,
-      number: s.number,
-      title: s.title,
-      status: s.status,
-      results: s.results,
-      phases: s.phases?.map((p, j) => ({
-        id: `live-s${i}-p${j}`,
-        label: p.label,
-        status: p.status,
-        description: p.detail,
-      })),
+    ...task,
+    status: raw.status === 'completed' ? 'completed' : 'in_progress',
+    pipelineStage: raw.pipeline_stage ?? task.pipelineStage ?? 'ideation',
+    title: raw.title ?? task.title,
+    startedAt: raw.started_at ?? task.startedAt,
+    steps: steps.map((s: any, i: number) => ({
+      id: `${task.id}-s${i}`,
+      number: (s.number as number) ?? i + 1,
+      title: (s.title as string) ?? `Step ${i + 1}`,
+      status: (s.status as TaskStatus) ?? 'pending',
+      results: s.results as StepResults | undefined,
+      phases: Array.isArray(s.phases)
+        ? s.phases.map((p: any, j: number) => ({
+            id: `${task.id}-s${i}-p${j}`,
+            label: (p.label as string) ?? `Phase ${j + 1}`,
+            status: (p.status as PhaseStatus) ?? 'pending',
+            description: p.detail as string | undefined,
+          }))
+        : undefined,
     })),
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: mockTasks,
@@ -56,7 +60,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   mode: 'auto',
   stats: mockStats,
   startedAt: Date.now(),
-  livePlan: null,
 
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
@@ -125,28 +128,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return id
   },
 
-  refreshPlan: async () => {
-    const plan = await fetchPlan()
+  refreshPlan: async (projectId: string) => {
+    const plan = await fetchPlan(projectId)
     if (!plan) return
 
-    const liveTask = planToTask(plan)
-    const { tasks } = get()
+    const { tasks, selectedTaskId } = get()
+    const idx = tasks.findIndex((t) => t.id === projectId)
+    if (idx < 0) return
 
-    const existingIdx = tasks.findIndex((t) => t.id === '_live')
-    let updated: ProjectTask[]
-    if (existingIdx >= 0) {
-      updated = [...tasks]
-      updated[existingIdx] = liveTask
-    } else {
-      updated = [liveTask, ...tasks]
-    }
+    const updated = [...tasks]
+    updated[idx] = applyPlanToTask(tasks[idx], plan)
 
+    const isSelected = selectedTaskId === projectId
+    const applied = updated[idx]
     set({
-      livePlan: plan,
       tasks: updated,
-      selectedTaskId: '_live',
-      pipelineStage: plan.pipeline_stage,
-      startedAt: new Date(plan.started_at).getTime(),
+      ...(isSelected && {
+        pipelineStage: applied.pipelineStage,
+        startedAt: applied.startedAt
+          ? new Date(applied.startedAt).getTime()
+          : get().startedAt,
+      }),
     })
   },
 }))

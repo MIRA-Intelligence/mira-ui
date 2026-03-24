@@ -89,7 +89,7 @@ export function NewProjectModal() {
     const projectId = createProject(input)
 
     const agentMsg = buildAgentMessage(input, workspacePath, projectId)
-    useAgentStore.getState().addLog({
+    useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content: agentMsg,

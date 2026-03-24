@@ -5,9 +5,10 @@ function getApiUrl(): string {
   return useSettingsStore.getState().apiUrl
 }
 
-export async function fetchPlan(): Promise<TaskPlan | null> {
+export async function fetchPlan(sessionId?: string): Promise<TaskPlan | null> {
   try {
-    const resp = await fetch(`${getApiUrl()}/plan`)
+    const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+    const resp = await fetch(`${getApiUrl()}/plan${qs}`)
     if (!resp.ok) return null
     const data = await resp.json()
     if (!data || data.error) return null

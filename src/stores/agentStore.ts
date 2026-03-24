@@ -3,27 +3,34 @@ import type { LogEntry, WsResponse } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 
 interface AgentState {
-  logs: LogEntry[]
+  logsByProject: Record<string, LogEntry[]>
   isStreaming: boolean
   connected: boolean
 
-  addLog: (entry: LogEntry) => void
+  addLog: (projectId: string, entry: LogEntry) => void
   handleWsMessage: (msg: WsResponse) => void
   setConnected: (v: boolean) => void
-  clearLogs: () => void
+  clearLogs: (projectId: string) => void
+  getProjectLogs: (projectId: string | null) => LogEntry[]
 }
 
 let logIdCounter = 0
 
-export const useAgentStore = create<AgentState>((set) => ({
-  logs: [],
+export const useAgentStore = create<AgentState>((set, get) => ({
+  logsByProject: {},
   isStreaming: false,
   connected: false,
 
-  addLog: (entry) =>
-    set((state) => ({ logs: [...state.logs, entry] })),
+  addLog: (projectId, entry) =>
+    set((state) => ({
+      logsByProject: {
+        ...state.logsByProject,
+        [projectId]: [...(state.logsByProject[projectId] ?? []), entry],
+      },
+    })),
 
   handleWsMessage: (msg) => {
+    const sessionId = msg.session_id ?? '_unknown'
     const entry: LogEntry = {
       id: `log-${++logIdCounter}`,
       timestamp: new Date().toISOString(),
@@ -33,17 +40,29 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
 
     set((state) => ({
-      logs: [...state.logs, entry],
+      logsByProject: {
+        ...state.logsByProject,
+        [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
+      },
       isStreaming: msg.type === 'progress',
     }))
 
-    // After each final response, refresh the plan from backend
     if (msg.type === 'response') {
-      useProjectStore.getState().refreshPlan()
+      useProjectStore.getState().refreshPlan(sessionId)
     }
   },
 
   setConnected: (connected) => set({ connected }),
 
-  clearLogs: () => set({ logs: [], isStreaming: false }),
+  clearLogs: (projectId) =>
+    set((state) => {
+      const updated = { ...state.logsByProject }
+      delete updated[projectId]
+      return { logsByProject: updated, isStreaming: false }
+    }),
+
+  getProjectLogs: (projectId) => {
+    if (!projectId) return []
+    return get().logsByProject[projectId] ?? []
+  },
 }))

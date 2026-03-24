@@ -119,6 +119,7 @@ export interface WsMessage {
 
 export interface WsResponse {
   type: 'response' | 'progress' | 'tool_call' | 'error'
+  session_id?: string
   content: string
   media?: string[]
   metadata?: Record<string, unknown>
