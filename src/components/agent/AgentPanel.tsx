@@ -1,12 +1,16 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useAutoContinue } from '@/hooks/useAutoContinue'
 import { wsClient } from '@/services/websocket'
 import { LogEntry } from './LogEntry'
+
+const AUTO_DELAY_MS = 4000
 
 export function AgentPanel() {
   const { connected, logsByProject } = useAgentStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
 
   const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
 
@@ -22,6 +26,8 @@ export function AgentPanel() {
   const handleSend = () => {
     const text = input.trim()
     if (!text || !selectedTaskId) return
+
+    cancelAuto()
 
     useAgentStore.getState().addLog(selectedTaskId, {
       id: `user-${Date.now()}`,
@@ -40,6 +46,10 @@ export function AgentPanel() {
     setInput('')
   }
 
+  const countdownProgress = countdown !== null
+    ? Math.max(0, countdown / AUTO_DELAY_MS)
+    : null
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -54,6 +64,11 @@ export function AgentPanel() {
         <span className="text-[10px] text-[var(--color-text-muted)]">
           {connected ? 'Connected' : 'Disconnected'}
         </span>
+        {isAuto && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/15 text-[var(--color-success)] font-medium">
+            AUTO
+          </span>
+        )}
         {selectedTaskId && (
           <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
             {selectedTaskId}
@@ -65,10 +80,18 @@ export function AgentPanel() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         {logs.map((entry) => {
           const isUser = !!entry.metadata?._user
+          const isAutoMsg = !!entry.metadata?._auto
           if (isUser) {
             return (
               <div key={entry.id} className="px-4 py-2">
-                <div className="text-sm rounded-lg p-2.5 leading-relaxed whitespace-pre-wrap bg-[var(--color-accent)]/15 text-[var(--color-text-primary)] ml-8">
+                <div className={`text-sm rounded-lg p-2.5 leading-relaxed whitespace-pre-wrap ml-8 ${
+                  isAutoMsg
+                    ? 'bg-[var(--color-success)]/10 text-[var(--color-text-secondary)] italic'
+                    : 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)]'
+                }`}>
+                  {isAutoMsg && (
+                    <span className="text-[10px] font-semibold text-[var(--color-success)] uppercase mr-1.5 not-italic">AUTO</span>
+                  )}
                   {entry.content}
                 </div>
               </div>
@@ -88,6 +111,33 @@ export function AgentPanel() {
           </div>
         )}
       </div>
+
+      {/* Auto-continue countdown */}
+      {countdownProgress !== null && (
+        <div className="px-3 shrink-0">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-success)]/8 border border-[var(--color-success)]/20">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-[var(--color-success)] font-medium">
+                  Auto-continuing in {Math.ceil((countdown ?? 0) / 1000)}s...
+                </span>
+                <button
+                  onClick={cancelAuto}
+                  className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="h-1 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-[var(--color-success)] rounded-full transition-all duration-75 ease-linear"
+                  style={{ width: `${(1 - countdownProgress) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input */}
       <div className="p-3 border-t border-[var(--color-border)] shrink-0">
