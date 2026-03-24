@@ -1,9 +1,11 @@
 import { useProjectStore } from '@/stores/projectStore'
 import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
+import { ResearchView } from '../stages/ResearchView'
+import { ResultView } from '../stages/ResultView'
 
 export function TaskDetail() {
-  const { tasks, selectedTaskId, selectedExpId } = useProjectStore()
+  const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
@@ -14,6 +16,15 @@ export function TaskDetail() {
     )
   }
 
+  if (activeStage === 'research') {
+    return <ResearchView data={task.research} coreQuestion={task.coreQuestion} />
+  }
+
+  if (activeStage === 'result') {
+    return <ResultView data={task.result} task={task} />
+  }
+
+  // activeStage === 'experiment'
   if (selectedExpId === '__knowledge__') {
     return <KnowledgePanel knowledge={task.knowledge} coreQuestion={task.coreQuestion} />
   }

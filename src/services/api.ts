@@ -27,3 +27,37 @@ export async function fetchStatus(): Promise<Record<string, unknown> | null> {
     return null
   }
 }
+
+export interface RemoteProject {
+  id: string
+  title?: string
+  status?: string
+  core_question?: string
+  started_at?: string
+  has_plan: boolean
+}
+
+export async function fetchProjects(): Promise<RemoteProject[]> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/projects`)
+    if (!resp.ok) return []
+    const data = await resp.json()
+    return (data?.projects as RemoteProject[]) ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `${getApiUrl()}/projects?session_id=${encodeURIComponent(sessionId)}`,
+      { method: 'DELETE' },
+    )
+    if (!resp.ok) return false
+    const data = await resp.json()
+    return !!data?.deleted
+  } catch {
+    return false
+  }
+}

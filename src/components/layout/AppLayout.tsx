@@ -33,6 +33,7 @@ function ChevronRight({ className }: { className?: string }) {
 export function AppLayout() {
   const { sidebarCollapsed, toggleSidebar, agentPanelCollapsed, toggleAgentPanel } = useUiStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const activeStage = useProjectStore((s) => s.activeStage)
   useWebSocket()
 
   return (
@@ -62,8 +63,8 @@ export function AppLayout() {
           {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </button>
 
-        {/* Experiment timeline — visible when a project is selected */}
-        {selectedTaskId && (
+        {/* Experiment timeline — visible in the experiment stage */}
+        {selectedTaskId && activeStage === 'experiment' && (
           <div className="w-[180px] shrink-0 border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
             <ExperimentTimeline />
           </div>

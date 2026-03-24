@@ -46,6 +46,26 @@ export function AgentPanel() {
     setInput('')
   }
 
+  const handleResend = (content: string) => {
+    if (!selectedTaskId) return
+    cancelAuto()
+
+    useAgentStore.getState().addLog(selectedTaskId, {
+      id: `user-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      content,
+      type: 'response',
+      metadata: { _user: true },
+    })
+
+    wsClient.send({
+      type: 'message',
+      content,
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+    })
+  }
+
   const countdownProgress = countdown !== null
     ? Math.max(0, countdown / AUTO_DELAY_MS)
     : null
@@ -83,7 +103,7 @@ export function AgentPanel() {
           const isAutoMsg = !!entry.metadata?._auto
           if (isUser) {
             return (
-              <div key={entry.id} className="px-4 py-2">
+              <div key={entry.id} className="group/msg px-4 py-2">
                 <div className={`text-sm rounded-lg p-2.5 leading-relaxed whitespace-pre-wrap ml-8 ${
                   isAutoMsg
                     ? 'bg-[var(--color-success)]/10 text-[var(--color-text-secondary)] italic'
@@ -93,6 +113,18 @@ export function AgentPanel() {
                     <span className="text-[10px] font-semibold text-[var(--color-success)] uppercase mr-1.5 not-italic">AUTO</span>
                   )}
                   {entry.content}
+                </div>
+                <div className="flex justify-end mt-1 mr-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleResend(entry.content)}
+                    title="Resend"
+                    className="p-1 rounded hover:bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                  </button>
                 </div>
               </div>
             )

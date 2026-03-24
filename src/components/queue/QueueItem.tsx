@@ -7,7 +7,7 @@ interface QueueItemProps {
   isSelected: boolean
   onSelect: (id: string) => void
   onRename: (id: string, label: string) => void
-  onDelete: (id: string) => void
+  onDelete: (id: string, deleteFiles: boolean) => void
   onDuplicate: (id: string) => void
 }
 
@@ -16,6 +16,7 @@ interface MenuPos { x: number; y: number }
 export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDuplicate }: QueueItemProps) {
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [draft, setDraft] = useState(task.label)
   const inputRef = useRef<HTMLInputElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -54,7 +55,7 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
   const actions: { label: string; action: () => void; danger?: boolean }[] = [
     { label: 'Rename', action: () => { setMenu(null); setEditing(true) } },
     { label: 'Duplicate', action: () => { setMenu(null); onDuplicate(task.id) } },
-    { label: 'Delete', action: () => { setMenu(null); onDelete(task.id) }, danger: true },
+    { label: 'Delete', action: () => { setMenu(null); setConfirmDelete(true) }, danger: true },
   ]
 
   return (
@@ -108,6 +109,43 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
               {a.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={() => setConfirmDelete(false)}>
+          <div
+            className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-xl shadow-2xl p-5 w-[320px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
+              Delete "{task.label}"?
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
+              Choose whether to also delete the local project files from disk. This action cannot be undone.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => { setConfirmDelete(false); onDelete(task.id, true) }}
+                className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
+              >
+                Delete from UI &amp; delete local files
+              </button>
+              <button
+                onClick={() => { setConfirmDelete(false); onDelete(task.id, false) }}
+                className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              >
+                Remove from UI only (keep files)
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="w-full px-3 py-2 rounded-lg text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

@@ -1,7 +1,31 @@
 import { useProjectStore } from '@/stores/projectStore'
+import type { PipelineStage } from '@/types'
+
+const STAGES: { key: PipelineStage; label: string; icon: string }[] = [
+  { key: 'research', label: 'Research', icon: '📚' },
+  { key: 'experiment', label: 'Experiment', icon: '🔬' },
+  { key: 'result', label: 'Result', icon: '📝' },
+]
+
+function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
+  if (stage === 'research') {
+    const count = task.research.references.length
+    return count > 0 ? `${count}` : null
+  }
+  if (stage === 'experiment') {
+    const c = task.experiments.filter((e) => e.status === 'completed').length
+    const t = task.experiments.length
+    return t > 0 ? `${c}/${t}` : null
+  }
+  if (stage === 'result') {
+    const has = task.result?.summary || (task.result?.sections?.length ?? 0) > 0
+    return has ? '✓' : null
+  }
+  return null
+}
 
 export function PipelineProgress() {
-  const { tasks, selectedTaskId, stats } = useProjectStore()
+  const { tasks, selectedTaskId, activeStage, setActiveStage } = useProjectStore()
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
@@ -12,50 +36,58 @@ export function PipelineProgress() {
     )
   }
 
-  const total = task.experiments.length
-  const completed = task.experiments.filter((e) => e.status === 'completed').length
-  const failed = task.experiments.filter((e) => e.status === 'failed').length
-  const running = task.experiments.filter((e) => e.status === 'running').length
-  const current = task.experiments.find((e) => e.status === 'running')
-
   return (
-    <div className="flex items-center gap-4 py-2.5 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+    <div className="flex items-center gap-3 py-2 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {/* Project title */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 shrink-0 max-w-[200px]">
         <h1 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
           {task.title || task.label}
         </h1>
-        {task.coreQuestion && (
-          <p className="text-[11px] text-[var(--color-text-muted)] truncate mt-0.5">
-            {task.coreQuestion}
-          </p>
-        )}
       </div>
 
-      {/* Current experiment */}
-      {current && (
-        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded bg-[var(--color-accent)]/8">
-          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
-          <span className="text-[11px] font-mono text-[var(--color-accent)]">
-            {current.id}: {current.title}
-          </span>
-        </div>
-      )}
+      <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 
-      {/* Experiment counters */}
-      {total > 0 && (
-        <div className="shrink-0 flex items-center gap-2 text-[11px]">
-          {completed > 0 && (
-            <span className="text-[var(--color-success)]">✓ {completed}</span>
-          )}
-          {failed > 0 && (
-            <span className="text-[var(--color-error)]">✗ {failed}</span>
-          )}
-          {running > 0 && (
-            <span className="text-[var(--color-accent)]">● {running}</span>
-          )}
-          <span className="text-[var(--color-text-muted)]">/ {total}</span>
-        </div>
+      {/* Stage tabs */}
+      <div className="flex items-center gap-0.5 flex-1 min-w-0">
+        {STAGES.map((stage, idx) => {
+          const isActive = activeStage === stage.key
+          const badge = stageBadge(task, stage.key)
+
+          return (
+            <div key={stage.key} className="flex items-center">
+              {idx > 0 && (
+                <div className="w-6 h-px bg-[var(--color-border)] mx-0.5" />
+              )}
+              <button
+                onClick={() => setActiveStage(stage.key)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all select-none ${
+                  isActive
+                    ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
+                }`}
+              >
+                <span className="text-[13px]">{stage.icon}</span>
+                <span>{stage.label}</span>
+                {badge && (
+                  <span className={`text-[10px] font-mono px-1 py-px rounded ${
+                    isActive
+                      ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                      : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]'
+                  }`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Core question (if short) */}
+      {task.coreQuestion && (
+        <p className="text-[11px] text-[var(--color-text-muted)] truncate max-w-[300px] shrink-0">
+          {task.coreQuestion}
+        </p>
       )}
     </div>
   )

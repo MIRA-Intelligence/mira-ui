@@ -51,7 +51,7 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
   lines.push('', `**Output Goal**: ${input.outputGoal}`)
   lines.push(
     '',
-    `Please begin by reading the task_plan skill, then create a task_plan.json and start the ideation phase.`,
+    `Please begin by creating a task_plan.json, then start with the **Research** phase: search for relevant literature, add references and notes to the research section of task_plan.json. After completing the research survey, STOP and report your findings.`,
   )
 
   return lines.join('\n')
@@ -59,7 +59,8 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
 
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
-  const { createProject } = useProjectStore()
+  const { createProject, projectsLoaded } = useProjectStore()
+  const connected = useAgentStore((s) => s.connected)
   const { workspacePath } = useSettingsStore()
 
   const [description, setDescription] = useState('')
@@ -73,7 +74,7 @@ export function NewProjectModal() {
 
   if (!newProjectOpen) return null
 
-  const canCreate = description.trim().length > 0
+  const canCreate = description.trim().length > 0 && connected && projectsLoaded
 
   const handleCreate = () => {
     const input: NewProjectInput = {
@@ -311,6 +312,11 @@ export function NewProjectModal() {
             Create Project
           </button>
         </div>
+        {!connected && (
+          <p className="text-[11px] text-[var(--color-error)] text-center mt-2">
+            Agent is disconnected — connect first to create a project.
+          </p>
+        )}
       </div>
     </div>
   )

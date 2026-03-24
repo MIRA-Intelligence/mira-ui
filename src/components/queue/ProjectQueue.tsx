@@ -5,6 +5,10 @@ import { cn } from '@/lib/utils'
 
 export function ProjectQueue() {
   const { tasks, selectedTaskId, selectTask, mode, setMode, renameTask, deleteTask, duplicateTask } = useProjectStore()
+
+  const handleDelete = (id: string, deleteFiles: boolean) => {
+    deleteTask(id, deleteFiles)
+  }
   const { openNewProject } = useUiStore()
 
   return (
@@ -35,7 +39,7 @@ export function ProjectQueue() {
             isSelected={task.id === selectedTaskId}
             onSelect={selectTask}
             onRename={renameTask}
-            onDelete={deleteTask}
+            onDelete={handleDelete}
             onDuplicate={duplicateTask}
           />
         ))}

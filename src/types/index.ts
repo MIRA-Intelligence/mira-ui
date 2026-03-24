@@ -1,3 +1,7 @@
+/* ── Pipeline stages ───────────────────────────── */
+
+export type PipelineStage = 'research' | 'experiment' | 'result'
+
 /* ── Experiment status ──────────────────────────── */
 
 export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -37,6 +41,39 @@ export interface Experiment {
   parent?: string
 }
 
+/* ── Research data (literature & references) ───── */
+
+export interface Reference {
+  id: string
+  title: string
+  authors?: string
+  year?: string
+  venue?: string
+  url?: string
+  summary?: string
+  relevance?: string
+}
+
+export interface ResearchData {
+  references: Reference[]
+  notes: string[]
+  survey?: string
+}
+
+/* ── Final result / deliverable ────────────────── */
+
+export interface ResultData {
+  summary?: string
+  outputPath?: string
+  outputType?: string
+  sections?: ResultSection[]
+}
+
+export interface ResultSection {
+  title: string
+  content: string
+}
+
 /* ── Project task (one project = many experiments) ── */
 
 export interface ProjectTask {
@@ -48,6 +85,8 @@ export interface ProjectTask {
   currentExperiment?: string
   experiments: Experiment[]
   knowledge: string[]
+  research: ResearchData
+  result: ResultData
   startedAt: string
 }
 
@@ -81,6 +120,20 @@ export interface TaskPlan {
   current_experiment?: string
   experiments: TaskPlanExperiment[]
   knowledge?: string[]
+  research?: {
+    references?: Array<{
+      id: string; title: string; authors?: string; year?: string
+      venue?: string; url?: string; summary?: string; relevance?: string
+    }>
+    notes?: string[]
+    survey?: string
+  }
+  result?: {
+    summary?: string
+    output_path?: string
+    output_type?: string
+    sections?: Array<{ title: string; content: string }>
+  }
 }
 
 export interface TaskPlanExperiment {
