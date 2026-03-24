@@ -45,7 +45,7 @@ export function useAutoContinue() {
 
     wsClient.send({
       type: 'message',
-      content: 'Continue with the next step. Update task_plan.json as you progress.',
+      content: 'Continue. Proceed to the next phase or step, then stop and report results.',
       session_id: selectedTaskId,
       user_id: 'ui_user',
     })

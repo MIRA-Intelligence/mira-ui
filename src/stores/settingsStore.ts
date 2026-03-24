@@ -38,7 +38,7 @@ function persist(state: SettingsState) {
 const saved = loadPersisted()
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  workspacePath: saved.workspacePath ?? '~/.sciagentui/workspaces',
+  workspacePath: saved.workspacePath ?? '~/.sciagent/workspace',
   theme: (saved.theme as Theme) ?? 'dark',
   language: (saved.language as Language) ?? 'en',
   apiUrl: saved.apiUrl ?? 'http://localhost:18790/api',

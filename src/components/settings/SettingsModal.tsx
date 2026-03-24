@@ -35,6 +35,14 @@ export function SettingsModal() {
     store.setLanguage(draft.language)
     store.setApiUrl(draft.apiUrl)
     store.setWsUrl(draft.wsUrl)
+
+    // Notify gateway of workspace path change
+    fetch(`${draft.apiUrl}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projects_root: draft.workspacePath }),
+    }).catch(() => {})
+
     closeSettings()
   }
 
