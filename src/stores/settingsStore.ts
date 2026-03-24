@@ -3,6 +3,19 @@ import { create } from 'zustand'
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 
+const GATEWAY_PORT = 18790
+
+function defaultApiUrl(): string {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  return `http://${host}:${GATEWAY_PORT}/api`
+}
+
+function defaultWsUrl(): string {
+  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${host}:${GATEWAY_PORT}/ws`
+}
+
 interface SettingsState {
   workspacePath: string
   theme: Theme
@@ -22,10 +35,22 @@ interface SettingsState {
 
 const STORAGE_KEY = 'sci-agent-ui-settings'
 
+function isStaleLocalhost(url: string | undefined): boolean {
+  if (!url) return false
+  try {
+    const u = new URL(url)
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+  } catch { return false }
+}
+
 function loadPersisted(): Partial<SettingsState> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (isStaleLocalhost(parsed.apiUrl)) delete parsed.apiUrl
+    if (isStaleLocalhost(parsed.wsUrl)) delete parsed.wsUrl
+    return parsed
   } catch { /* ignore */ }
   return {}
 }
@@ -41,8 +66,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   workspacePath: saved.workspacePath ?? '~/.radiologybot/workspace',
   theme: (saved.theme as Theme) ?? 'dark',
   language: (saved.language as Language) ?? 'en',
-  apiUrl: saved.apiUrl ?? 'http://localhost:18790/api',
-  wsUrl: saved.wsUrl ?? 'ws://localhost:18790/ws',
+  apiUrl: saved.apiUrl ?? defaultApiUrl(),
+  wsUrl: saved.wsUrl ?? defaultWsUrl(),
   settingsOpen: false,
 
   setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
