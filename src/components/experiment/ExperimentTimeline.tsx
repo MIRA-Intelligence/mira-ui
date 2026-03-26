@@ -14,12 +14,18 @@ const STATUS_COLOR: Record<string, string> = {
   pending: 'text-[var(--color-text-muted)]',
 }
 
+function formatProgressValue(value: unknown): string | null {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num.toFixed(3) : null
+}
+
 function ExpItem({ exp, isSelected, onSelect }: {
   exp: Experiment
   isSelected: boolean
   onSelect: () => void
 }) {
   const indent = exp.parent ? 'ml-4' : ''
+  const progressValue = formatProgressValue(exp.progress?.current_value)
   return (
     <button
       onClick={onSelect}
@@ -38,7 +44,7 @@ function ExpItem({ exp, isSelected, onSelect }: {
         {exp.progress && exp.status === 'running' && (
           <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
             epoch {exp.progress.epoch}/{exp.progress.total_epochs}
-            {exp.progress.current_value != null && ` · ${exp.progress.current_metric}=${exp.progress.current_value.toFixed(3)}`}
+            {progressValue && ` · ${exp.progress.current_metric}=${progressValue}`}
           </span>
         )}
       </span>

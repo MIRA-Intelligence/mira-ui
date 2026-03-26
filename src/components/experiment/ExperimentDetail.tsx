@@ -18,9 +18,44 @@ function Section({ icon, label, children }: { icon: string; label: string; child
   )
 }
 
-function MetricsTable({ metrics }: { metrics: Record<string, number | string> }) {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatDecimal(value: unknown, digits: number): string | null {
+  const num = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(num) ? num.toFixed(digits) : null
+}
+
+function formatMetricValue(value: unknown): string {
+  if (typeof value === 'number') return Number.isFinite(value) ? value.toFixed(4) : String(value)
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (value == null) return '-'
+  if (Array.isArray(value)) return value.join(', ')
+  return JSON.stringify(value)
+}
+
+function MetricsTable({ metrics }: { metrics: Record<string, unknown> }) {
   const entries = Object.entries(metrics)
   if (entries.length === 0) return null
+
+  const allScalar = entries.every(([, val]) => !isRecord(val))
+  if (!allScalar) {
+    return (
+      <div className="mt-2 space-y-3">
+        {entries.map(([key, val]) => (
+          <div key={key} className="rounded-lg border border-[var(--color-border)] p-3">
+            <div className="text-xs font-mono text-[var(--color-text-muted)] mb-2">{key}</div>
+            {isRecord(val)
+              ? <MetricsTable metrics={val} />
+              : <div className="text-sm text-[var(--color-text-primary)]">{formatMetricValue(val)}</div>}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className="overflow-x-auto mt-2">
       <table className="text-xs w-full border-collapse">
@@ -35,7 +70,7 @@ function MetricsTable({ metrics }: { metrics: Record<string, number | string> })
           <tr>
             {entries.map(([key, val]) => (
               <td key={key} className="py-1 px-2 font-mono text-[var(--color-text-primary)]">
-                {typeof val === 'number' ? val.toFixed(4) : val}
+                {formatMetricValue(val)}
               </td>
             ))}
           </tr>
@@ -46,15 +81,16 @@ function MetricsTable({ metrics }: { metrics: Record<string, number | string> })
 }
 
 function ProgressBar({ epoch, total, metric, value }: {
-  epoch?: number; total?: number; metric?: string; value?: number
+  epoch?: number; total?: number; metric?: string; value?: number | string
 }) {
   if (!epoch || !total) return null
   const pct = Math.min((epoch / total) * 100, 100)
+  const formattedValue = formatDecimal(value, 4)
   return (
     <div className="mt-2 space-y-1">
       <div className="flex justify-between text-[11px] text-[var(--color-text-muted)]">
         <span>Epoch {epoch} / {total}</span>
-        {metric && value != null && <span>{metric} = {value.toFixed(4)}</span>}
+        {metric && formattedValue && <span>{metric} = {formattedValue}</span>}
       </div>
       <div className="h-1.5 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
         <div

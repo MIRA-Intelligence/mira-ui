@@ -9,7 +9,7 @@ export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
 /* ── Experiment result ─────────────────────────── */
 
 export interface ExperimentResult {
-  metrics?: Record<string, number | string>
+  metrics?: Record<string, unknown>
   findings?: string
   artifacts?: string[]
 }
@@ -20,7 +20,7 @@ export interface ExperimentProgress {
   epoch?: number
   total_epochs?: number
   current_metric?: string
-  current_value?: number
+  current_value?: number | string
 }
 
 /* ── Single experiment ─────────────────────────── */
@@ -145,7 +145,7 @@ export interface TaskPlanExperiment {
   prediction?: string
   method?: string
   results?: {
-    metrics?: Record<string, number | string>
+    metrics?: Record<string, unknown>
     findings?: string
     artifacts?: string[]
   }
@@ -156,7 +156,7 @@ export interface TaskPlanExperiment {
     epoch?: number
     total_epochs?: number
     current_metric?: string
-    current_value?: number
+    current_value?: number | string
   }
   parent?: string
 }
