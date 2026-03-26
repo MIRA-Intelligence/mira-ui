@@ -8,7 +8,7 @@ export function TopBar() {
   const { formatted } = useTimer(startedAt)
 
   const selected = tasks.find((t) => t.id === selectedTaskId)
-  const title = selected?.title ?? 'MedPilotUI'
+  const title = selected?.title ?? 'MedPilot'
 
   return (
     <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
