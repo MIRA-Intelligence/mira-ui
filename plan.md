@@ -1,4 +1,4 @@
-# SciAgentUI — 开发计划与架构设计
+# MedPilotUI — 开发计划与架构设计
 
 > 最后更新：2026-03-22
 > 状态：规划阶段
@@ -7,7 +7,7 @@
 
 ## 1. 项目概述
 
-SciAgentUI 是一个基于 Electron 的 AI Agent UI 界面，对接 radiologybot（基于 nanobot 框架开发）后端。
+MedPilotUI 是一个基于 Electron 的 AI Agent UI 界面，对接 radiologybot（基于 nanobot 框架开发）后端。
 支持两种部署模式：
 
 | 模式 | 说明 |
@@ -211,7 +211,7 @@ outbound 分发器 `_dispatch_outbound()` 持续从 bus 消费 `OutboundMessage`
 
 ```
 ┌─────────────────────────┐         ┌──────────────────────────────┐
-│   SciAgentUI Frontend   │         │   radiologybot gateway       │
+│   MedPilotUI Frontend   │         │   radiologybot gateway       │
 │                         │  WS     │                              │
 │   React + TypeScript    │◀═══════▶│   WebChannel (:18790)        │
 │                         │  REST   │     │                        │
@@ -441,7 +441,7 @@ class WebChannel(BaseChannel):
 ## 6. 项目目录结构
 
 ```
-SciAgentUI/
+MedPilotUI/
 ├── plan.md                          # 本文档
 ├── electron/                        # Electron 主进程
 │   ├── main.ts                      # Electron 入口，创建 BrowserWindow
@@ -664,7 +664,7 @@ radiologybot gateway                     # 启动 gateway + WebChannel :18790
 radiologybot agent -m "hello"            # CLI 直接测试 agent
 
 # ===== 前端开发 =====
-cd ~/Shared/SciAgentUI
+cd ~/Shared/MedPilotUI
 npm install
 npm run dev                              # Web 模式 → http://localhost:5173
 npm run electron:dev                     # Desktop 模式

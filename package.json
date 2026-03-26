@@ -1,5 +1,5 @@
 {
-  "name": "sci-agent-ui",
+  "name": "medpilot-ui",
   "version": "0.1.0",
   "description": "AI Agent UI for radiologybot",
   "main": "dist-electron/main.js",

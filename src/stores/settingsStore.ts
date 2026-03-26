@@ -33,7 +33,7 @@ interface SettingsState {
   closeSettings: () => void
 }
 
-const STORAGE_KEY = 'sci-agent-ui-settings'
+const STORAGE_KEY = 'medpilot-ui-settings'
 
 function isStaleLocalhost(url: string | undefined): boolean {
   if (!url) return false

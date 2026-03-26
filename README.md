@@ -1,4 +1,4 @@
-# SciAgentUI
+# MedPilotUI
 
 AI Agent UI for radiology workflows, built with React, TypeScript, Vite, Tailwind CSS, and Electron.
 
