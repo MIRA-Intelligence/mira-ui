@@ -1,4 +1,5 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useAgentStore } from '@/stores/agentStore'
 import type { PipelineStage } from '@/types'
 
 const STAGES: { key: PipelineStage; label: string; icon: string }[] = [
@@ -26,6 +27,7 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
 
 export function PipelineProgress() {
   const { tasks, selectedTaskId, activeStage, setActiveStage } = useProjectStore()
+  const isStreaming = useAgentStore((s) => s.isStreaming)
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
@@ -82,6 +84,14 @@ export function PipelineProgress() {
           )
         })}
       </div>
+
+      {/* Streaming indicator */}
+      {isStreaming && (
+        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--color-accent)]/8">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+          <span className="text-[10px] text-[var(--color-accent)] font-medium">Working...</span>
+        </div>
+      )}
 
       {/* Core question (if short) */}
       {task.coreQuestion && (

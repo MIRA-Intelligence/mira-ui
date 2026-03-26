@@ -16,6 +16,24 @@ interface AgentState {
 
 let logIdCounter = 0
 
+const PLAN_POLL_INTERVAL = 3000
+const _pollTimers: Record<string, ReturnType<typeof setInterval>> = {}
+
+function ensurePlanPolling(sessionId: string) {
+  if (_pollTimers[sessionId]) return
+  _pollTimers[sessionId] = setInterval(() => {
+    useProjectStore.getState().refreshPlan(sessionId)
+  }, PLAN_POLL_INTERVAL)
+}
+
+function stopPlanPolling(sessionId: string) {
+  const timer = _pollTimers[sessionId]
+  if (timer) {
+    clearInterval(timer)
+    delete _pollTimers[sessionId]
+  }
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   logsByProject: {},
   isStreaming: false,
@@ -47,7 +65,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       isStreaming: msg.type === 'progress',
     }))
 
-    if (msg.type === 'response') {
+    if (msg.type === 'progress') {
+      ensurePlanPolling(sessionId)
+    } else if (msg.type === 'response') {
+      stopPlanPolling(sessionId)
       useProjectStore.getState().refreshPlan(sessionId)
     }
   },

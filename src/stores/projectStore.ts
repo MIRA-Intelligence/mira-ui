@@ -222,7 +222,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const existingIds = new Set(tasks.map((t) => t.id))
     const newTasks: ProjectTask[] = []
 
+    const SKIP_DIRS = new Set(['skills', 'memory', 'sessions', 'media', 'cron', 'logs'])
+
     for (const r of remotes) {
+      if (SKIP_DIRS.has(r.id)) continue
       const m = PRJ_RE.exec(r.id)
       if (m) projectCounter = Math.max(projectCounter, parseInt(m[1], 10))
 
@@ -265,14 +268,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const isSelected = selectedTaskId === projectId
     const applied = updated[idx]
-    const hasExperiments = applied.experiments.length > 0
-    const hasResult = applied.result?.summary || (applied.result?.sections?.length ?? 0) > 0
     set({
       tasks: updated,
       stats: computeStats(updated),
       ...(isSelected && {
         selectedExpId: applied.currentExperiment ?? get().selectedExpId,
-        activeStage: hasResult ? 'result' : hasExperiments ? 'experiment' : get().activeStage,
         startedAt: applied.startedAt
           ? new Date(applied.startedAt).getTime()
           : get().startedAt,
