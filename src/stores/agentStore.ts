@@ -8,6 +8,7 @@ interface AgentState {
   connected: boolean
 
   addLog: (projectId: string, entry: LogEntry) => void
+  hydrateLogs: (projectId: string, entries: LogEntry[]) => void
   handleWsMessage: (msg: WsResponse) => void
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
@@ -46,6 +47,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         [projectId]: [...(state.logsByProject[projectId] ?? []), entry],
       },
     })),
+
+  hydrateLogs: (projectId, entries) =>
+    set((state) => {
+      if (entries.length === 0 || (state.logsByProject[projectId]?.length ?? 0) > 0) {
+        return state
+      }
+      return {
+        logsByProject: {
+          ...state.logsByProject,
+          [projectId]: entries,
+        },
+      }
+    }),
 
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'

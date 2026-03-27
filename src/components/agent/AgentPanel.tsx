@@ -3,12 +3,13 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useAutoContinue } from '@/hooks/useAutoContinue'
 import { wsClient } from '@/services/websocket'
+import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
 
 const AUTO_DELAY_MS = 4000
 
 export function AgentPanel() {
-  const { connected, logsByProject } = useAgentStore()
+  const { connected, logsByProject, hydrateLogs } = useAgentStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
 
@@ -22,6 +23,22 @@ export function AgentPanel() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [logs.length])
+
+  useEffect(() => {
+    if (!selectedTaskId) return
+    if ((logsByProject[selectedTaskId] ?? []).length > 0) return
+
+    let cancelled = false
+    void (async () => {
+      const history = await fetchSessionHistory(selectedTaskId)
+      if (cancelled || history.length === 0) return
+      hydrateLogs(selectedTaskId, history)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [selectedTaskId, logsByProject, hydrateLogs])
 
   const handleSend = () => {
     const text = input.trim()

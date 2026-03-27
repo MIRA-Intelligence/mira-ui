@@ -1,5 +1,5 @@
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { TaskPlan } from '@/types'
+import type { LogEntry, TaskPlan } from '@/types'
 
 function getApiUrl(): string {
   return useSettingsStore.getState().apiUrl
@@ -43,6 +43,17 @@ export async function fetchProjects(): Promise<RemoteProject[]> {
     if (!resp.ok) return []
     const data = await resp.json()
     return (data?.projects as RemoteProject[]) ?? []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/sessions/${encodeURIComponent(sessionId)}/history`)
+    if (!resp.ok) return []
+    const data = await resp.json()
+    return Array.isArray(data?.entries) ? (data.entries as LogEntry[]) : []
   } catch {
     return []
   }
