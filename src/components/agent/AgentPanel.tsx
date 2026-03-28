@@ -9,7 +9,7 @@ import { LogEntry } from './LogEntry'
 const AUTO_DELAY_MS = 4000
 
 export function AgentPanel() {
-  const { connected, logsByProject, hydrateLogs } = useAgentStore()
+  const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
 
@@ -78,6 +78,18 @@ export function AgentPanel() {
     wsClient.send({
       type: 'message',
       content,
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+    })
+  }
+
+  const handleStop = () => {
+    if (!selectedTaskId) return
+
+    cancelAuto()
+    wsClient.send({
+      type: 'message',
+      content: '/stop',
       session_id: selectedTaskId,
       user_id: 'ui_user',
     })
@@ -205,6 +217,14 @@ export function AgentPanel() {
             className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
           >
             Send
+          </button>
+          <button
+            onClick={handleStop}
+            disabled={!selectedTaskId}
+            title={isStreaming ? 'Stop current task' : 'Cancel auto-continue or stop current task'}
+            className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
+          >
+            Stop
           </button>
         </div>
       </div>
