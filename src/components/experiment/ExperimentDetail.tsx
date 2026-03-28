@@ -104,6 +104,16 @@ function ProgressBar({ epoch, total, metric, value }: {
 
 export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
   const badge = STATUS_BADGE[experiment.status] ?? STATUS_BADGE.pending
+  const hasScientificDetail = Boolean(
+    experiment.question
+    || experiment.hypothesis
+    || experiment.prediction
+    || experiment.method
+    || experiment.results
+    || experiment.conclusion
+    || experiment.next
+    || experiment.progress,
+  )
 
   return (
     <div className="h-full overflow-y-auto">
@@ -121,6 +131,16 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
           </div>
           <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{experiment.title}</h2>
         </div>
+
+        {!hasScientificDetail && (
+          <Section icon="○" label={experiment.status === 'pending' ? 'Planned' : 'Status'}>
+            <p className="text-[var(--color-text-secondary)]">
+              {experiment.status === 'pending'
+                ? 'This experiment is planned from the research stage and has not started yet. Run it manually or continue in auto mode to execute it.'
+                : 'Details will appear here as the agent fills in the experiment record.'}
+            </p>
+          </Section>
+        )}
 
         {/* Scientific method sections */}
         {experiment.question && (

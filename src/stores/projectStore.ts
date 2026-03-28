@@ -120,6 +120,34 @@ function computeStats(tasks: ProjectTask[]): Stats {
   return { experiments, completed, failed, running }
 }
 
+function pickActiveExperimentId(task: ProjectTask | undefined, fallbackId: string | null = null): string | null {
+  if (!task) return null
+
+  const running = task.experiments.find((e) => e.status === 'running')?.id
+  if (running) return running
+
+  const current = task.experiments.find((e) => e.id === task.currentExperiment)
+  if (current && current.status !== 'completed') return current.id
+
+  const pending = task.experiments.find((e) => e.status === 'pending')?.id
+  if (pending) return pending
+
+  const experimentIds = new Set(task.experiments.map((e) => e.id))
+  if (fallbackId && experimentIds.has(fallbackId)) return fallbackId
+
+  return task.experiments[0]?.id ?? null
+}
+
+function resolveSelectedExperimentId(task: ProjectTask | undefined, selectedExpId: string | null): string | null {
+  if (!task) return null
+  if (selectedExpId === '__knowledge__') return '__knowledge__'
+
+  const experimentIds = new Set(task.experiments.map((e) => e.id))
+  if (selectedExpId && experimentIds.has(selectedExpId)) return selectedExpId
+
+  return pickActiveExperimentId(task)
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
@@ -132,7 +160,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
-    const activeExp = task?.currentExperiment ?? task?.experiments.find((e) => e.status === 'running')?.id ?? null
+    const activeExp = pickActiveExperimentId(task)
     set({
       selectedTaskId: id,
       selectedExpId: activeExp,
@@ -272,7 +300,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       tasks: updated,
       stats: computeStats(updated),
       ...(isSelected && {
-        selectedExpId: applied.currentExperiment ?? get().selectedExpId,
+        selectedExpId: resolveSelectedExperimentId(applied, get().selectedExpId),
         startedAt: applied.startedAt
           ? new Date(applied.startedAt).getTime()
           : get().startedAt,
