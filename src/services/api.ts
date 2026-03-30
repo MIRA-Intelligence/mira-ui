@@ -105,3 +105,9 @@ export async function uploadProjectFiles(sessionId: string, files: File[]): Prom
   const data = await resp.json()
   return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
 }
+
+export function getProjectArtifactUrl(sessionId: string, artifactPath: string): string {
+  const sid = encodeURIComponent(sessionId)
+  const path = encodeURIComponent(artifactPath)
+  return `${getApiUrl()}/projects/${sid}/artifacts?path=${path}`
+}

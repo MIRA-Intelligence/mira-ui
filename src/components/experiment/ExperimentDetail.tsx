@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { Experiment } from '@/types'
+import { useProjectStore } from '@/stores/projectStore'
+import { getProjectArtifactUrl } from '@/services/api'
 
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   completed: { label: 'Completed', cls: 'bg-[var(--color-success)]/15 text-[var(--color-success)]' },
@@ -35,6 +38,10 @@ function formatMetricValue(value: unknown): string {
   if (value == null) return '-'
   if (Array.isArray(value)) return value.join(', ')
   return JSON.stringify(value)
+}
+
+function isImageArtifact(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path)
 }
 
 function MetricsTable({ metrics }: { metrics: Record<string, unknown> }) {
@@ -104,6 +111,8 @@ function ProgressBar({ epoch, total, metric, value }: {
 }
 
 export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
+  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const [expandedImageArtifacts, setExpandedImageArtifacts] = useState<Record<string, boolean>>({})
   const badge = STATUS_BADGE[experiment.status] ?? STATUS_BADGE.pending
   const hasScientificDetail = Boolean(
     experiment.question
@@ -196,12 +205,44 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
               <p className="mt-2 text-[var(--color-text-secondary)]">{experiment.results.findings}</p>
             )}
             {experiment.results.artifacts && experiment.results.artifacts.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {experiment.results.artifacts.map((a) => (
-                  <span key={a} className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 rounded">
-                    {a}
-                  </span>
-                ))}
+              <div className="mt-2 space-y-2">
+                {experiment.results.artifacts.map((a) => {
+                  const canOpen = !!selectedTaskId
+                  const isImage = isImageArtifact(a)
+                  const expanded = !!expandedImageArtifacts[a]
+                  const artifactUrl = selectedTaskId ? getProjectArtifactUrl(selectedTaskId, a) : ''
+                  return (
+                    <div key={a} className="space-y-1">
+                      <button
+                        type="button"
+                        disabled={!canOpen}
+                        onClick={() => {
+                          if (!selectedTaskId) return
+                          if (isImage) {
+                            setExpandedImageArtifacts((prev) => ({ ...prev, [a]: !prev[a] }))
+                            return
+                          }
+                          window.open(artifactUrl, '_blank', 'noopener,noreferrer')
+                        }}
+                        className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-50"
+                        title={!canOpen ? 'Select a project first' : isImage ? 'Click to expand/collapse image preview' : 'Open artifact'}
+                      >
+                        {isImage ? (expanded ? '▼ ' : '▷ ') : '↗ '}
+                        {a}
+                      </button>
+                      {selectedTaskId && isImage && expanded && (
+                        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2">
+                          <img
+                            src={getProjectArtifactUrl(selectedTaskId, a)}
+                            alt={a}
+                            loading="lazy"
+                            className="max-h-[360px] w-auto rounded-md border border-[var(--color-border)]"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </Section>
