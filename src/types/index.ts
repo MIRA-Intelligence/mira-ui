@@ -4,7 +4,7 @@ export type PipelineStage = 'research' | 'experiment' | 'result'
 
 /* ── Experiment status ──────────────────────────── */
 
-export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
 /* ── Experiment result ─────────────────────────── */
 

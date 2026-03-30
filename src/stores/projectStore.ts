@@ -32,6 +32,13 @@ let dupCounter = 0
 let projectCounter = 0
 
 const PRJ_RE = /^PRJ-(\d+)$/
+const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'skipped',
+])
 
 function safeClone<T>(value: T): T {
   if (value == null) return value
@@ -40,6 +47,13 @@ function safeClone<T>(value: T): T {
   } catch {
     return JSON.parse(JSON.stringify(value)) as T
   }
+}
+
+function normalizeExperimentStatus(value: unknown): ExperimentStatus {
+  if (typeof value === 'string' && EXPERIMENT_STATUS_SET.has(value as ExperimentStatus)) {
+    return value as ExperimentStatus
+  }
+  return 'pending'
 }
 
 function syncCounterFromTasks(tasks: ProjectTask[]) {
@@ -54,7 +68,7 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
   return {
     id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
     title: (raw.title as string) ?? 'Untitled experiment',
-    status: (raw.status as ExperimentStatus) ?? 'pending',
+    status: normalizeExperimentStatus(raw.status),
     question: raw.question as string | undefined,
     hypothesis: raw.hypothesis as string | undefined,
     prediction: raw.prediction as string | undefined,
@@ -97,18 +111,26 @@ function parseResult(raw: any): ResultData {
   }
 }
 
+function deriveTaskStatus(rawStatus: unknown, experiments: Experiment[]): ProjectTask['status'] {
+  const hasActiveOrPending = experiments.some((e) => e.status === 'running' || e.status === 'pending')
+  if (hasActiveOrPending) return 'in_progress'
+  if (rawStatus === 'completed') return 'completed'
+  return 'in_progress'
+}
+
 function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
+  const parsedExperiments = exps.map((e, i) => parseExperiment(e, i))
   const knowledge: string[] = Array.isArray(raw.knowledge) ? raw.knowledge : task.knowledge
 
   return {
     ...task,
-    status: raw.status === 'completed' ? 'completed' : 'in_progress',
+    status: deriveTaskStatus(raw.status, parsedExperiments),
     title: raw.title ?? task.title,
     coreQuestion: raw.core_question ?? task.coreQuestion,
     currentExperiment: raw.current_experiment ?? task.currentExperiment,
     startedAt: raw.started_at ?? task.startedAt,
-    experiments: exps.map((e, i) => parseExperiment(e, i)),
+    experiments: parsedExperiments,
     knowledge,
     research: parseResearch(raw.research),
     result: parseResult(raw.result),
@@ -136,7 +158,7 @@ function pickActiveExperimentId(task: ProjectTask | undefined, fallbackId: strin
   if (running) return running
 
   const current = task.experiments.find((e) => e.id === task.currentExperiment)
-  if (current && current.status !== 'completed') return current.id
+  if (current && current.status !== 'completed' && current.status !== 'skipped') return current.id
 
   const pending = task.experiments.find((e) => e.status === 'pending')?.id
   if (pending) return pending

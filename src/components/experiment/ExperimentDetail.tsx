@@ -3,6 +3,7 @@ import type { Experiment } from '@/types'
 const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   completed: { label: 'Completed', cls: 'bg-[var(--color-success)]/15 text-[var(--color-success)]' },
   failed: { label: 'Failed', cls: 'bg-[var(--color-error)]/15 text-[var(--color-error)]' },
+  skipped: { label: 'Skipped', cls: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]' },
   running: { label: 'Running', cls: 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' },
   pending: { label: 'Pending', cls: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]' },
 }
@@ -129,7 +130,13 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
               </span>
             )}
           </div>
-          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{experiment.title}</h2>
+          <h2 className={[
+            'text-lg font-semibold',
+            experiment.status === 'failed' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]',
+            experiment.status === 'skipped' ? 'line-through text-[var(--color-text-muted)]' : '',
+          ].join(' ')}>
+            {experiment.title}
+          </h2>
         </div>
 
         {!hasScientificDetail && (
@@ -137,7 +144,9 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
             <p className="text-[var(--color-text-secondary)]">
               {experiment.status === 'pending'
                 ? 'This experiment is planned from the research stage and has not started yet. Run it manually or continue in auto mode to execute it.'
-                : 'Details will appear here as the agent fills in the experiment record.'}
+                : experiment.status === 'skipped'
+                  ? 'This experiment was intentionally skipped and will not be executed unless explicitly re-enabled.'
+                  : 'Details will appear here as the agent fills in the experiment record.'}
             </p>
           </Section>
         )}

@@ -4,12 +4,14 @@ import type { Experiment } from '@/types'
 const STATUS_ICON: Record<string, string> = {
   completed: '✓',
   failed: '✗',
+  skipped: '⤼',
   running: '●',
   pending: '○',
 }
 const STATUS_COLOR: Record<string, string> = {
   completed: 'text-[var(--color-success)]',
   failed: 'text-[var(--color-error)]',
+  skipped: 'text-[var(--color-text-muted)]',
   running: 'text-[var(--color-accent)]',
   pending: 'text-[var(--color-text-muted)]',
 }
@@ -33,14 +35,19 @@ function ExpItem({ exp, isSelected, onSelect }: {
         isSelected
           ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)]'
           : 'hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
-      } ${exp.status === 'failed' ? 'opacity-60' : ''}`}
+      }`}
     >
-      <span className={`shrink-0 font-mono text-[11px] leading-4 ${STATUS_COLOR[exp.status]}`}>
-        {STATUS_ICON[exp.status]}
+      <span className={`shrink-0 font-mono text-[11px] leading-4 ${STATUS_COLOR[exp.status] ?? STATUS_COLOR.pending}`}>
+        {STATUS_ICON[exp.status] ?? STATUS_ICON.pending}
       </span>
       <span className="min-w-0">
         <span className="font-mono text-[10px] text-[var(--color-text-muted)] mr-1">{exp.id}</span>
-        <span className={exp.status === 'failed' ? 'line-through' : ''}>{exp.title}</span>
+        <span className={[
+          exp.status === 'failed' ? 'text-[var(--color-error)]' : '',
+          exp.status === 'skipped' ? 'line-through text-[var(--color-text-muted)]' : '',
+        ].join(' ')}>
+          {exp.title}
+        </span>
         {exp.progress && exp.status === 'running' && (
           <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
             epoch {exp.progress.epoch}/{exp.progress.total_epochs}

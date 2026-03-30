@@ -14,7 +14,7 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
     return count > 0 ? `${count}` : null
   }
   if (stage === 'experiment') {
-    const c = task.experiments.filter((e) => e.status === 'completed').length
+    const c = task.experiments.filter((e) => e.status === 'completed' || e.status === 'skipped').length
     const t = task.experiments.length
     return t > 0 ? `${c}/${t}` : null
   }
