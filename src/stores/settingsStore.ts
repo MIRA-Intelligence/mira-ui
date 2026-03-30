@@ -4,6 +4,7 @@ export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 
 const GATEWAY_PORT = 18790
+const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
 
 function defaultApiUrl(): string {
   const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
@@ -48,8 +49,12 @@ function loadPersisted(): Partial<SettingsState> {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw)
-    if (isStaleLocalhost(parsed.apiUrl)) delete parsed.apiUrl
-    if (isStaleLocalhost(parsed.wsUrl)) delete parsed.wsUrl
+    if (isStaleLocalhost(parsed.apiUrl)) {
+      delete parsed.apiUrl
+    }
+    if (isStaleLocalhost(parsed.wsUrl)) {
+      delete parsed.wsUrl
+    }
     return parsed
   } catch { /* ignore */ }
   return {}
@@ -63,7 +68,7 @@ function persist(state: SettingsState) {
 const saved = loadPersisted()
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  workspacePath: saved.workspacePath ?? '~/.radiologybot/workspace',
+  workspacePath: saved.workspacePath ?? DEFAULT_WORKSPACE_PATH,
   theme: (saved.theme as Theme) ?? 'dark',
   language: (saved.language as Language) ?? 'en',
   apiUrl: saved.apiUrl ?? defaultApiUrl(),
