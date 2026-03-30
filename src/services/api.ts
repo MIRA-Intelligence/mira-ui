@@ -72,3 +72,36 @@ export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
     return false
   }
 }
+
+export interface UploadedProjectFile {
+  name: string
+  path: string
+  size: number
+}
+
+export async function uploadProjectFiles(sessionId: string, files: File[]): Promise<UploadedProjectFile[]> {
+  if (files.length === 0) return []
+
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('files', file, file.name)
+  }
+
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/files`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!resp.ok) {
+    let msg = ''
+    try {
+      const data = await resp.json()
+      msg = typeof data?.error === 'string' ? data.error : JSON.stringify(data)
+    } catch {
+      msg = await resp.text()
+    }
+    throw new Error(msg || `Failed to upload files for ${sessionId}`)
+  }
+
+  const data = await resp.json()
+  return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
+}

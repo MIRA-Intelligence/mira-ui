@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
+import { uploadProjectFiles } from '@/services/api'
 import { cn } from '@/lib/utils'
 import type { OutputGoal, NewProjectInput } from '@/types'
 
@@ -25,7 +26,24 @@ const DOMAIN_SUGGESTIONS = [
   'Robotics',
 ]
 
-function buildAgentMessage(input: NewProjectInput, workspacePath: string, projectId: string): string {
+function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
+  const next = [...existing]
+  const incomingList = Array.from(incoming)
+  for (const file of incomingList) {
+    const duplicated = next.some(
+      (it) => it.name === file.name && it.size === file.size && it.lastModified === file.lastModified,
+    )
+    if (!duplicated) next.push(file)
+  }
+  return next
+}
+
+function buildAgentMessage(
+  input: NewProjectInput,
+  workspacePath: string,
+  projectId: string,
+  uploadedPaths: string[],
+): string {
   const lines = [
     `New research project initialized.`,
     ``,
@@ -36,8 +54,12 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
     input.description,
   ]
 
-  if (input.dataPath) {
-    lines.push('', `## Data Source`, `Path: ${input.dataPath}`)
+  if (uploadedPaths.length > 0) {
+    lines.push('', `## Uploaded Data Files`)
+    for (const path of uploadedPaths) {
+      lines.push(`- ${path}`)
+    }
+    lines.push('', `These files are saved under ${workspacePath}/${projectId}/data.`)
   }
   if (input.domain) {
     lines.push('', `**Domain**: ${input.domain}`)
@@ -59,12 +81,15 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
 
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
-  const { createProject, projectsLoaded } = useProjectStore()
+  const { createProject, deleteTask, projectsLoaded } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
   const { workspacePath } = useSettingsStore()
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [description, setDescription] = useState('')
-  const [dataPath, setDataPath] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [creating, setCreating] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const [title, setTitle] = useState('')
   const [domain, setDomain] = useState('')
   const [references, setReferences] = useState('')
@@ -74,12 +99,35 @@ export function NewProjectModal() {
 
   if (!newProjectOpen) return null
 
-  const canCreate = description.trim().length > 0 && connected && projectsLoaded
+  const canCreate = description.trim().length > 0 && connected && projectsLoaded && !creating
 
-  const handleCreate = () => {
+  const handleFilesAdded = (files: FileList | File[]) => {
+    setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
+    setUploadError('')
+  }
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleBrowse = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer.files?.length) {
+      handleFilesAdded(e.dataTransfer.files)
+    }
+  }
+
+  const handleCreate = async () => {
+    if (!canCreate) return
+    setCreating(true)
+    setUploadError('')
+
     const input: NewProjectInput = {
       description: description.trim(),
-      dataPath: dataPath.trim(),
       title: title.trim() || undefined,
       domain: domain.trim() || undefined,
       references: references.trim() || undefined,
@@ -88,8 +136,19 @@ export function NewProjectModal() {
     }
 
     const projectId = createProject(input)
+    let uploadedPaths: string[] = []
 
-    const agentMsg = buildAgentMessage(input, workspacePath, projectId)
+    try {
+      const uploaded = await uploadProjectFiles(projectId, selectedFiles)
+      uploadedPaths = uploaded.map((file) => file.path)
+    } catch (err) {
+      await deleteTask(projectId, false)
+      setUploadError(err instanceof Error ? err.message : 'Failed to upload data files.')
+      setCreating(false)
+      return
+    }
+
+    const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths)
     useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -106,13 +165,15 @@ export function NewProjectModal() {
 
     // Reset form
     setDescription('')
-    setDataPath('')
+    setSelectedFiles([])
     setTitle('')
     setDomain('')
     setReferences('')
     setComputeBudget('')
     setOutputGoal('paper')
     setShowAdvanced(false)
+    setCreating(false)
+    setUploadError('')
     closeNewProject()
   }
 
@@ -160,19 +221,57 @@ export function NewProjectModal() {
           {/* Data Source */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-              Data Source
+              Data Source Files
             </label>
-            <div className="flex gap-2">
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
+            >
               <input
-                value={dataPath}
-                onChange={(e) => setDataPath(e.target.value)}
-                placeholder="/path/to/data or drag files here..."
-                className="flex-1 bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleFilesAdded(e.target.files)
+                  e.currentTarget.value = ''
+                }}
               />
-              <button className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0">
-                Browse
-              </button>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  {selectedFiles.length > 0
+                    ? `${selectedFiles.length} file(s) selected`
+                    : 'Drag files here or click Browse to upload into data/'}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleBrowse}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                >
+                  Browse
+                </button>
+              </div>
+              {selectedFiles.length > 0 && (
+                <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
+                  {selectedFiles.map((file, idx) => (
+                    <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                      <span className="truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedFile(idx)}
+                        className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+            {uploadError && (
+              <p className="text-[11px] text-[var(--color-error)]">{uploadError}</p>
+            )}
           </div>
 
           {/* Output Goal */}
@@ -309,7 +408,7 @@ export function NewProjectModal() {
                 : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed',
             )}
           >
-            Create Project
+            {creating ? 'Creating...' : 'Create Project'}
           </button>
         </div>
         {!connected && (

@@ -167,7 +167,6 @@ export type OutputGoal = 'paper' | 'report' | 'analysis' | 'code'
 
 export interface NewProjectInput {
   description: string
-  dataPath: string
   title?: string
   domain?: string
   references?: string
