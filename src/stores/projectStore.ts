@@ -33,6 +33,15 @@ let projectCounter = 0
 
 const PRJ_RE = /^PRJ-(\d+)$/
 
+function safeClone<T>(value: T): T {
+  if (value == null) return value
+  try {
+    return structuredClone(value)
+  } catch {
+    return JSON.parse(JSON.stringify(value)) as T
+  }
+}
+
 function syncCounterFromTasks(tasks: ProjectTask[]) {
   for (const t of tasks) {
     const m = PRJ_RE.exec(t.id)
@@ -50,11 +59,11 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     hypothesis: raw.hypothesis as string | undefined,
     prediction: raw.prediction as string | undefined,
     method: raw.method as string | undefined,
-    results: raw.results ?? undefined,
+    results: raw.results ? safeClone(raw.results) : undefined,
     conclusion: raw.conclusion as string | undefined,
     next: raw.next as string | undefined,
     commit: raw.commit as string | undefined,
-    progress: raw.progress ?? undefined,
+    progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
   }
 }
@@ -221,10 +230,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   createProject: (input) => {
     syncCounterFromTasks(get().tasks)
     const id = `PRJ-${String(++projectCounter).padStart(4, '0')}`
-    const label = input.title?.trim() || id
     const task: ProjectTask = {
       id,
-      label,
+      label: id,
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
@@ -260,7 +268,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (existingIds.has(r.id)) continue
       newTasks.push({
         id: r.id,
-        label: r.title || r.id,
+        label: r.id,
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,

@@ -54,5 +54,5 @@ export function TaskDetail() {
     )
   }
 
-  return <ExperimentDetail experiment={experiment} />
+  return <ExperimentDetail key={`${task.id}:${experiment.id}`} experiment={experiment} />
 }

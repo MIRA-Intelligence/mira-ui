@@ -23,6 +23,7 @@ interface SettingsState {
   language: Language
   apiUrl: string
   wsUrl: string
+  showProgressMessages: boolean
   settingsOpen: boolean
 
   setWorkspacePath: (p: string) => void
@@ -30,6 +31,7 @@ interface SettingsState {
   setLanguage: (l: Language) => void
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
+  setShowProgressMessages: (v: boolean) => void
   openSettings: () => void
   closeSettings: () => void
 }
@@ -61,8 +63,15 @@ function loadPersisted(): Partial<SettingsState> {
 }
 
 function persist(state: SettingsState) {
-  const { workspacePath, theme, language, apiUrl, wsUrl } = state
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ workspacePath, theme, language, apiUrl, wsUrl }))
+  const { workspacePath, theme, language, apiUrl, wsUrl, showProgressMessages } = state
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    workspacePath,
+    theme,
+    language,
+    apiUrl,
+    wsUrl,
+    showProgressMessages,
+  }))
 }
 
 const saved = loadPersisted()
@@ -73,6 +82,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   language: (saved.language as Language) ?? 'en',
   apiUrl: saved.apiUrl ?? defaultApiUrl(),
   wsUrl: saved.wsUrl ?? defaultWsUrl(),
+  showProgressMessages: saved.showProgressMessages ?? true,
   settingsOpen: false,
 
   setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
@@ -80,6 +90,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setLanguage: (l) => { set({ language: l }); persist(get()) },
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
+  setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
 }))

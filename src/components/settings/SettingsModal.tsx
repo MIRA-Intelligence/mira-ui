@@ -13,6 +13,7 @@ export function SettingsModal() {
     language: store.language,
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
+    showProgressMessages: store.showProgressMessages,
   })
 
   useEffect(() => {
@@ -23,9 +24,18 @@ export function SettingsModal() {
         language: store.language,
         apiUrl: store.apiUrl,
         wsUrl: store.wsUrl,
+        showProgressMessages: store.showProgressMessages,
       })
     }
-  }, [settingsOpen, store.workspacePath, store.theme, store.language, store.apiUrl, store.wsUrl])
+  }, [
+    settingsOpen,
+    store.workspacePath,
+    store.theme,
+    store.language,
+    store.apiUrl,
+    store.wsUrl,
+    store.showProgressMessages,
+  ])
 
   if (!settingsOpen) return null
 
@@ -35,6 +45,7 @@ export function SettingsModal() {
     store.setLanguage(draft.language)
     store.setApiUrl(draft.apiUrl)
     store.setWsUrl(draft.wsUrl)
+    store.setShowProgressMessages(draft.showProgressMessages)
 
     // Notify gateway of workspace path change
     fetch(`${draft.apiUrl}/config`, {
@@ -132,6 +143,33 @@ export function SettingsModal() {
                 </button>
               ))}
             </div>
+
+            {/* Progress messages */}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <Label text={t('progressMessages', curLang)} className="mb-0" />
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draft.showProgressMessages}
+                onClick={() => setDraft({ ...draft, showProgressMessages: !draft.showProgressMessages })}
+                className={cn(
+                  'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  draft.showProgressMessages
+                    ? 'bg-[var(--color-accent)]'
+                    : 'bg-[var(--color-bg-tertiary)]',
+                )}
+              >
+                <span
+                  className={cn(
+                    'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+                    draft.showProgressMessages ? 'translate-x-5' : 'translate-x-0',
+                  )}
+                />
+              </button>
+            </div>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+              {t('progressMessagesHint', curLang)}
+            </p>
           </Section>
 
           {/* ── Connection ────────────────────── */}

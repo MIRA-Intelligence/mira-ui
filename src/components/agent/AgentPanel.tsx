@@ -1,28 +1,67 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useAutoContinue } from '@/hooks/useAutoContinue'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
+import { formatTime } from '@/lib/utils'
+import type { LogEntry as AgentLogEntry } from '@/types'
 
 const AUTO_DELAY_MS = 4000
+type RenderItem =
+  | { kind: 'entry'; entry: AgentLogEntry }
+  | { kind: 'progress_group'; id: string; entries: AgentLogEntry[] }
 
 export function AgentPanel() {
   const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
+  const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
 
   const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
 
   const [input, setInput] = useState('')
+  const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const renderItems = useMemo<RenderItem[]>(() => {
+    const items: RenderItem[] = []
+    let progressBuffer: AgentLogEntry[] = []
+
+    const flushProgress = () => {
+      if (progressBuffer.length === 0) return
+      const first = progressBuffer[0]
+      items.push({
+        kind: 'progress_group',
+        id: `progress:${first.id}`,
+        entries: progressBuffer,
+      })
+      progressBuffer = []
+    }
+
+    for (const entry of logs) {
+      if (entry.type === 'progress') {
+        progressBuffer.push(entry)
+        continue
+      }
+      flushProgress()
+      items.push({ kind: 'entry', entry })
+    }
+    flushProgress()
+    return items
+  }, [logs])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [logs.length])
+
+  useEffect(() => {
+    setCollapsedProgressGroups({})
+  }, [showProgressMessages, selectedTaskId])
 
   useEffect(() => {
     if (!selectedTaskId) return
@@ -127,7 +166,53 @@ export function AgentPanel() {
 
       {/* Message stream */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
-        {logs.map((entry) => {
+        {renderItems.map((item) => {
+          if (item.kind === 'progress_group') {
+            const collapsed = collapsedProgressGroups[item.id] ?? !showProgressMessages
+            const lastLine = item.entries[item.entries.length - 1]?.content.split('\n')[0] ?? 'Progress update'
+            const firstTs = item.entries[0]?.timestamp
+            const lastTs = item.entries[item.entries.length - 1]?.timestamp
+
+            return (
+              <div key={item.id} className="px-4 py-1.5">
+                <button
+                  onClick={() => {
+                    setCollapsedProgressGroups((prev) => ({
+                      ...prev,
+                      [item.id]: !(prev[item.id] ?? !showProgressMessages),
+                    }))
+                  }}
+                  className="w-full text-left flex items-center gap-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+                >
+                  <span>{collapsed ? '▷' : '▽'}</span>
+                  <span className="uppercase tracking-wide">Progress</span>
+                  <span className="font-mono">{item.entries.length}</span>
+                  {firstTs && (
+                    <span className="font-mono">{formatTime(firstTs)}{lastTs && lastTs !== firstTs ? `-${formatTime(lastTs)}` : ''}</span>
+                  )}
+                  {collapsed && (
+                    <span className="truncate">- {lastLine}</span>
+                  )}
+                </button>
+                {!collapsed && (
+                  <div className="mt-1 ml-4 space-y-2">
+                    {item.entries.map((entry) => (
+                      <div key={entry.id}>
+                        <div className="text-xs text-[var(--color-text-muted)] mb-1 font-mono">
+                          {formatTime(entry.timestamp)}
+                        </div>
+                        <div className="text-sm leading-relaxed whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                          {entry.content}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          }
+
+          const entry = item.entry
           const isUser = !!entry.metadata?._user
           const isAutoMsg = !!entry.metadata?._auto
           if (isUser) {
