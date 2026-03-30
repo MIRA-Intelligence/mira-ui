@@ -12,7 +12,7 @@ import type { LogEntry as AgentLogEntry } from '@/types'
 const AUTO_DELAY_MS = 4000
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
-  | { kind: 'progress_group'; id: string; entries: AgentLogEntry[] }
+  | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
 
 export function AgentPanel() {
   const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
@@ -28,28 +28,28 @@ export function AgentPanel() {
 
   const renderItems = useMemo<RenderItem[]>(() => {
     const items: RenderItem[] = []
-    let progressBuffer: AgentLogEntry[] = []
+    let activityBuffer: AgentLogEntry[] = []
 
-    const flushProgress = () => {
-      if (progressBuffer.length === 0) return
-      const first = progressBuffer[0]
+    const flushActivity = () => {
+      if (activityBuffer.length === 0) return
+      const first = activityBuffer[0]
       items.push({
-        kind: 'progress_group',
-        id: `progress:${first.id}`,
-        entries: progressBuffer,
+        kind: 'activity_group',
+        id: `activity:${first.id}`,
+        entries: activityBuffer,
       })
-      progressBuffer = []
+      activityBuffer = []
     }
 
     for (const entry of logs) {
-      if (entry.type === 'progress') {
-        progressBuffer.push(entry)
+      if (entry.type === 'progress' || entry.type === 'tool_call') {
+        activityBuffer.push(entry)
         continue
       }
-      flushProgress()
+      flushActivity()
       items.push({ kind: 'entry', entry })
     }
-    flushProgress()
+    flushActivity()
     return items
   }, [logs])
 
@@ -167,11 +167,12 @@ export function AgentPanel() {
       {/* Message stream */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
         {renderItems.map((item) => {
-          if (item.kind === 'progress_group') {
+          if (item.kind === 'activity_group') {
             const collapsed = collapsedProgressGroups[item.id] ?? !showProgressMessages
-            const lastLine = item.entries[item.entries.length - 1]?.content.split('\n')[0] ?? 'Progress update'
+            const last = item.entries[item.entries.length - 1]
+            const lastLine = last?.content.split('\n')[0] ?? 'Progress update'
             const firstTs = item.entries[0]?.timestamp
-            const lastTs = item.entries[item.entries.length - 1]?.timestamp
+            const lastTs = last?.timestamp
 
             return (
               <div key={item.id} className="px-4 py-1.5">
@@ -191,7 +192,7 @@ export function AgentPanel() {
                     <span className="font-mono">{formatTime(firstTs)}{lastTs && lastTs !== firstTs ? `-${formatTime(lastTs)}` : ''}</span>
                   )}
                   {collapsed && (
-                    <span className="truncate">- {lastLine}</span>
+                    <span className="truncate">- {last?.type === 'tool_call' ? `🔧 ${lastLine}` : lastLine}</span>
                   )}
                 </button>
                 {!collapsed && (
@@ -201,9 +202,18 @@ export function AgentPanel() {
                         <div className="text-xs text-[var(--color-text-muted)] mb-1 font-mono">
                           {formatTime(entry.timestamp)}
                         </div>
-                        <div className="text-sm leading-relaxed whitespace-pre-wrap text-[var(--color-text-secondary)]">
-                          {entry.content}
-                        </div>
+                        {entry.type === 'tool_call' ? (
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-[var(--color-text-muted)]">🔧</span>
+                            <span className="px-2 py-0.5 rounded bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] font-mono">
+                              {entry.content}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap text-[var(--color-text-secondary)]">
+                            {entry.content}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
