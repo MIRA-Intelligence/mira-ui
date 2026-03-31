@@ -1,6 +1,6 @@
 /* ── Pipeline stages ───────────────────────────── */
 
-export type PipelineStage = 'research' | 'experiment' | 'result'
+export type PipelineStage = 'research' | 'experiment' | 'result' | 'replay'
 
 /* ── Experiment status ──────────────────────────── */
 

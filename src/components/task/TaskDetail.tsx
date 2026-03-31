@@ -3,6 +3,7 @@ import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
 import { ResearchView } from '../stages/ResearchView'
 import { ResultView } from '../stages/ResultView'
+import { ReplayView } from '../stages/ReplayView'
 
 export function TaskDetail() {
   const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
@@ -22,6 +23,10 @@ export function TaskDetail() {
 
   if (activeStage === 'result') {
     return <ResultView data={task.result} task={task} />
+  }
+
+  if (activeStage === 'replay') {
+    return <ReplayView task={task} />
   }
 
   // activeStage === 'experiment'

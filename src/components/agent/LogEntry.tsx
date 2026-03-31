@@ -146,7 +146,7 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
           <button
             onClick={() => {
               focusRun(selectedTaskId, runId)
-              setActiveStage('result')
+              setActiveStage('replay')
             }}
             className="px-2 py-0.5 rounded border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
           >

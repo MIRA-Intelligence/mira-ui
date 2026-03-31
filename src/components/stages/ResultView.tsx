@@ -1,5 +1,4 @@
 import type { ResultData, ProjectTask } from '@/types'
-import { HarnessPanel } from '@/components/harness/HarnessPanel'
 
 export function ResultView({ data, task }: { data: ResultData; task: ProjectTask }) {
   const hasContent = data.summary || (data.sections?.length ?? 0) > 0
@@ -86,8 +85,6 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
             </ul>
           </div>
         )}
-
-        <HarnessPanel sessionId={task.id} />
       </div>
     </div>
   )

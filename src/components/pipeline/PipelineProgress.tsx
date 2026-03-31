@@ -6,6 +6,7 @@ const STAGES: { key: PipelineStage; label: string; icon: string }[] = [
   { key: 'research', label: 'Research', icon: '📚' },
   { key: 'experiment', label: 'Experiment', icon: '🔬' },
   { key: 'result', label: 'Result', icon: '📝' },
+  { key: 'replay', label: 'Replay', icon: '🧪' },
 ]
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
