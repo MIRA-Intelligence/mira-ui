@@ -4,6 +4,8 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as LogEntryType } from '@/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useProjectStore } from '@/stores/projectStore'
+import { useHarnessStore } from '@/stores/harnessStore'
 
 interface LogEntryProps {
   entry: LogEntryType
@@ -67,7 +69,11 @@ function MarkdownContent({ content }: { content: string }) {
 }
 
 export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
+  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const setActiveStage = useProjectStore((s) => s.setActiveStage)
+  const focusRun = useHarnessStore((s) => s.focusRun)
   const [collapsed, setCollapsed] = useState(entry.collapsed ?? defaultCollapsed)
+  const runId = typeof entry.metadata?._run_id === 'string' ? entry.metadata._run_id : null
 
   useEffect(() => {
     setCollapsed(entry.collapsed ?? defaultCollapsed)
@@ -134,6 +140,20 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
       >
         {entry.type === 'response' ? <MarkdownContent content={entry.content} /> : entry.content}
       </div>
+      {entry.type === 'response' && runId && selectedTaskId && (
+        <div className="mt-2 flex items-center gap-2 text-[11px]">
+          <span className="font-mono text-[var(--color-text-muted)]">run: {runId}</span>
+          <button
+            onClick={() => {
+              focusRun(selectedTaskId, runId)
+              setActiveStage('result')
+            }}
+            className="px-2 py-0.5 rounded border border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
+          >
+            View Trace
+          </button>
+        </div>
+      )}
     </div>
   )
 }

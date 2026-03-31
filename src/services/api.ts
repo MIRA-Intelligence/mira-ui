@@ -1,5 +1,5 @@
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { LogEntry, TaskPlan } from '@/types'
+import type { LogEntry, ReplayComparison, ReplayReport, TaskPlan } from '@/types'
 
 function getApiUrl(): string {
   return useSettingsStore.getState().apiUrl
@@ -110,4 +110,50 @@ export function getProjectArtifactUrl(sessionId: string, artifactPath: string): 
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
   return `${getApiUrl()}/projects/${sid}/artifacts?path=${path}`
+}
+
+export async function fetchProjectRuns(sessionId: string): Promise<string[]> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/runs`)
+    if (!resp.ok) return []
+    const data = await resp.json()
+    return Array.isArray(data?.runs) ? data.runs as string[] : []
+  } catch {
+    return []
+  }
+}
+
+export async function fetchProjectReplay(sessionId: string, runId: string): Promise<ReplayReport | null> {
+  try {
+    const sid = encodeURIComponent(sessionId)
+    const rid = encodeURIComponent(runId)
+    const resp = await fetch(`${getApiUrl()}/projects/${sid}/runs/${rid}/replay`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!data || data.error) return null
+    return data as ReplayReport
+  } catch {
+    return null
+  }
+}
+
+export async function compareProjectRuns(
+  sessionId: string,
+  runId: string,
+  baselineRunId: string,
+): Promise<ReplayComparison | null> {
+  try {
+    const sid = encodeURIComponent(sessionId)
+    const run = encodeURIComponent(runId)
+    const base = encodeURIComponent(baselineRunId)
+    const resp = await fetch(
+      `${getApiUrl()}/projects/${sid}/runs/compare?run_id=${run}&baseline_run_id=${base}`,
+    )
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!data || data.error) return null
+    return data as ReplayComparison
+  } catch {
+    return null
+  }
 }

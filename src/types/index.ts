@@ -110,6 +110,46 @@ export interface Stats {
   running: number
 }
 
+/* ── Harness / replay ───────────────────────────── */
+
+export interface ReplayIssue {
+  code: string
+  message: string
+  step_id?: string | null
+}
+
+export interface ReplayArtifact {
+  path: string
+  size?: number
+  sha256?: string
+  produced_by_step?: string | null
+  recorded_at?: string
+}
+
+export interface ReplayReport {
+  run_id: string
+  event_count: number
+  event_type_counts: Record<string, number>
+  tool_call_count: number
+  tool_result_count: number
+  artifact_count: number
+  artifacts: ReplayArtifact[]
+  issues: ReplayIssue[]
+  ok: boolean
+}
+
+export interface ReplayComparison {
+  current_run_id: string
+  baseline_run_id: string
+  event_count_delta: number
+  issue_count_delta: number
+  tool_call_delta: number
+  artifact_delta: number
+  event_type_delta: Record<string, number>
+  new_artifacts: string[]
+  removed_artifacts: string[]
+}
+
 /* ── task_plan.json — contract between agent & UI ── */
 
 export interface TaskPlan {
