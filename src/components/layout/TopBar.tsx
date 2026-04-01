@@ -1,10 +1,12 @@
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useUiStore } from '@/stores/uiStore'
 import { useTimer } from '@/hooks/useTimer'
 
 export function TopBar() {
   const { tasks, selectedTaskId, startedAt } = useProjectStore()
   const { openSettings } = useSettingsStore()
+  const { openSkillsPlugins } = useUiStore()
   const { formatted } = useTimer(startedAt)
 
   const selected = tasks.find((t) => t.id === selectedTaskId)
@@ -14,6 +16,16 @@ export function TopBar() {
     <header className="flex items-center justify-between px-6 py-3 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {/* Left: settings gear */}
       <div className="w-32 flex items-center">
+        <button
+          onClick={openSkillsPlugins}
+          className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          aria-label="Skills Plugins"
+          title="Skills Plugins"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9z" />
+          </svg>
+        </button>
         <button
           onClick={openSettings}
           className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"

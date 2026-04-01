@@ -6,6 +6,7 @@ import { ExperimentTimeline } from '@/components/experiment/ExperimentTimeline'
 import { TaskDetail } from '@/components/task/TaskDetail'
 import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
+import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -99,6 +100,7 @@ export function AppLayout() {
 
       <StatusBar />
       <SettingsModal />
+      <SkillsPluginsModal />
       <NewProjectModal />
     </div>
   )
