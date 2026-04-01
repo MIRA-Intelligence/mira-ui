@@ -191,3 +191,42 @@ export interface WsResponse {
   media?: string[]
   metadata?: Record<string, unknown>
 }
+
+export type SkillPluginScope = 'global' | 'project'
+export type SkillPluginTargetType = 'plugin' | 'group' | 'skill'
+
+export interface SkillPluginToggleState {
+  global: boolean
+  project: boolean | null
+  effective: boolean
+}
+
+export interface SkillPluginGroup {
+  id: string
+  name: string
+  skill_ids: string[]
+  enabled: SkillPluginToggleState
+}
+
+export interface SkillPluginSkill {
+  id: string
+  name: string
+  path: string
+  group_ids: string[]
+  enabled: SkillPluginToggleState
+}
+
+export interface SkillPlugin {
+  id: string
+  name: string
+  version: string
+  description: string
+  install_path: string
+  source: {
+    type: string
+    path: string
+  }
+  enabled: SkillPluginToggleState
+  groups: SkillPluginGroup[]
+  skills: SkillPluginSkill[]
+}
