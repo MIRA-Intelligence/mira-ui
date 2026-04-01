@@ -199,6 +199,8 @@ export interface SkillPluginToggleState {
   global: boolean
   project: boolean | null
   effective: boolean
+  global_explicit?: boolean
+  project_explicit?: boolean
 }
 
 export interface SkillPluginGroup {
@@ -206,6 +208,10 @@ export interface SkillPluginGroup {
   name: string
   skill_ids: string[]
   enabled: SkillPluginToggleState
+  customized?: {
+    global: boolean
+    project: boolean
+  }
 }
 
 export interface SkillPluginSkill {
