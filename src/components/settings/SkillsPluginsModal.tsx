@@ -216,7 +216,7 @@ function PluginCard({
   expandedGroups: Record<string, boolean>
   setExpandedGroups: Dispatch<SetStateAction<Record<string, boolean>>>
   onToggle: (
-    targetType: 'plugin' | 'group' | 'skill',
+    targetType: 'group' | 'skill',
     pluginId: string,
     enabled: boolean,
     targetId?: string,

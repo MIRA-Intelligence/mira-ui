@@ -193,7 +193,7 @@ export interface WsResponse {
 }
 
 export type SkillPluginScope = 'global' | 'project'
-export type SkillPluginTargetType = 'plugin' | 'group' | 'skill'
+export type SkillPluginTargetType = 'group' | 'skill'
 
 export interface SkillPluginToggleState {
   global: boolean
