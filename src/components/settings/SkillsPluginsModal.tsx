@@ -5,7 +5,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
-import type { SkillPlugin, SkillPluginGroup, SkillPluginScope, SkillPluginSkill, SkillPluginToggleState } from '@/types'
+import type { SkillPlugin, SkillPluginGroup, SkillPluginScope, SkillPluginToggleState } from '@/types'
 
 export function SkillsPluginsModal() {
   const { skillsPluginsOpen, closeSkillsPlugins } = useUiStore()
@@ -36,6 +36,8 @@ export function SkillsPluginsModal() {
   if (!skillsPluginsOpen) return null
 
   const canManagePlugins = !!selectedTaskId
+  const builtInPlugin = plugins.find((plugin) => plugin.source.type === 'builtin')
+  const customPlugins = plugins.filter((plugin) => plugin.source.type !== 'builtin')
 
   const handleInstallDirectory = async () => {
     if (!selectedTaskId) return
@@ -131,25 +133,64 @@ export function SkillsPluginsModal() {
               {plugins.length === 0 ? (
                 <p className="text-xs text-[var(--color-text-muted)]">No installed plugins.</p>
               ) : (
-                <div className="space-y-3">
-                  {plugins.map((plugin) => (
-                    <PluginCard
-                      key={plugin.id}
-                      plugin={plugin}
-                      scope={scope}
-                      loading={loading}
-                      expandedGroups={expandedGroups}
-                      setExpandedGroups={setExpandedGroups}
-                      onToggle={async (targetType, pluginId, enabled, targetId) => {
-                        if (!selectedTaskId) return
-                        await toggle(selectedTaskId, targetType, pluginId, enabled, targetId)
-                      }}
-                      onUninstall={async (pluginId) => {
-                        if (!selectedTaskId) return
-                        await uninstall(selectedTaskId, pluginId)
-                      }}
-                    />
-                  ))}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Built-in Skills</p>
+                      <span className="text-[11px] text-[var(--color-text-muted)]">{builtInPlugin ? 1 : 0} plugin(s)</span>
+                    </div>
+                    {builtInPlugin ? (
+                      <PluginCard
+                        key={builtInPlugin.id}
+                        plugin={builtInPlugin}
+                        scope={scope}
+                        loading={loading}
+                        expandedGroups={expandedGroups}
+                        setExpandedGroups={setExpandedGroups}
+                        onToggle={async (targetType, pluginId, enabled, targetId) => {
+                          if (!selectedTaskId) return
+                          await toggle(selectedTaskId, targetType, pluginId, enabled, targetId)
+                        }}
+                        onUninstall={async (pluginId) => {
+                          if (!selectedTaskId) return
+                          await uninstall(selectedTaskId, pluginId)
+                        }}
+                      />
+                    ) : (
+                      <p className="text-xs text-[var(--color-text-muted)]">Built-in skills unavailable.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Custom</p>
+                      <span className="text-[11px] text-[var(--color-text-muted)]">{customPlugins.length} plugin(s)</span>
+                    </div>
+                    {customPlugins.length === 0 ? (
+                      <p className="text-xs text-[var(--color-text-muted)]">No custom plugins installed.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {customPlugins.map((plugin) => (
+                          <PluginCard
+                            key={plugin.id}
+                            plugin={plugin}
+                            scope={scope}
+                            loading={loading}
+                            expandedGroups={expandedGroups}
+                            setExpandedGroups={setExpandedGroups}
+                            onToggle={async (targetType, pluginId, enabled, targetId) => {
+                              if (!selectedTaskId) return
+                              await toggle(selectedTaskId, targetType, pluginId, enabled, targetId)
+                            }}
+                            onUninstall={async (pluginId) => {
+                              if (!selectedTaskId) return
+                              await uninstall(selectedTaskId, pluginId)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -189,42 +230,17 @@ function PluginCard({
     () => plugin.skills.filter((skill) => !groupedSkillIds.has(skill.id)),
     [plugin.skills, pluginGroups],
   )
+  const hasGroupedSkills = pluginGroups.length > 0
+  const isBuiltin = plugin.source.type === 'builtin'
 
   return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-sm font-medium text-[var(--color-text-primary)]">
-            {plugin.name} <span className="text-xs text-[var(--color-text-muted)]">@{plugin.version}</span>
-          </p>
-          <p className="text-[11px] text-[var(--color-text-muted)]">{plugin.id}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <LabeledSwitch
-            label="Plugin"
-            checked={pluginChecked}
-            disabled={loading}
-            onChange={(checked) => void onToggle('plugin', plugin.id, checked)}
-          />
-          {plugin.source.type !== 'builtin' && (
-            <button
-              type="button"
-              disabled={loading}
-              onClick={() => void onUninstall(plugin.id)}
-              className="px-2.5 py-1.5 text-xs rounded-md border border-[var(--color-border)] hover:bg-[var(--color-bg-hover)] disabled:opacity-60"
-            >
-              Uninstall
-            </button>
-          )}
-        </div>
-      </div>
-
-      {pluginGroups.map((group) => {
+    <div className="space-y-2">
+      {pluginGroups.map((group, index) => {
         const key = `${plugin.id}:${group.id}`
         const open = expandedGroups[key] ?? false
         const groupSkills = plugin.skills.filter((skill) => skill.group_ids.includes(group.id))
-        const customized = isGroupCustomized(group, scope)
-        const checked = scopeValue(group.enabled, scope)
+        const groupChecked = scopeValue(group.enabled, scope)
+        const paused = isGroupPaused(group, groupSkills, scope)
         return (
           <div key={key} className="rounded-md border border-[var(--color-border)]/70 bg-[var(--color-bg-secondary)]/20">
             <div className="flex items-center justify-between px-3 py-2 gap-2">
@@ -243,20 +259,40 @@ function PluginCard({
                   {group.name} <span className="text-[11px] text-[var(--color-text-muted)]">({groupSkills.length})</span>
                 </span>
               </label>
-              <LabeledSwitch
-                label=""
-                checked={checked}
-                disabled={loading}
-                tone={customized ? 'warning' : 'default'}
-                onChange={(_next) => {
-                  const applyValue = customized ? checked : !checked
-                  void onToggle('group', plugin.id, applyValue, group.id)
-                }}
-              />
+              <div className="flex items-center gap-2">
+                <LabeledSwitch
+                  label=""
+                  checked={groupChecked}
+                  disabled={loading}
+                  tone={paused ? 'warning' : 'default'}
+                  onChange={(_next) => {
+                    const applyValue = paused ? groupChecked : !groupChecked
+                    void onToggle('group', plugin.id, applyValue, group.id)
+                  }}
+                />
+                {!isBuiltin && index === 0 && (
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => void onUninstall(plugin.id)}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-red-300 disabled:opacity-60"
+                    aria-label="Uninstall plugin"
+                    title="Uninstall"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" />
+                      <path d="M8 6V4h8v2" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6" />
+                      <path d="M14 11v6" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
-            {customized && (
+            {paused && (
               <p className="px-3 pb-2 text-[11px] text-amber-300">
-                Skill-level overrides are active; group switch is paused. Toggle this switch to apply group setting again.
+                Group switch is paused because child skills diverge. Toggle this switch to reapply unified group control.
               </p>
             )}
             {open && (
@@ -264,8 +300,9 @@ function PluginCard({
                 {groupSkills.map((skill) => (
                   <LabeledSwitch
                     key={`${plugin.id}-${group.id}-${skill.id}`}
-                    label={`Skill: ${skill.id}`}
-                    checked={scopeValue(skill.enabled, scope)}
+                    label={`Skill: ${skill.name}`}
+                    switchSize="sm"
+                    checked={pluginChecked && groupAwareSkillState(skill, group, scope)}
                     disabled={loading}
                     onChange={(checked) => void onToggle('skill', plugin.id, checked, skill.id)}
                   />
@@ -278,26 +315,82 @@ function PluginCard({
 
       {ungroupedSkills.length > 0 && (
         <div className="rounded-md border border-[var(--color-border)]/70 px-3 py-2 space-y-1">
-          <p className="text-xs text-[var(--color-text-muted)]">Ungrouped</p>
-          {ungroupedSkills.map((skill) => (
-            <LabeledSwitch
-              key={`${plugin.id}-ungrouped-${skill.id}`}
-              label={`Skill: ${skill.id}`}
-              checked={scopeValue(skill.enabled, scope)}
-              disabled={loading}
-              onChange={(checked) => void onToggle('skill', plugin.id, checked, skill.id)}
-            />
-          ))}
+          {hasGroupedSkills && <p className="text-xs text-[var(--color-text-muted)]">Ungrouped</p>}
+          {!isBuiltin && !hasGroupedSkills
+            ? ungroupedSkills.map((skill, index) => (
+                <div key={`${plugin.id}-ungrouped-${skill.id}`} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-[var(--color-text-secondary)]">{`Skill: ${skill.name}`}</span>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      size="sm"
+                      checked={pluginChecked && scopeValue(skill.enabled, scope)}
+                      disabled={loading}
+                      onChange={(checked) => void onToggle('skill', plugin.id, checked, skill.id)}
+                    />
+                    {index === 0 && (
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void onUninstall(plugin.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-red-300 disabled:opacity-60"
+                        aria-label="Uninstall plugin"
+                        title="Uninstall"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18" />
+                          <path d="M8 6V4h8v2" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v6" />
+                          <path d="M14 11v6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            : ungroupedSkills.map((skill) => (
+                <LabeledSwitch
+                  key={`${plugin.id}-ungrouped-${skill.id}`}
+                  label={`Skill: ${skill.name}`}
+                  switchSize="sm"
+                  checked={pluginChecked && scopeValue(skill.enabled, scope)}
+                  disabled={loading}
+                  onChange={(checked) => void onToggle('skill', plugin.id, checked, skill.id)}
+                />
+              ))}
         </div>
       )}
     </div>
   )
 }
 
-function isGroupCustomized(group: SkillPluginGroup, scope: SkillPluginScope): boolean {
-  const customized = group.customized
-  if (!customized) return false
-  return scope === 'global' ? customized.global : customized.project
+function isGroupPaused(
+  group: SkillPluginGroup,
+  skills: Array<{ enabled: SkillPluginToggleState }>,
+  scope: SkillPluginScope,
+): boolean {
+  const groupState = scopeValue(group.enabled, scope)
+  const mismatch = skills.some((skill) => {
+    const skillState = groupAwareSkillState(skill, group, scope)
+    return skillState !== groupState
+  })
+  return mismatch
+}
+
+function isSkillExplicitAtScope(state: SkillPluginToggleState, scope: SkillPluginScope): boolean {
+  return scope === 'global' ? !!state.global_explicit : !!state.project_explicit
+}
+
+function groupAwareSkillState(
+  skill: { enabled: SkillPluginToggleState },
+  group: SkillPluginGroup,
+  scope: SkillPluginScope,
+): boolean {
+  const explicit = isSkillExplicitAtScope(skill.enabled, scope)
+  if (explicit) {
+    return scopeValue(skill.enabled, scope)
+  }
+  return scopeValue(group.enabled, scope)
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -329,28 +422,32 @@ function LabeledSwitch({
   checked,
   disabled,
   tone = 'default',
+  switchSize = 'md',
   onChange,
 }: {
   label: string
   checked: boolean
   disabled?: boolean
   tone?: 'default' | 'warning'
+  switchSize?: 'md' | 'sm'
   onChange: (checked: boolean) => void
 }) {
   return (
     <div className="flex items-center justify-between gap-2 text-xs">
       {label ? <span className="text-[var(--color-text-secondary)]">{label}</span> : <span />}
-      <Switch checked={checked} disabled={disabled} tone={tone} onChange={onChange} />
+      <Switch size={switchSize} checked={checked} disabled={disabled} tone={tone} onChange={onChange} />
     </div>
   )
 }
 
 function Switch({
+  size = 'md',
   checked,
   disabled,
   tone = 'default',
   onChange,
 }: {
+  size?: 'md' | 'sm'
   checked: boolean
   disabled?: boolean
   tone?: 'default' | 'warning'
@@ -367,7 +464,8 @@ function Switch({
       />
       <span
         className={cn(
-          'w-10 h-5 rounded-full transition-colors',
+          'rounded-full transition-colors',
+          size === 'sm' ? 'h-4 w-8' : 'h-5 w-10',
           checked
             ? tone === 'warning'
               ? 'bg-amber-500/70'
@@ -377,8 +475,11 @@ function Switch({
       />
       <span
         className={cn(
-          'absolute left-[2px] top-[2px] h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
-          checked ? 'translate-x-5' : 'translate-x-0',
+          'absolute rounded-full bg-white shadow-sm transition-transform',
+          size === 'sm'
+            ? 'left-[1px] top-[1px] h-3.5 w-3.5'
+            : 'left-[2px] top-[2px] h-4 w-4',
+          checked ? (size === 'sm' ? 'translate-x-4' : 'translate-x-5') : 'translate-x-0',
         )}
       />
     </label>
