@@ -1,5 +1,11 @@
 import { useSettingsStore } from '@/stores/settingsStore'
-import type { LogEntry, TaskPlan } from '@/types'
+import type {
+  LogEntry,
+  SkillPlugin,
+  SkillPluginScope,
+  SkillPluginTargetType,
+  TaskPlan,
+} from '@/types'
 
 function getApiUrl(): string {
   return useSettingsStore.getState().apiUrl
@@ -110,4 +116,76 @@ export function getProjectArtifactUrl(sessionId: string, artifactPath: string): 
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
   return `${getApiUrl()}/projects/${sid}/artifacts?path=${path}`
+}
+
+export async function fetchSkillPlugins(sessionId: string): Promise<SkillPlugin[]> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins`)
+    if (!resp.ok) return []
+    const data = await resp.json()
+    return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+  } catch {
+    return []
+  }
+}
+
+export async function installSkillPluginFromDirectory(sessionId: string, path: string): Promise<SkillPlugin[]> {
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+}
+
+export async function installSkillPluginFromZip(sessionId: string, zipFile: File): Promise<SkillPlugin[]> {
+  const formData = new FormData()
+  formData.append('zip', zipFile, zipFile.name)
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins/install`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+}
+
+export async function setSkillPluginState(
+  sessionId: string,
+  payload: {
+    scope: SkillPluginScope
+    target_type: SkillPluginTargetType
+    plugin_id: string
+    enabled: boolean
+    target_id?: string
+  },
+): Promise<SkillPlugin[]> {
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins/state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+}
+
+export async function uninstallSkillPlugin(sessionId: string, pluginId: string): Promise<SkillPlugin[]> {
+  const resp = await fetch(
+    `${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins/${encodeURIComponent(pluginId)}`,
+    { method: 'DELETE' },
+  )
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
 }
