@@ -1,21 +1,26 @@
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
+
 export function KnowledgePanel({ knowledge, coreQuestion }: {
   knowledge: string[]
   coreQuestion?: string
 }) {
+  const lang = useSettingsStore((s) => s.language)
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-2xl mx-auto px-6 py-5">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">
-          Accumulated Knowledge
+          {t('accumulatedKnowledge', lang)}
         </h2>
         <p className="text-xs text-[var(--color-text-muted)] mb-5">
-          Key discoveries from all experiments in this project
+          {t('knowledgeSummary', lang)}
         </p>
 
         {coreQuestion && (
           <div className="mb-5 p-3 rounded-lg bg-[var(--color-accent)]/8 border border-[var(--color-accent)]/20">
             <span className="text-[10px] uppercase tracking-wider text-[var(--color-accent)] font-semibold">
-              Core Question
+              {t('coreQuestion', lang)}
             </span>
             <p className="text-sm text-[var(--color-text-primary)] mt-1 leading-relaxed">
               {coreQuestion}
@@ -25,7 +30,7 @@ export function KnowledgePanel({ knowledge, coreQuestion }: {
 
         {knowledge.length === 0 ? (
           <div className="text-sm text-[var(--color-text-muted)] text-center py-12">
-            No knowledge accumulated yet.
+            {t('noKnowledgeYet', lang)}
           </div>
         ) : (
           <ul className="space-y-2">

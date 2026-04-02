@@ -1,26 +1,29 @@
 import type { ResultData, ProjectTask } from '@/types'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 export function ResultView({ data, task }: { data: ResultData; task: ProjectTask }) {
+  const lang = useSettingsStore((s) => s.language)
   const hasContent = data.summary || (data.sections?.length ?? 0) > 0
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-2xl mx-auto px-6 py-5">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">
-          Result
+          {t('result', lang)}
         </h2>
         <p className="text-xs text-[var(--color-text-muted)] mb-5">
-          Final output and deliverables for this project
+          {t('resultSubtitle', lang)}
         </p>
 
         {!hasContent && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="text-3xl mb-3">📝</div>
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
-              No results yet
+              {t('noResultsYet', lang)}
             </h3>
             <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
-              Results will appear here once the agent completes experiments and generates the final deliverable ({task.coreQuestion ? 'based on your research question' : 'paper, report, or analysis'}).
+              {task.coreQuestion ? t('noResultsHintWithQuestion', lang) : t('noResultsHintGeneric', lang)}
             </p>
           </div>
         )}
@@ -31,7 +34,7 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
             <span className="text-lg">📁</span>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] text-[var(--color-text-muted)] uppercase tracking-wider font-semibold">
-                Output {data.outputType ? `(${data.outputType})` : ''}
+                {t('output', lang)} {data.outputType ? `(${data.outputType})` : ''}
               </p>
               <p className="text-xs font-mono text-[var(--color-text-primary)] truncate mt-0.5">
                 {data.outputPath}
@@ -44,7 +47,7 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
         {data.summary && (
           <div className="mb-5">
             <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-2 flex items-center gap-1.5">
-              <span>✅</span> Summary
+              <span>✅</span> {t('summary', lang)}
             </h3>
             <div className="text-sm text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap p-3 rounded-lg bg-[var(--color-bg-secondary)]">
               {data.summary}
@@ -73,7 +76,7 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
         {task.knowledge.length > 0 && (
           <div className="mt-6 pt-4 border-t border-[var(--color-border)]">
             <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-2 flex items-center gap-1.5">
-              <span>💡</span> Key Findings ({task.knowledge.length})
+              <span>💡</span> {t('keyFindings', lang)} ({task.knowledge.length})
             </h3>
             <ul className="space-y-1.5">
               {task.knowledge.map((item, i) => (

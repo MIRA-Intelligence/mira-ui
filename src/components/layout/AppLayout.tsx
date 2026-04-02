@@ -12,6 +12,8 @@ import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { cn } from '@/lib/utils'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 function ChevronLeft({ className }: { className?: string }) {
   return (
@@ -35,6 +37,7 @@ export function AppLayout() {
   const { sidebarCollapsed, toggleSidebar, agentPanelCollapsed, toggleAgentPanel } = useUiStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
+  const lang = useSettingsStore((s) => s.language)
   useWebSocket()
 
   return (
@@ -59,7 +62,7 @@ export function AppLayout() {
         <button
           onClick={toggleSidebar}
           className="w-5 shrink-0 flex items-center justify-center border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-          aria-label="Toggle sidebar"
+          aria-label={t('toggleSidebar', lang)}
         >
           {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </button>
@@ -80,7 +83,7 @@ export function AppLayout() {
         <button
           onClick={toggleAgentPanel}
           className="w-5 shrink-0 flex items-center justify-center border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-          aria-label="Toggle agent panel"
+          aria-label={t('toggleAgentPanel', lang)}
         >
           {agentPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
         </button>

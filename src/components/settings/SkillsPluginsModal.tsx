@@ -4,12 +4,15 @@ import type { Dispatch, SetStateAction } from 'react'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useUiStore } from '@/stores/uiStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
 import type { SkillPlugin, SkillPluginGroup, SkillPluginScope, SkillPluginToggleState } from '@/types'
+import { t } from '@/i18n'
 
 export function SkillsPluginsModal() {
   const { skillsPluginsOpen, closeSkillsPlugins } = useUiStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const lang = useSettingsStore((s) => s.language)
   const {
     plugins,
     scope,
@@ -58,7 +61,7 @@ export function SkillsPluginsModal() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
-          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">Skills Plugins</h2>
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('skillsPlugins', lang)}</h2>
           <button
             onClick={closeSkillsPlugins}
             className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors text-lg leading-none"
@@ -69,10 +72,10 @@ export function SkillsPluginsModal() {
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
           <div className="flex items-center justify-between gap-2">
-            <Label text="Scope" className="mb-0" />
+            <Label text={t('scope', lang)} className="mb-0" />
             <div className="flex items-center gap-2">
               <span className={cn('text-xs', scope === 'project' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-                Project
+                {t('project', lang)}
               </span>
               <Switch
                 checked={scope === 'global'}
@@ -80,24 +83,24 @@ export function SkillsPluginsModal() {
                 disabled={loading}
               />
               <span className={cn('text-xs', scope === 'global' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-                Global
+                {t('global', lang)}
               </span>
             </div>
           </div>
-          <p className="text-[11px] text-[var(--color-text-muted)]">Project scope overrides global scope.</p>
+          <p className="text-[11px] text-[var(--color-text-muted)]">{t('projectScopeOverridesGlobal', lang)}</p>
 
           {!canManagePlugins && (
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">Select a project in the queue to manage skill plugins.</p>
+            <p className="mt-2 text-xs text-[var(--color-text-muted)]">{t('selectProjectToManagePlugins', lang)}</p>
           )}
 
           {canManagePlugins && (
             <div className="space-y-4">
-              <Section title="Install from local directory">
+              <Section title={t('installFromLocalDirectory', lang)}>
                 <div className="flex gap-2">
                   <input
                     value={installPath}
                     onChange={(e) => setInstallPath(e.target.value)}
-                    placeholder="/path/to/plugin"
+                    placeholder={t('installPathPlaceholder', lang)}
                     className={inputClass}
                   />
                   <button
@@ -106,12 +109,12 @@ export function SkillsPluginsModal() {
                     onClick={handleInstallDirectory}
                     className="px-3 py-2 text-xs rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-bg-hover)] disabled:opacity-60"
                   >
-                    Install
+                    {t('install', lang)}
                   </button>
                 </div>
               </Section>
 
-              <Section title="Install from zip">
+              <Section title={t('installFromZip', lang)}>
                 <input
                   key={zipInputKey}
                   type="file"
@@ -131,18 +134,19 @@ export function SkillsPluginsModal() {
               )}
 
               {plugins.length === 0 ? (
-                <p className="text-xs text-[var(--color-text-muted)]">No installed plugins.</p>
+                <p className="text-xs text-[var(--color-text-muted)]">{t('noInstalledPlugins', lang)}</p>
               ) : (
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Built-in Skills</p>
-                      <span className="text-[11px] text-[var(--color-text-muted)]">{builtInPlugin ? 1 : 0} plugin(s)</span>
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">{t('builtInSkills', lang)}</p>
+                      <span className="text-[11px] text-[var(--color-text-muted)]">{t('pluginCount', lang, { count: builtInPlugin ? 1 : 0 })}</span>
                     </div>
                     {builtInPlugin ? (
                       <PluginCard
                         key={builtInPlugin.id}
                         plugin={builtInPlugin}
+                        lang={lang}
                         scope={scope}
                         loading={loading}
                         expandedGroups={expandedGroups}
@@ -157,23 +161,24 @@ export function SkillsPluginsModal() {
                         }}
                       />
                     ) : (
-                      <p className="text-xs text-[var(--color-text-muted)]">Built-in skills unavailable.</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">{t('builtInSkillsUnavailable', lang)}</p>
                     )}
                   </div>
 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Custom</p>
-                      <span className="text-[11px] text-[var(--color-text-muted)]">{customPlugins.length} plugin(s)</span>
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">{t('custom', lang)}</p>
+                      <span className="text-[11px] text-[var(--color-text-muted)]">{t('pluginCount', lang, { count: customPlugins.length })}</span>
                     </div>
                     {customPlugins.length === 0 ? (
-                      <p className="text-xs text-[var(--color-text-muted)]">No custom plugins installed.</p>
+                      <p className="text-xs text-[var(--color-text-muted)]">{t('noCustomPluginsInstalled', lang)}</p>
                     ) : (
                       <div className="space-y-2">
                         {customPlugins.map((plugin) => (
                           <PluginCard
                             key={plugin.id}
                             plugin={plugin}
+                            lang={lang}
                             scope={scope}
                             loading={loading}
                             expandedGroups={expandedGroups}
@@ -203,6 +208,7 @@ export function SkillsPluginsModal() {
 
 function PluginCard({
   plugin,
+  lang,
   scope,
   loading,
   expandedGroups,
@@ -211,6 +217,7 @@ function PluginCard({
   onUninstall,
 }: {
   plugin: SkillPlugin
+  lang: ReturnType<typeof useSettingsStore.getState>['language']
   scope: SkillPluginScope
   loading: boolean
   expandedGroups: Record<string, boolean>
@@ -276,8 +283,8 @@ function PluginCard({
                     disabled={loading}
                     onClick={() => void onUninstall(plugin.id)}
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-red-300 disabled:opacity-60"
-                    aria-label="Uninstall plugin"
-                    title="Uninstall"
+                    aria-label={t('uninstall', lang)}
+                    title={t('uninstall', lang)}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M3 6h18" />
@@ -292,7 +299,7 @@ function PluginCard({
             </div>
             {paused && (
               <p className="px-3 pb-2 text-[11px] text-amber-300">
-                Group switch is paused because child skills diverge. Toggle this switch to reapply unified group control.
+                {t('groupSwitchPausedHint', lang)}
               </p>
             )}
             {open && (
@@ -300,7 +307,7 @@ function PluginCard({
                 {groupSkills.map((skill) => (
                   <LabeledSwitch
                     key={`${plugin.id}-${group.id}-${skill.id}`}
-                    label={`Skill: ${skill.name}`}
+                    label={t('skillLabel', lang, { name: skill.name })}
                     switchSize="sm"
                     checked={pluginChecked && groupAwareSkillState(skill, group, scope)}
                     disabled={loading}
@@ -315,11 +322,11 @@ function PluginCard({
 
       {ungroupedSkills.length > 0 && (
         <div className="rounded-md border border-[var(--color-border)]/70 px-3 py-2 space-y-1">
-          {hasGroupedSkills && <p className="text-xs text-[var(--color-text-muted)]">Ungrouped</p>}
+          {hasGroupedSkills && <p className="text-xs text-[var(--color-text-muted)]">{t('ungrouped', lang)}</p>}
           {!isBuiltin && !hasGroupedSkills
             ? ungroupedSkills.map((skill, index) => (
                 <div key={`${plugin.id}-ungrouped-${skill.id}`} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-[var(--color-text-secondary)]">{`Skill: ${skill.name}`}</span>
+                  <span className="text-[var(--color-text-secondary)]">{t('skillLabel', lang, { name: skill.name })}</span>
                   <div className="flex items-center gap-2">
                     <Switch
                       size="sm"
@@ -333,8 +340,8 @@ function PluginCard({
                         disabled={loading}
                         onClick={() => void onUninstall(plugin.id)}
                         className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-red-300 disabled:opacity-60"
-                        aria-label="Uninstall plugin"
-                        title="Uninstall"
+                        aria-label={t('uninstall', lang)}
+                        title={t('uninstall', lang)}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M3 6h18" />
@@ -351,7 +358,7 @@ function PluginCard({
             : ungroupedSkills.map((skill) => (
                 <LabeledSwitch
                   key={`${plugin.id}-ungrouped-${skill.id}`}
-                  label={`Skill: ${skill.name}`}
+                  label={t('skillLabel', lang, { name: skill.name })}
                   switchSize="sm"
                   checked={pluginChecked && scopeValue(skill.enabled, scope)}
                   disabled={loading}

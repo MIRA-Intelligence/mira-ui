@@ -1,17 +1,20 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
 import { ResearchView } from '../stages/ResearchView'
 import { ResultView } from '../stages/ResultView'
+import { t } from '@/i18n'
 
 export function TaskDetail() {
   const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
+  const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
     return (
       <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-sm">
-        Select a project to get started
+        {t('selectProjectToStart', lang)}
       </div>
     )
   }
@@ -37,11 +40,12 @@ export function TaskDetail() {
         <div className="h-full flex flex-col items-center justify-center text-center px-8">
           <div className="text-2xl mb-3">🔬</div>
           <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
-            Ready to start
+            {t('readyToStart', lang)}
           </h3>
           <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
-            Send a message to the agent to begin the first experiment.
-            The agent will follow the scientific method: Question → Hypothesis → Experiment → Analysis.
+            {t('sendMessageToStartExperiment', lang)}
+            {' '}
+            {t('scientificMethodHint', lang)}
           </p>
         </div>
       )
@@ -49,7 +53,7 @@ export function TaskDetail() {
 
     return (
       <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
-        Select an experiment from the timeline
+        {t('selectExperimentFromTimeline', lang)}
       </div>
     )
   }
