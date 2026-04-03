@@ -1,6 +1,6 @@
 # MedPilotUI
 
-AI Agent UI for radiology workflows, built with React, TypeScript, Vite, Tailwind CSS, and Electron.
+AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tailwind CSS, and Electron.
 
 ## Features
 
@@ -28,7 +28,7 @@ npm install
 
 ## 2) Backend assumptions
 
-This UI is designed to connect to the radiologybot gateway through:
+This UI is designed to connect to the [MedPilot](https://github.com/Project-MedPilot/MedPilot) gateway through:
 
 - WebSocket endpoint: `/ws`
 - REST API endpoint: `/api`

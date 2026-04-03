@@ -46,12 +46,6 @@ function isStaleLocalhost(url: string | undefined): boolean {
   } catch { return false }
 }
 
-function isLegacyWorkspacePath(path: string | undefined): boolean {
-  if (!path) return false
-  const normalized = path.replace(/\\/g, '/')
-  return normalized === '~/.radiologybot/workspace' || normalized.endsWith('/.radiologybot/workspace')
-}
-
 function loadPersisted(): Partial<SettingsState> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -62,9 +56,6 @@ function loadPersisted(): Partial<SettingsState> {
     }
     if (isStaleLocalhost(parsed.wsUrl)) {
       delete parsed.wsUrl
-    }
-    if (isLegacyWorkspacePath(parsed.workspacePath)) {
-      delete parsed.workspacePath
     }
     return parsed
   } catch { /* ignore */ }
