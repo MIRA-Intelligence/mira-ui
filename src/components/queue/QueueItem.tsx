@@ -117,10 +117,9 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
 
       {/* Delete confirmation dialog */}
       {confirmDelete && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={() => setConfirmDelete(false)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
           <div
             className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-xl shadow-2xl p-5 w-[320px]"
-            onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
               {t('deleteProjectTitle', lang, { name: task.label })}

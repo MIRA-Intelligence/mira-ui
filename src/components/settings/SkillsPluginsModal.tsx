@@ -54,11 +54,10 @@ export function SkillsPluginsModal() {
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center" onClick={closeSkillsPlugins}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-[var(--color-overlay)]" />
       <div
         className="relative w-[760px] max-h-[88vh] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('skillsPlugins', lang)}</h2>

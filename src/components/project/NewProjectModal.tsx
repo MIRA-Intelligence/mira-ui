@@ -178,14 +178,9 @@ export function NewProjectModal() {
     closeNewProject()
   }
 
-  const handleBackdrop = (e: React.MouseEvent) => {
-    if (e.target === e.currentTarget) closeNewProject()
-  }
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--color-overlay)]"
-      onClick={handleBackdrop}
     >
       <div className="w-full max-w-[560px] max-h-[85vh] bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}

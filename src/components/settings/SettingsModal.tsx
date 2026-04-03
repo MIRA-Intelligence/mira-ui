@@ -62,7 +62,6 @@ export function SettingsModal() {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center"
-      onClick={closeSettings}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-[var(--color-overlay)]" />
@@ -70,7 +69,6 @@ export function SettingsModal() {
       {/* Modal */}
       <div
         className="relative w-[520px] max-h-[80vh] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
