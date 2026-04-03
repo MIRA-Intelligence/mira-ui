@@ -1,13 +1,12 @@
 name: Desktop Release Build
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - deploy
-  pull_request:
-    branches:
-      - deploy
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build-desktop:
@@ -44,3 +43,22 @@ jobs:
         with:
           name: medpilotui-${{ matrix.os }}
           path: release/**
+
+  publish-release:
+    needs: build-desktop
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: medpilotui-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/**
