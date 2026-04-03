@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'
 import type { ProjectTask } from '@/types'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 interface QueueItemProps {
   task: ProjectTask
@@ -14,6 +16,7 @@ interface QueueItemProps {
 interface MenuPos { x: number; y: number }
 
 export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDuplicate }: QueueItemProps) {
+  const lang = useSettingsStore((s) => s.language)
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -53,9 +56,9 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
   }
 
   const actions: { label: string; action: () => void; danger?: boolean }[] = [
-    { label: 'Rename', action: () => { setMenu(null); setEditing(true) } },
-    { label: 'Duplicate', action: () => { setMenu(null); onDuplicate(task.id) } },
-    { label: 'Delete', action: () => { setMenu(null); setConfirmDelete(true) }, danger: true },
+    { label: t('rename', lang), action: () => { setMenu(null); setEditing(true) } },
+    { label: t('duplicate', lang), action: () => { setMenu(null); onDuplicate(task.id) } },
+    { label: t('delete', lang), action: () => { setMenu(null); setConfirmDelete(true) }, danger: true },
   ]
 
   return (
@@ -120,29 +123,29 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
-              Delete "{task.label}"?
+              {t('deleteProjectTitle', lang, { name: task.label })}
             </h3>
             <p className="text-xs text-[var(--color-text-muted)] mb-4 leading-relaxed">
-              Choose whether to also delete the local project files from disk. This action cannot be undone.
+              {t('deleteProjectDesc', lang)}
             </p>
             <div className="flex flex-col gap-2">
               <button
                 onClick={() => { setConfirmDelete(false); onDelete(task.id, true) }}
                 className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-red-500/15 text-red-400 hover:bg-red-500/25 transition-colors"
               >
-                Delete from UI &amp; delete local files
+                {t('deleteUiAndFiles', lang)}
               </button>
               <button
                 onClick={() => { setConfirmDelete(false); onDelete(task.id, false) }}
                 className="w-full px-3 py-2 rounded-lg text-xs font-medium bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
               >
-                Remove from UI only (keep files)
+                {t('removeUiKeepFiles', lang)}
               </button>
               <button
                 onClick={() => setConfirmDelete(false)}
                 className="w-full px-3 py-2 rounded-lg text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
               >
-                Cancel
+                {t('cancel', lang)}
               </button>
             </div>
           </div>

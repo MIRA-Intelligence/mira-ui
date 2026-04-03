@@ -1,5 +1,7 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { Experiment } from '@/types'
+import { t } from '@/i18n'
 
 const STATUS_ICON: Record<string, string> = {
   completed: '✓',
@@ -21,10 +23,11 @@ function formatProgressValue(value: unknown): string | null {
   return Number.isFinite(num) ? num.toFixed(3) : null
 }
 
-function ExpItem({ exp, isSelected, onSelect }: {
+function ExpItem({ exp, isSelected, onSelect, lang }: {
   exp: Experiment
   isSelected: boolean
   onSelect: () => void
+  lang: ReturnType<typeof useSettingsStore.getState>['language']
 }) {
   const indent = exp.parent ? 'ml-4' : ''
   const progressValue = formatProgressValue(exp.progress?.current_value)
@@ -50,7 +53,7 @@ function ExpItem({ exp, isSelected, onSelect }: {
         </span>
         {exp.progress && exp.status === 'running' && (
           <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
-            epoch {exp.progress.epoch}/{exp.progress.total_epochs}
+            {t('epoch', lang)} {exp.progress.epoch}/{exp.progress.total_epochs}
             {progressValue && ` · ${exp.progress.current_metric}=${progressValue}`}
           </span>
         )}
@@ -61,12 +64,13 @@ function ExpItem({ exp, isSelected, onSelect }: {
 
 export function ExperimentTimeline() {
   const { tasks, selectedTaskId, selectedExpId, selectExperiment } = useProjectStore()
+  const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
     return (
       <div className="h-full flex items-center justify-center text-xs text-[var(--color-text-muted)] px-4 text-center">
-        Select a project to see experiments
+        {t('selectProjectToSeeExperiments', lang)}
       </div>
     )
   }
@@ -78,7 +82,7 @@ export function ExperimentTimeline() {
       {/* Header */}
       <div className="px-3 py-2 border-b border-[var(--color-border)] shrink-0">
         <span className="text-[11px] font-semibold text-[var(--color-text-primary)] uppercase tracking-wider">
-          Experiments
+          {t('experiments', lang)}
         </span>
         <span className="text-[10px] text-[var(--color-text-muted)] ml-1.5">
           {experiments.filter((e) => e.status === 'completed').length}/{experiments.length}
@@ -89,7 +93,7 @@ export function ExperimentTimeline() {
       <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
         {experiments.length === 0 && (
           <div className="text-[11px] text-[var(--color-text-muted)] text-center py-8 px-3">
-            No experiments yet. Send a message to start.
+            {t('noExperimentsYet', lang)}
           </div>
         )}
         {experiments.map((exp) => (
@@ -97,6 +101,7 @@ export function ExperimentTimeline() {
             key={exp.id}
             exp={exp}
             isSelected={exp.id === selectedExpId}
+            lang={lang}
             onSelect={() => selectExperiment(exp.id)}
           />
         ))}
@@ -112,7 +117,7 @@ export function ExperimentTimeline() {
               : 'hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
           }`}
         >
-          <span className="text-[11px]">💡 Knowledge</span>
+          <span className="text-[11px]">💡 {t('knowledge', lang)}</span>
           <span className="text-[10px] text-[var(--color-text-muted)] ml-1">({task.knowledge.length})</span>
         </button>
       )}

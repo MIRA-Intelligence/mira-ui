@@ -1,18 +1,21 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 export function StatusBar() {
   const { stats } = useProjectStore()
+  const lang = useSettingsStore((s) => s.language)
 
   return (
     <footer className="flex items-center justify-between px-6 py-2.5 border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       <div className="flex items-center gap-6">
-        <StatBlock value={stats.experiments} label="Experiments" />
-        <StatBlock value={stats.completed} label="Completed" />
+        <StatBlock value={stats.experiments} label={t('experiments', lang)} />
+        <StatBlock value={stats.completed} label={t('completed', lang)} />
       </div>
 
       <div className="flex items-center gap-6">
-        <StatBlock value={stats.running} label="Running" />
-        <StatBlock value={stats.failed} label="Failed" />
+        <StatBlock value={stats.running} label={t('running', lang)} />
+        <StatBlock value={stats.failed} label={t('failed', lang)} />
       </div>
     </footer>
   )

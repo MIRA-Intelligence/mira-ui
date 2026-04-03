@@ -106,15 +106,33 @@ Create distributable installers/packages:
 npm run dist
 ```
 
+Target specific desktop platforms:
+
+```bash
+# macOS artifacts (dmg + zip)
+npm run dist:mac
+
+# Windows artifacts (nsis + portable)
+npm run dist:win
+
+# Build both (best used in CI)
+npm run dist:all
+```
+
 ## 6) Script reference
 
 - `npm run dev` → start Vite development server on port 5173 (web mode)
 - `npm run dev:electron` → start Electron with Vite integration
 - `npm run build:web` → compile web client for production (`dist/`)
 - `npm run build:electron` → compile Electron main/preload/renderer bundles (`dist-electron/`)
+- `npm run build:desktop` → run both web + electron production builds
 - `npm run preview` → preview compiled web assets
-- `npm run pack` → package app contents without installer
-- `npm run dist` → generate installers for the current OS
+- `npm run pack` → generate unpacked desktop app into `release/`
+- `npm run dist` → generate installers for the current OS into `release/`
+- `npm run dist:mac` → generate macOS `dmg` and `zip` packages
+- `npm run dist:win` → generate Windows `nsis` and `portable` packages
+- `npm run dist:all` → attempt both macOS and Windows packaging in one run
+- `npm run dist:mac` uses local Electron distribution and unsigned packaging (`mac.identity=null`) for local release preparation
 
 ## 7) Project structure
 
@@ -170,3 +188,8 @@ npm run dist
 - Re-run `npm run build:electron` to regenerate renderer output.
 - Confirm Vite dev server is running when using `npm run dev:electron`.
 - Run from repo root to avoid path resolution issues.
+
+### Desktop release artifacts
+- CI workflow: `.github/workflows/desktop-release.yml`
+- Trigger with GitHub Actions `workflow_dispatch` or push/PR to `deploy`
+- Generated installers are uploaded as workflow artifacts and also written to local `release/` when run locally

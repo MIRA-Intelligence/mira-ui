@@ -1,10 +1,13 @@
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { QueueItem } from './QueueItem'
 import { cn } from '@/lib/utils'
+import { t } from '@/i18n'
 
 export function ProjectQueue() {
   const { tasks, selectedTaskId, selectTask, mode, setMode, renameTask, deleteTask, duplicateTask } = useProjectStore()
+  const lang = useSettingsStore((s) => s.language)
 
   const handleDelete = (id: string, deleteFiles: boolean) => {
     deleteTask(id, deleteFiles)
@@ -16,12 +19,12 @@ export function ProjectQueue() {
       {/* Header */}
       <div className="px-3 py-2.5 border-b border-[var(--color-border)] flex items-center justify-between">
         <span className="text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
-          Projects
+          {t('projects', lang)}
         </span>
         <button
           onClick={openNewProject}
           className="w-5 h-5 flex items-center justify-center rounded hover:bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-          aria-label="New project"
+          aria-label={t('newProjectAria', lang)}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -60,7 +63,7 @@ export function ProjectQueue() {
                 : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
             )}
           >
-            {m === 'manual' ? '● Manual' : '● Auto'}
+            {m === 'manual' ? `● ${t('manual', lang)}` : `● ${t('auto', lang)}`}
           </button>
         ))}
       </div>

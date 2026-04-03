@@ -1,6 +1,8 @@
 import type { ResearchData, Reference } from '@/types'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
-function ReferenceCard({ reference: r }: { reference: Reference }) {
+function ReferenceCard({ reference: r, lang }: { reference: Reference; lang: ReturnType<typeof useSettingsStore.getState>['language'] }) {
   return (
     <div className="p-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:border-[var(--color-accent)]/30 transition-colors">
       <div className="flex items-start gap-2">
@@ -23,7 +25,7 @@ function ReferenceCard({ reference: r }: { reference: Reference }) {
           )}
           {r.relevance && (
             <p className="text-[11px] text-[var(--color-accent)] mt-1 italic">
-              Relevance: {r.relevance}
+              {t('relevance', lang)}: {r.relevance}
             </p>
           )}
         </div>
@@ -36,22 +38,23 @@ export function ResearchView({ data, coreQuestion }: {
   data: ResearchData
   coreQuestion?: string
 }) {
+  const lang = useSettingsStore((s) => s.language)
   const hasContent = data.references.length > 0 || data.notes.length > 0 || data.survey
 
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-2xl mx-auto px-6 py-5">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">
-          Research & Literature
+          {t('researchLiterature', lang)}
         </h2>
         <p className="text-xs text-[var(--color-text-muted)] mb-5">
-          Background research, references, and survey notes
+          {t('researchSubtitle', lang)}
         </p>
 
         {coreQuestion && (
           <div className="mb-5 p-3 rounded-lg bg-[var(--color-accent)]/8 border border-[var(--color-accent)]/20">
             <span className="text-[10px] uppercase tracking-wider text-[var(--color-accent)] font-semibold">
-              Research Question
+              {t('researchQuestion', lang)}
             </span>
             <p className="text-sm text-[var(--color-text-primary)] mt-1 leading-relaxed">
               {coreQuestion}
@@ -63,10 +66,10 @@ export function ResearchView({ data, coreQuestion }: {
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="text-3xl mb-3">📚</div>
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
-              No research data yet
+              {t('noResearchData', lang)}
             </h3>
             <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
-              The agent will populate this section with literature references and survey notes as it performs background research.
+              {t('noResearchDataHint', lang)}
             </p>
           </div>
         )}
@@ -75,7 +78,7 @@ export function ResearchView({ data, coreQuestion }: {
         {data.survey && (
           <div className="mb-5">
             <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-2 flex items-center gap-1.5">
-              <span>📋</span> Survey
+              <span>📋</span> {t('survey', lang)}
             </h3>
             <div className="text-sm text-[var(--color-text-secondary)] leading-relaxed whitespace-pre-wrap p-3 rounded-lg bg-[var(--color-bg-secondary)]">
               {data.survey}
@@ -87,14 +90,14 @@ export function ResearchView({ data, coreQuestion }: {
         {data.references.length > 0 && (
           <div className="mb-5">
             <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-2 flex items-center gap-1.5">
-              <span>📄</span> References
+              <span>📄</span> {t('references', lang)}
               <span className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1 py-px rounded">
                 {data.references.length}
               </span>
             </h3>
             <div className="space-y-2">
               {data.references.map((r) => (
-                <ReferenceCard key={r.id} reference={r} />
+                <ReferenceCard key={r.id} reference={r} lang={lang} />
               ))}
             </div>
           </div>
@@ -104,7 +107,7 @@ export function ResearchView({ data, coreQuestion }: {
         {data.notes.length > 0 && (
           <div className="mb-5">
             <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-2 flex items-center gap-1.5">
-              <span>📝</span> Notes
+              <span>📝</span> {t('notes', lang)}
             </h3>
             <ul className="space-y-1.5">
               {data.notes.map((note, i) => (

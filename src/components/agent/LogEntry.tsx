@@ -4,6 +4,8 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as LogEntryType } from '@/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 interface LogEntryProps {
   entry: LogEntryType
@@ -67,6 +69,7 @@ function MarkdownContent({ content }: { content: string }) {
 }
 
 export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
+  const lang = useSettingsStore((s) => s.language)
   const [collapsed, setCollapsed] = useState(entry.collapsed ?? defaultCollapsed)
 
   useEffect(() => {
@@ -81,7 +84,7 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
           className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
         >
           <span>{collapsed ? '▷' : '▽'}</span>
-          <span>Worked for &lt;1s</span>
+          <span>{t('workedForLessThan1s', lang)}</span>
         </button>
         {!collapsed && (
           <div className="mt-1 ml-4 flex items-center gap-2 text-xs">
@@ -96,7 +99,7 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
   }
 
   if (entry.type === 'progress') {
-    const preview = entry.content.split('\n')[0] || 'Progress update'
+    const preview = entry.content.split('\n')[0] || t('progressUpdate', lang)
     return (
       <div className="px-4 py-1.5">
         <button
@@ -105,7 +108,7 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
         >
           <span>{collapsed ? '▷' : '▽'}</span>
           <span className="font-mono">{formatTime(entry.timestamp)}</span>
-          <span className="uppercase tracking-wide">Progress</span>
+          <span className="uppercase tracking-wide">{t('progress', lang)}</span>
           {collapsed && (
             <span className="truncate">- {preview}</span>
           )}

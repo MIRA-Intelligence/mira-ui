@@ -1,11 +1,13 @@
 import { useProjectStore } from '@/stores/projectStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { PipelineStage } from '@/types'
+import { t } from '@/i18n'
 
-const STAGES: { key: PipelineStage; label: string; icon: string }[] = [
-  { key: 'research', label: 'Research', icon: '📚' },
-  { key: 'experiment', label: 'Experiment', icon: '🔬' },
-  { key: 'result', label: 'Result', icon: '📝' },
+const STAGES: { key: PipelineStage; icon: string }[] = [
+  { key: 'research', icon: '📚' },
+  { key: 'experiment', icon: '🔬' },
+  { key: 'result', icon: '📝' },
 ]
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
@@ -28,12 +30,13 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
 export function PipelineProgress() {
   const { tasks, selectedTaskId, activeStage, setActiveStage } = useProjectStore()
   const isStreaming = useAgentStore((s) => s.isStreaming)
+  const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
 
   if (!task) {
     return (
       <div className="flex items-center justify-center py-2.5 px-8 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
-        <span className="text-xs text-[var(--color-text-muted)]">No project selected</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{t('noProjectSelected', lang)}</span>
       </div>
     )
   }
@@ -69,7 +72,7 @@ export function PipelineProgress() {
                 }`}
               >
                 <span className="text-[13px]">{stage.icon}</span>
-                <span>{stage.label}</span>
+                <span>{t(stage.key === 'research' ? 'research' : stage.key === 'experiment' ? 'experiment' : 'result', lang)}</span>
                 {badge && (
                   <span className={`text-[10px] font-mono px-1 py-px rounded ${
                     isActive
@@ -89,7 +92,7 @@ export function PipelineProgress() {
       {isStreaming && (
         <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--color-accent)]/8">
           <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
-          <span className="text-[10px] text-[var(--color-accent)] font-medium">Working...</span>
+          <span className="text-[10px] text-[var(--color-accent)] font-medium">{t('working', lang)}</span>
         </div>
       )}
 

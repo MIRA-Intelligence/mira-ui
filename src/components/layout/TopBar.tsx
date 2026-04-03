@@ -2,10 +2,12 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useTimer } from '@/hooks/useTimer'
+import { t } from '@/i18n'
 
 export function TopBar() {
   const { tasks, selectedTaskId, startedAt } = useProjectStore()
   const { openSettings } = useSettingsStore()
+  const lang = useSettingsStore((s) => s.language)
   const { openSkillsPlugins } = useUiStore()
   const { formatted } = useTimer(startedAt)
 
@@ -19,8 +21,8 @@ export function TopBar() {
         <button
           onClick={openSettings}
           className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-          aria-label="Settings"
-          title="Settings"
+          aria-label={t('settings', lang)}
+          title={t('settings', lang)}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="3" />
@@ -30,8 +32,8 @@ export function TopBar() {
         <button
           onClick={openSkillsPlugins}
           className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-          aria-label="Skills Plugins"
-          title="Skills Plugins"
+          aria-label={t('skillsPlugins', lang)}
+          title={t('skillsPlugins', lang)}
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M13 2 3 14h9l-1 8 10-12h-9z" />

@@ -1,14 +1,16 @@
 import { useState } from 'react'
 import type { Experiment } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { getProjectArtifactUrl } from '@/services/api'
+import { t } from '@/i18n'
 
-const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
-  completed: { label: 'Completed', cls: 'bg-[var(--color-success)]/15 text-[var(--color-success)]' },
-  failed: { label: 'Failed', cls: 'bg-[var(--color-error)]/15 text-[var(--color-error)]' },
-  skipped: { label: 'Skipped', cls: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]' },
-  running: { label: 'Running', cls: 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' },
-  pending: { label: 'Pending', cls: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]' },
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  completed: 'bg-[var(--color-success)]/15 text-[var(--color-success)]',
+  failed: 'bg-[var(--color-error)]/15 text-[var(--color-error)]',
+  skipped: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]',
+  running: 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]',
+  pending: 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]',
 }
 
 function Section({ icon, label, children }: { icon: string; label: string; children: React.ReactNode }) {
@@ -88,8 +90,8 @@ function MetricsTable({ metrics }: { metrics: Record<string, unknown> }) {
   )
 }
 
-function ProgressBar({ epoch, total, metric, value }: {
-  epoch?: number; total?: number; metric?: string; value?: number | string
+function ProgressBar({ epoch, total, metric, value, epochLabel }: {
+  epoch?: number; total?: number; metric?: string; value?: number | string; epochLabel: string
 }) {
   if (!epoch || !total) return null
   const pct = Math.min((epoch / total) * 100, 100)
@@ -97,7 +99,7 @@ function ProgressBar({ epoch, total, metric, value }: {
   return (
     <div className="mt-2 space-y-1">
       <div className="flex justify-between text-[11px] text-[var(--color-text-muted)]">
-        <span>Epoch {epoch} / {total}</span>
+        <span>{epochLabel} {epoch} / {total}</span>
         {metric && formattedValue && <span>{metric} = {formattedValue}</span>}
       </div>
       <div className="h-1.5 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
@@ -112,8 +114,18 @@ function ProgressBar({ epoch, total, metric, value }: {
 
 export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const lang = useSettingsStore((s) => s.language)
   const [expandedImageArtifacts, setExpandedImageArtifacts] = useState<Record<string, boolean>>({})
-  const badge = STATUS_BADGE[experiment.status] ?? STATUS_BADGE.pending
+  const badgeLabel = experiment.status === 'completed'
+    ? t('completed', lang)
+    : experiment.status === 'failed'
+      ? t('failed', lang)
+      : experiment.status === 'skipped'
+        ? t('skipped', lang)
+        : experiment.status === 'running'
+          ? t('running', lang)
+          : t('pending', lang)
+  const badgeClass = STATUS_BADGE_CLASS[experiment.status] ?? STATUS_BADGE_CLASS.pending
   const hasScientificDetail = Boolean(
     experiment.question
     || experiment.hypothesis
@@ -132,7 +144,7 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         <div className="mb-5">
           <div className="flex items-center gap-2 mb-1">
             <span className="font-mono text-xs text-[var(--color-text-muted)]">{experiment.id}</span>
-            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badge.cls}`}>{badge.label}</span>
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeClass}`}>{badgeLabel}</span>
             {experiment.commit && (
               <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
                 @ {experiment.commit.slice(0, 7)}
@@ -149,57 +161,58 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         </div>
 
         {!hasScientificDetail && (
-          <Section icon="○" label={experiment.status === 'pending' ? 'Planned' : 'Status'}>
+          <Section icon="○" label={experiment.status === 'pending' ? t('planned', lang) : t('progress', lang)}>
             <p className="text-[var(--color-text-secondary)]">
               {experiment.status === 'pending'
-                ? 'This experiment is planned from the research stage and has not started yet. Run it manually or continue in auto mode to execute it.'
+                ? t('experimentPendingHint', lang)
                 : experiment.status === 'skipped'
-                  ? 'This experiment was intentionally skipped and will not be executed unless explicitly re-enabled.'
-                  : 'Details will appear here as the agent fills in the experiment record.'}
+                  ? t('experimentSkippedHint', lang)
+                  : t('experimentDetailsPending', lang)}
             </p>
           </Section>
         )}
 
         {/* Scientific method sections */}
         {experiment.question && (
-          <Section icon="?" label="Question">
+          <Section icon="?" label={t('question', lang)}>
             <p>{experiment.question}</p>
           </Section>
         )}
 
         {experiment.hypothesis && (
-          <Section icon="!" label="Hypothesis">
+          <Section icon="!" label={t('hypothesis', lang)}>
             <p>{experiment.hypothesis}</p>
           </Section>
         )}
 
         {experiment.prediction && (
-          <Section icon="→" label="Prediction">
+          <Section icon="→" label={t('prediction', lang)}>
             <p>{experiment.prediction}</p>
           </Section>
         )}
 
         {experiment.method && (
-          <Section icon="⚙" label="Method">
+          <Section icon="⚙" label={t('method', lang)}>
             <p className="text-[var(--color-text-secondary)]">{experiment.method}</p>
           </Section>
         )}
 
         {/* Running progress */}
         {experiment.status === 'running' && experiment.progress && (
-          <Section icon="▶" label="Progress">
+          <Section icon="▶" label={t('progress', lang)}>
             <ProgressBar
               epoch={experiment.progress.epoch}
               total={experiment.progress.total_epochs}
               metric={experiment.progress.current_metric}
               value={experiment.progress.current_value}
+              epochLabel={t('epoch', lang)}
             />
           </Section>
         )}
 
         {/* Results */}
         {experiment.results && (
-          <Section icon="📊" label="Results">
+          <Section icon="📊" label={t('results', lang)}>
             {experiment.results.metrics && <MetricsTable metrics={experiment.results.metrics} />}
             {experiment.results.findings && (
               <p className="mt-2 text-[var(--color-text-secondary)]">{experiment.results.findings}</p>
@@ -225,7 +238,7 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
                           window.open(artifactUrl, '_blank', 'noopener,noreferrer')
                         }}
                         className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-50"
-                        title={!canOpen ? 'Select a project first' : isImage ? 'Click to expand/collapse image preview' : 'Open artifact'}
+                        title={!canOpen ? t('selectProjectFirst', lang) : isImage ? t('progressMetricHint', lang) : t('openArtifact', lang)}
                       >
                         {isImage ? (expanded ? '▼ ' : '▷ ') : '↗ '}
                         {a}
@@ -250,14 +263,14 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
 
         {/* Conclusion */}
         {experiment.conclusion && (
-          <Section icon="✓" label="Conclusion">
+          <Section icon="✓" label={t('conclusion', lang)}>
             <p>{experiment.conclusion}</p>
           </Section>
         )}
 
         {/* Next */}
         {experiment.next && (
-          <Section icon="➡" label="Next">
+          <Section icon="➡" label={t('next', lang)}>
             <p className="text-[var(--color-accent)]">{experiment.next}</p>
           </Section>
         )}
