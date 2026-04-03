@@ -1,40 +1,96 @@
-export type PipelineStage = 'ideation' | 'planning' | 'experiment' | 'writing'
+/* ── Pipeline stages ───────────────────────────── */
 
-export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed'
+export type PipelineStage = 'research' | 'experiment' | 'result'
 
-export type PhaseStatus = 'pending' | 'running' | 'completed'
+/* ── Experiment status ──────────────────────────── */
 
-export interface Phase {
-  id: string
-  label: string
-  status: PhaseStatus
-  description?: string
-}
+export type ExperimentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
-export interface StepResults {
-  metrics?: Record<string, number | string>
+/* ── Experiment result ─────────────────────────── */
+
+export interface ExperimentResult {
+  metrics?: Record<string, unknown>
   findings?: string
   artifacts?: string[]
 }
 
-export interface Step {
-  id: string
-  number: number
-  title: string
-  status: TaskStatus
-  phases?: Phase[]
-  results?: StepResults
+/* ── Training / execution progress ─────────────── */
+
+export interface ExperimentProgress {
+  epoch?: number
+  total_epochs?: number
+  current_metric?: string
+  current_value?: number | string
 }
+
+/* ── Single experiment ─────────────────────────── */
+
+export interface Experiment {
+  id: string
+  title: string
+  status: ExperimentStatus
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: ExperimentResult
+  conclusion?: string
+  next?: string
+  commit?: string
+  progress?: ExperimentProgress
+  parent?: string
+}
+
+/* ── Research data (literature & references) ───── */
+
+export interface Reference {
+  id: string
+  title: string
+  authors?: string
+  year?: string
+  venue?: string
+  url?: string
+  summary?: string
+  relevance?: string
+}
+
+export interface ResearchData {
+  references: Reference[]
+  notes: string[]
+  survey?: string
+}
+
+/* ── Final result / deliverable ────────────────── */
+
+export interface ResultData {
+  summary?: string
+  outputPath?: string
+  outputType?: string
+  sections?: ResultSection[]
+}
+
+export interface ResultSection {
+  title: string
+  content: string
+}
+
+/* ── Project task (one project = many experiments) ── */
 
 export interface ProjectTask {
   id: string
   label: string
-  status: 'in_progress' | 'completed'
-  pipelineStage: PipelineStage
+  status: 'in_progress' | 'completed' | 'pending'
   title: string
-  steps: Step[]
+  coreQuestion?: string
+  currentExperiment?: string
+  experiments: Experiment[]
+  knowledge: string[]
+  research: ResearchData
+  result: ResultData
   startedAt: string
 }
+
+/* ── Agent log entry ───────────────────────────── */
 
 export interface LogEntry {
   id: string
@@ -45,52 +101,64 @@ export interface LogEntry {
   collapsed?: boolean
 }
 
-export interface JobMonitorInfo {
-  id: string
-  label: string
-  service?: string
-}
+/* ── Stats (status bar) ────────────────────────── */
 
 export interface Stats {
-  hypotheses: number
-  papers: number
-  tokens: number
-  cost: number
-  stages: { label: string; active: boolean }[]
+  experiments: number
+  completed: number
+  failed: number
+  running: number
 }
 
-/**
- * task_plan.json schema — the contract between agent and UI.
- *
- * The agent maintains this file in its workspace via write_file.
- * The UI fetches it via GET /api/plan?session=xxx after each response.
- */
+/* ── task_plan.json — contract between agent & UI ── */
+
 export interface TaskPlan {
   title: string
-  pipeline_stage: PipelineStage
+  core_question?: string
   status: 'in_progress' | 'completed' | 'failed'
-  started_at: string
-  steps: TaskPlanStep[]
+  started_at?: string
+  current_experiment?: string
+  experiments: TaskPlanExperiment[]
+  knowledge?: string[]
+  research?: {
+    references?: Array<{
+      id: string; title: string; authors?: string; year?: string
+      venue?: string; url?: string; summary?: string; relevance?: string
+    }>
+    notes?: string[]
+    survey?: string
+  }
+  result?: {
+    summary?: string
+    output_path?: string
+    output_type?: string
+    sections?: Array<{ title: string; content: string }>
+  }
 }
 
-export interface TaskPlanResults {
-  metrics?: Record<string, number | string>
-  findings?: string
-  artifacts?: string[]
-}
-
-export interface TaskPlanStep {
-  number: number
+export interface TaskPlanExperiment {
+  id: string
   title: string
-  status: TaskStatus
-  phases?: TaskPlanPhase[]
-  results?: TaskPlanResults
-}
-
-export interface TaskPlanPhase {
-  label: string
-  status: PhaseStatus
-  detail?: string
+  status: string
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: {
+    metrics?: Record<string, unknown>
+    findings?: string
+    artifacts?: string[]
+  }
+  conclusion?: string
+  next?: string
+  commit?: string
+  progress?: {
+    epoch?: number
+    total_epochs?: number
+    current_metric?: string
+    current_value?: number | string
+  }
+  parent?: string
 }
 
 /* ── New Project creation ────────────────────────── */
@@ -99,7 +167,6 @@ export type OutputGoal = 'paper' | 'report' | 'analysis' | 'code'
 
 export interface NewProjectInput {
   description: string
-  dataPath: string
   title?: string
   domain?: string
   references?: string
@@ -119,7 +186,53 @@ export interface WsMessage {
 
 export interface WsResponse {
   type: 'response' | 'progress' | 'tool_call' | 'error'
+  session_id?: string
   content: string
   media?: string[]
   metadata?: Record<string, unknown>
+}
+
+export type SkillPluginScope = 'global' | 'project'
+export type SkillPluginTargetType = 'group' | 'skill'
+
+export interface SkillPluginToggleState {
+  global: boolean
+  project: boolean | null
+  effective: boolean
+  global_explicit?: boolean
+  project_explicit?: boolean
+}
+
+export interface SkillPluginGroup {
+  id: string
+  name: string
+  skill_ids: string[]
+  enabled: SkillPluginToggleState
+  customized?: {
+    global: boolean
+    project: boolean
+  }
+}
+
+export interface SkillPluginSkill {
+  id: string
+  name: string
+  path: string
+  group_ids: string[]
+  enabled: SkillPluginToggleState
+}
+
+export interface SkillPlugin {
+  id: string
+  name: string
+  version: string
+  description: string
+  install_path: string
+  source: {
+    type: string
+    path: string
+  }
+  enabled: SkillPluginToggleState
+  groups: SkillPluginGroup[]
+  skills: SkillPluginSkill[]
 }

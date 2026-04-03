@@ -1,9 +1,12 @@
 import type { WsMessage, WsResponse } from '@/types'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 type MessageHandler = (msg: WsResponse) => void
 type StatusHandler = (connected: boolean) => void
 
-const WS_URL = import.meta.env.VITE_WS_URL ?? 'ws://localhost:18790/ws'
+function getWsUrl(): string {
+  return useSettingsStore.getState().wsUrl
+}
 
 const MAX_RECONNECT_DELAY = 30_000
 const INITIAL_RECONNECT_DELAY = 1_000
@@ -55,7 +58,7 @@ class WebSocketClient {
 
   private _connect(): void {
     try {
-      this.ws = new WebSocket(WS_URL)
+      this.ws = new WebSocket(getWsUrl())
     } catch {
       this._scheduleReconnect()
       return

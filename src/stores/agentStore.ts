@@ -3,27 +3,66 @@ import type { LogEntry, WsResponse } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 
 interface AgentState {
-  logs: LogEntry[]
+  logsByProject: Record<string, LogEntry[]>
   isStreaming: boolean
   connected: boolean
 
-  addLog: (entry: LogEntry) => void
+  addLog: (projectId: string, entry: LogEntry) => void
+  hydrateLogs: (projectId: string, entries: LogEntry[]) => void
   handleWsMessage: (msg: WsResponse) => void
   setConnected: (v: boolean) => void
-  clearLogs: () => void
+  clearLogs: (projectId: string) => void
+  getProjectLogs: (projectId: string | null) => LogEntry[]
 }
 
 let logIdCounter = 0
 
-export const useAgentStore = create<AgentState>((set) => ({
-  logs: [],
+const PLAN_POLL_INTERVAL = 3000
+const _pollTimers: Record<string, ReturnType<typeof setInterval>> = {}
+
+function ensurePlanPolling(sessionId: string) {
+  if (_pollTimers[sessionId]) return
+  _pollTimers[sessionId] = setInterval(() => {
+    useProjectStore.getState().refreshPlan(sessionId)
+  }, PLAN_POLL_INTERVAL)
+}
+
+function stopPlanPolling(sessionId: string) {
+  const timer = _pollTimers[sessionId]
+  if (timer) {
+    clearInterval(timer)
+    delete _pollTimers[sessionId]
+  }
+}
+
+export const useAgentStore = create<AgentState>((set, get) => ({
+  logsByProject: {},
   isStreaming: false,
   connected: false,
 
-  addLog: (entry) =>
-    set((state) => ({ logs: [...state.logs, entry] })),
+  addLog: (projectId, entry) =>
+    set((state) => ({
+      logsByProject: {
+        ...state.logsByProject,
+        [projectId]: [...(state.logsByProject[projectId] ?? []), entry],
+      },
+    })),
+
+  hydrateLogs: (projectId, entries) =>
+    set((state) => {
+      if (entries.length === 0 || (state.logsByProject[projectId]?.length ?? 0) > 0) {
+        return state
+      }
+      return {
+        logsByProject: {
+          ...state.logsByProject,
+          [projectId]: entries,
+        },
+      }
+    }),
 
   handleWsMessage: (msg) => {
+    const sessionId = msg.session_id ?? '_unknown'
     const entry: LogEntry = {
       id: `log-${++logIdCounter}`,
       timestamp: new Date().toISOString(),
@@ -33,17 +72,32 @@ export const useAgentStore = create<AgentState>((set) => ({
     }
 
     set((state) => ({
-      logs: [...state.logs, entry],
+      logsByProject: {
+        ...state.logsByProject,
+        [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
+      },
       isStreaming: msg.type === 'progress',
     }))
 
-    // After each final response, refresh the plan from backend
-    if (msg.type === 'response') {
-      useProjectStore.getState().refreshPlan()
+    if (msg.type === 'progress') {
+      ensurePlanPolling(sessionId)
+    } else if (msg.type === 'response') {
+      stopPlanPolling(sessionId)
+      useProjectStore.getState().refreshPlan(sessionId)
     }
   },
 
   setConnected: (connected) => set({ connected }),
 
-  clearLogs: () => set({ logs: [], isStreaming: false }),
+  clearLogs: (projectId) =>
+    set((state) => {
+      const updated = { ...state.logsByProject }
+      delete updated[projectId]
+      return { logsByProject: updated, isStreaming: false }
+    }),
+
+  getProjectLogs: (projectId) => {
+    if (!projectId) return []
+    return get().logsByProject[projectId] ?? []
+  },
 }))

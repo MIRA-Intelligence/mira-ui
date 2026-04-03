@@ -1,66 +1,107 @@
 import { useProjectStore } from '@/stores/projectStore'
-import { cn } from '@/lib/utils'
+import { useAgentStore } from '@/stores/agentStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import type { PipelineStage } from '@/types'
+import { t } from '@/i18n'
 
-const STAGES: { key: PipelineStage; label: string }[] = [
-  { key: 'ideation', label: 'Ideation' },
-  { key: 'planning', label: 'Planning' },
-  { key: 'experiment', label: 'Experiment' },
-  { key: 'writing', label: 'Writing' },
+const STAGES: { key: PipelineStage; icon: string }[] = [
+  { key: 'research', icon: '📚' },
+  { key: 'experiment', icon: '🔬' },
+  { key: 'result', icon: '📝' },
 ]
 
-const stageIndex = (s: PipelineStage) => STAGES.findIndex((x) => x.key === s)
+function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
+  if (stage === 'research') {
+    const count = task.research.references.length
+    return count > 0 ? `${count}` : null
+  }
+  if (stage === 'experiment') {
+    const c = task.experiments.filter((e) => e.status === 'completed' || e.status === 'skipped').length
+    const t = task.experiments.length
+    return t > 0 ? `${c}/${t}` : null
+  }
+  if (stage === 'result') {
+    const has = task.result?.summary || (task.result?.sections?.length ?? 0) > 0
+    return has ? '✓' : null
+  }
+  return null
+}
 
 export function PipelineProgress() {
-  const { pipelineStage } = useProjectStore()
-  const activeIdx = stageIndex(pipelineStage)
+  const { tasks, selectedTaskId, activeStage, setActiveStage } = useProjectStore()
+  const isStreaming = useAgentStore((s) => s.isStreaming)
+  const lang = useSettingsStore((s) => s.language)
+  const task = tasks.find((t) => t.id === selectedTaskId)
+
+  if (!task) {
+    return (
+      <div className="flex items-center justify-center py-2.5 px-8 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+        <span className="text-xs text-[var(--color-text-muted)]">{t('noProjectSelected', lang)}</span>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex items-center justify-center py-3 px-8 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
-      {STAGES.map((stage, i) => {
-        const isActive = i === activeIdx
-        const isPast = i < activeIdx
+    <div className="flex items-center gap-3 py-2 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+      {/* Project title */}
+      <div className="min-w-0 shrink-0 max-w-[200px]">
+        <h1 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+          {task.title || task.label}
+        </h1>
+      </div>
 
-        return (
-          <div key={stage.key} className="flex items-center">
-            {/* Connector line before this node (skip first) */}
-            {i > 0 && (
-              <div
-                className={cn(
-                  'w-20 h-0.5 rounded-full',
-                  isPast || isActive
-                    ? 'bg-[var(--color-accent)]'
-                    : 'bg-[var(--color-text-muted)]/25',
-                )}
-              />
-            )}
+      <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 
-            {/* Node + label stacked vertically */}
-            <div className="flex flex-col items-center gap-1 px-1">
-              <div
-                className={cn(
-                  'rounded-full transition-all',
-                  isActive && 'w-4 h-4 bg-[var(--color-accent)] ring-2 ring-[var(--color-accent)]/30',
-                  isPast && 'w-3 h-3 bg-[var(--color-accent)]',
-                  !isActive && !isPast && 'w-3 h-3 bg-[var(--color-text-muted)]/30 border-2 border-[var(--color-text-muted)]/50',
-                )}
-              />
-              <span
-                className={cn(
-                  'text-xs whitespace-nowrap',
+      {/* Stage tabs */}
+      <div className="flex items-center gap-0.5 flex-1 min-w-0">
+        {STAGES.map((stage, idx) => {
+          const isActive = activeStage === stage.key
+          const badge = stageBadge(task, stage.key)
+
+          return (
+            <div key={stage.key} className="flex items-center">
+              {idx > 0 && (
+                <div className="w-6 h-px bg-[var(--color-border)] mx-0.5" />
+              )}
+              <button
+                onClick={() => setActiveStage(stage.key)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all select-none ${
                   isActive
-                    ? 'text-[var(--color-text-primary)] font-semibold'
-                    : isPast
-                      ? 'text-[var(--color-text-secondary)]'
-                      : 'text-[var(--color-text-muted)]',
-                )}
+                    ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30'
+                    : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'
+                }`}
               >
-                {stage.label}
-              </span>
+                <span className="text-[13px]">{stage.icon}</span>
+                <span>{t(stage.key === 'research' ? 'research' : stage.key === 'experiment' ? 'experiment' : 'result', lang)}</span>
+                {badge && (
+                  <span className={`text-[10px] font-mono px-1 py-px rounded ${
+                    isActive
+                      ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                      : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]'
+                  }`}>
+                    {badge}
+                  </span>
+                )}
+              </button>
             </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
+
+      {/* Streaming indicator */}
+      {isStreaming && (
+        <div className="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-full bg-[var(--color-accent)]/8">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
+          <span className="text-[10px] text-[var(--color-accent)] font-medium">{t('working', lang)}</span>
+        </div>
+      )}
+
+      {/* Core question (if short) */}
+      {task.coreQuestion && (
+        <p className="text-[11px] text-[var(--color-text-muted)] truncate max-w-[300px] shrink-0">
+          {task.coreQuestion}
+        </p>
+      )}
     </div>
   )
 }

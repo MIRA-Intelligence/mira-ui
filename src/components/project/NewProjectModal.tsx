@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
+import { uploadProjectFiles } from '@/services/api'
 import { cn } from '@/lib/utils'
 import type { OutputGoal, NewProjectInput } from '@/types'
+import { t } from '@/i18n'
 
 const OUTPUT_GOALS: { value: OutputGoal; label: string; icon: string }[] = [
   { value: 'paper', label: 'Paper', icon: '📄' },
@@ -25,7 +27,24 @@ const DOMAIN_SUGGESTIONS = [
   'Robotics',
 ]
 
-function buildAgentMessage(input: NewProjectInput, workspacePath: string, projectId: string): string {
+function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
+  const next = [...existing]
+  const incomingList = Array.from(incoming)
+  for (const file of incomingList) {
+    const duplicated = next.some(
+      (it) => it.name === file.name && it.size === file.size && it.lastModified === file.lastModified,
+    )
+    if (!duplicated) next.push(file)
+  }
+  return next
+}
+
+function buildAgentMessage(
+  input: NewProjectInput,
+  workspacePath: string,
+  projectId: string,
+  uploadedPaths: string[],
+): string {
   const lines = [
     `New research project initialized.`,
     ``,
@@ -36,8 +55,12 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
     input.description,
   ]
 
-  if (input.dataPath) {
-    lines.push('', `## Data Source`, `Path: ${input.dataPath}`)
+  if (uploadedPaths.length > 0) {
+    lines.push('', `## Uploaded Data Files`)
+    for (const path of uploadedPaths) {
+      lines.push(`- ${path}`)
+    }
+    lines.push('', `These files are saved under ${workspacePath}/${projectId}/data.`)
   }
   if (input.domain) {
     lines.push('', `**Domain**: ${input.domain}`)
@@ -51,7 +74,7 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
   lines.push('', `**Output Goal**: ${input.outputGoal}`)
   lines.push(
     '',
-    `Please begin by reading the task_plan skill, then create a task_plan.json and start the ideation phase.`,
+    `Please begin by creating a task_plan.json, then start with the **Research** phase: search for relevant literature, add references and notes to the research section of task_plan.json. After completing the research survey, STOP and report your findings.`,
   )
 
   return lines.join('\n')
@@ -59,11 +82,15 @@ function buildAgentMessage(input: NewProjectInput, workspacePath: string, projec
 
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
-  const { createProject } = useProjectStore()
-  const { workspacePath } = useSettingsStore()
+  const { createProject, deleteTask, projectsLoaded } = useProjectStore()
+  const connected = useAgentStore((s) => s.connected)
+  const { workspacePath, language: lang } = useSettingsStore()
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [description, setDescription] = useState('')
-  const [dataPath, setDataPath] = useState('')
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [creating, setCreating] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const [title, setTitle] = useState('')
   const [domain, setDomain] = useState('')
   const [references, setReferences] = useState('')
@@ -73,12 +100,35 @@ export function NewProjectModal() {
 
   if (!newProjectOpen) return null
 
-  const canCreate = description.trim().length > 0
+  const canCreate = description.trim().length > 0 && connected && projectsLoaded && !creating
 
-  const handleCreate = () => {
+  const handleFilesAdded = (files: FileList | File[]) => {
+    setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
+    setUploadError('')
+  }
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleBrowse = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer.files?.length) {
+      handleFilesAdded(e.dataTransfer.files)
+    }
+  }
+
+  const handleCreate = async () => {
+    if (!canCreate) return
+    setCreating(true)
+    setUploadError('')
+
     const input: NewProjectInput = {
       description: description.trim(),
-      dataPath: dataPath.trim(),
       title: title.trim() || undefined,
       domain: domain.trim() || undefined,
       references: references.trim() || undefined,
@@ -87,9 +137,20 @@ export function NewProjectModal() {
     }
 
     const projectId = createProject(input)
+    let uploadedPaths: string[] = []
 
-    const agentMsg = buildAgentMessage(input, workspacePath, projectId)
-    useAgentStore.getState().addLog({
+    try {
+      const uploaded = await uploadProjectFiles(projectId, selectedFiles)
+      uploadedPaths = uploaded.map((file) => file.path)
+    } catch (err) {
+      await deleteTask(projectId, false)
+      setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
+      setCreating(false)
+      return
+    }
+
+    const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths)
+    useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content: agentMsg,
@@ -105,13 +166,15 @@ export function NewProjectModal() {
 
     // Reset form
     setDescription('')
-    setDataPath('')
+    setSelectedFiles([])
     setTitle('')
     setDomain('')
     setReferences('')
     setComputeBudget('')
     setOutputGoal('paper')
     setShowAdvanced(false)
+    setCreating(false)
+    setUploadError('')
     closeNewProject()
   }
 
@@ -127,7 +190,7 @@ export function NewProjectModal() {
       <div className="w-full max-w-[560px] max-h-[85vh] bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
-          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">New Research Project</h2>
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('newProject', lang)}</h2>
           <button
             onClick={closeNewProject}
             className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
@@ -144,13 +207,13 @@ export function NewProjectModal() {
           {/* Research Description — required */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[var(--color-text-secondary)] flex items-center gap-1">
-              Research Description
+              {t('researchDescription', lang)}
               <span className="text-red-400">*</span>
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe your research goal, question, or hypothesis..."
+              placeholder={t('descPlaceholder', lang)}
               rows={4}
               className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed"
             />
@@ -158,27 +221,61 @@ export function NewProjectModal() {
 
           {/* Data Source */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-              Data Source
-            </label>
-            <div className="flex gap-2">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('dataSourceFiles', lang)}</label>
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={handleDrop}
+              className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
+            >
               <input
-                value={dataPath}
-                onChange={(e) => setDataPath(e.target.value)}
-                placeholder="/path/to/data or drag files here..."
-                className="flex-1 bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleFilesAdded(e.target.files)
+                  e.currentTarget.value = ''
+                }}
               />
-              <button className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0">
-                Browse
-              </button>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-[var(--color-text-muted)]">
+                  {selectedFiles.length > 0
+                    ? t('filesSelected', lang, { count: selectedFiles.length })
+                    : t('dragFilesHint', lang)}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleBrowse}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                >
+                  {t('browse', lang)}
+                </button>
+              </div>
+              {selectedFiles.length > 0 && (
+                <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
+                  {selectedFiles.map((file, idx) => (
+                    <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                      <span className="truncate">{file.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeSelectedFile(idx)}
+                        className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                      >
+                        {t('remove', lang)}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+            {uploadError && (
+              <p className="text-[11px] text-[var(--color-error)]">{uploadError}</p>
+            )}
           </div>
 
           {/* Output Goal */}
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-              Output Goal
-            </label>
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('outputGoal', lang)}</label>
             <div className="flex gap-2">
               {OUTPUT_GOALS.map((g) => (
                 <button
@@ -192,7 +289,7 @@ export function NewProjectModal() {
                   )}
                 >
                   <span className="block text-base mb-0.5">{g.icon}</span>
-                  {g.label}
+                  {t(g.value, lang)}
                 </button>
               ))}
             </div>
@@ -210,7 +307,7 @@ export function NewProjectModal() {
             >
               <polyline points="9 18 15 12 9 6" />
             </svg>
-            Advanced Options
+            {t('advancedOptions', lang)}
           </button>
 
           {/* Advanced section */}
@@ -221,22 +318,20 @@ export function NewProjectModal() {
             {/* Project Title */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                Project Title
-                <span className="ml-1 text-[var(--color-text-muted)] font-normal">— leave empty for AI to generate</span>
+                {t('projectTitle', lang)}
+                <span className="ml-1 text-[var(--color-text-muted)] font-normal">{t('titleHint', lang)}</span>
               </label>
               <input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Prefix-Ratio GRPO for High-Staleness Rollout Replay"
+                placeholder={t('titlePlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
 
             {/* Research Domain */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                Research Domain
-              </label>
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('researchDomain', lang)}</label>
               <div className="flex flex-wrap gap-1.5">
                 {DOMAIN_SUGGESTIONS.map((d) => (
                   <button
@@ -256,20 +351,18 @@ export function NewProjectModal() {
               <input
                 value={domain}
                 onChange={(e) => setDomain(e.target.value)}
-                placeholder="Or type a custom domain..."
+                placeholder={t('domainPlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
 
             {/* References */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                References
-              </label>
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('referencesLabel', lang)}</label>
               <textarea
                 value={references}
                 onChange={(e) => setReferences(e.target.value)}
-                placeholder="Paper DOIs, file paths, or URLs (one per line)..."
+                placeholder={t('referencesPlaceholder', lang)}
                 rows={2}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] resize-none"
               />
@@ -277,13 +370,11 @@ export function NewProjectModal() {
 
             {/* Compute Budget */}
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
-                Compute Budget
-              </label>
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('computeBudgetLabel', lang)}</label>
               <input
                 value={computeBudget}
                 onChange={(e) => setComputeBudget(e.target.value)}
-                placeholder="e.g. 100 GPU hours, $50 max..."
+                placeholder={t('computeBudgetPlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
@@ -296,7 +387,7 @@ export function NewProjectModal() {
             onClick={closeNewProject}
             className="px-4 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           >
-            Cancel
+            {t('cancel', lang)}
           </button>
           <button
             onClick={handleCreate}
@@ -308,9 +399,14 @@ export function NewProjectModal() {
                 : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed',
             )}
           >
-            Create Project
+            {creating ? t('creating', lang) : t('createProject', lang)}
           </button>
         </div>
+        {!connected && (
+          <p className="text-[11px] text-[var(--color-error)] text-center mt-2">
+            {t('agentDisconnectedCreateProject', lang)}
+          </p>
+        )}
       </div>
     </div>
   )

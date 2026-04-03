@@ -2,13 +2,18 @@ import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { PipelineProgress } from '@/components/pipeline/PipelineProgress'
 import { ProjectQueue } from '@/components/queue/ProjectQueue'
+import { ExperimentTimeline } from '@/components/experiment/ExperimentTimeline'
 import { TaskDetail } from '@/components/task/TaskDetail'
 import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
+import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { useUiStore } from '@/stores/uiStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { cn } from '@/lib/utils'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { t } from '@/i18n'
 
 function ChevronLeft({ className }: { className?: string }) {
   return (
@@ -30,6 +35,9 @@ function ChevronRight({ className }: { className?: string }) {
 
 export function AppLayout() {
   const { sidebarCollapsed, toggleSidebar, agentPanelCollapsed, toggleAgentPanel } = useUiStore()
+  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const activeStage = useProjectStore((s) => s.activeStage)
+  const lang = useSettingsStore((s) => s.language)
   useWebSocket()
 
   return (
@@ -42,10 +50,10 @@ export function AppLayout() {
         <div
           className={cn(
             'shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden',
-            sidebarCollapsed ? 'w-0' : 'w-[160px]',
+            sidebarCollapsed ? 'w-0' : 'w-[140px]',
           )}
         >
-          <div className="w-[160px] h-full">
+          <div className="w-[140px] h-full">
             <ProjectQueue />
           </div>
         </div>
@@ -54,12 +62,19 @@ export function AppLayout() {
         <button
           onClick={toggleSidebar}
           className="w-5 shrink-0 flex items-center justify-center border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-          aria-label="Toggle sidebar"
+          aria-label={t('toggleSidebar', lang)}
         >
           {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
         </button>
 
-        {/* Center: Task Detail — always flex-1, takes remaining space */}
+        {/* Experiment timeline — visible in the experiment stage */}
+        {selectedTaskId && activeStage === 'experiment' && (
+          <div className="w-[180px] shrink-0 border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+            <ExperimentTimeline />
+          </div>
+        )}
+
+        {/* Center: Experiment Detail / Knowledge */}
         <div className="flex-1 overflow-hidden min-w-0">
           <TaskDetail />
         </div>
@@ -68,12 +83,12 @@ export function AppLayout() {
         <button
           onClick={toggleAgentPanel}
           className="w-5 shrink-0 flex items-center justify-center border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-          aria-label="Toggle agent panel"
+          aria-label={t('toggleAgentPanel', lang)}
         >
           {agentPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
         </button>
 
-        {/* Right: Agent Panel — collapsible with concrete width transition */}
+        {/* Right: Agent Panel — collapsible */}
         <div
           className={cn(
             'shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden',
@@ -88,6 +103,7 @@ export function AppLayout() {
 
       <StatusBar />
       <SettingsModal />
+      <SkillsPluginsModal />
       <NewProjectModal />
     </div>
   )

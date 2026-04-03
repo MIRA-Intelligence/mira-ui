@@ -17,6 +17,7 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: 'dist-electron',
+      emptyOutDir: false,
       rollupOptions: {
         input: resolve(__dirname, 'electron/preload.ts'),
       },
