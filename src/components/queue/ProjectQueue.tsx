@@ -1,18 +1,80 @@
+import { useEffect, useRef } from 'react'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { wsClient } from '@/services/websocket'
 import { QueueItem } from './QueueItem'
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
 
+const MODE_SWITCH_POLL_INTERVAL_MS = 1000
+const MODE_SWITCH_POLL_TIMEOUT_MS = 20000
+
 export function ProjectQueue() {
-  const { tasks, selectedTaskId, selectTask, mode, setMode, renameTask, deleteTask, duplicateTask } = useProjectStore()
+  const {
+    tasks,
+    selectedTaskId,
+    selectTask,
+    mode,
+    setMode,
+    renameTask,
+    deleteTask,
+    duplicateTask,
+    refreshPlan,
+  } = useProjectStore()
   const lang = useSettingsStore((s) => s.language)
+  const modePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const modePollDeadlineRef = useRef<number>(0)
 
   const handleDelete = (id: string, deleteFiles: boolean) => {
     deleteTask(id, deleteFiles)
   }
   const { openNewProject } = useUiStore()
+
+  const stopModePoll = () => {
+    if (!modePollRef.current) return
+    clearInterval(modePollRef.current)
+    modePollRef.current = null
+  }
+
+  const startModeSyncPolling = (sessionId: string) => {
+    stopModePoll()
+    modePollDeadlineRef.current = Date.now() + MODE_SWITCH_POLL_TIMEOUT_MS
+
+    const tick = async () => {
+      await useProjectStore.getState().refreshPlan(sessionId)
+      const task = useProjectStore.getState().tasks.find((t) => t.id === sessionId)
+      const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
+      const timedOut = Date.now() >= modePollDeadlineRef.current
+      if (!hasRunningExperiment || timedOut) {
+        stopModePoll()
+      }
+    }
+
+    void tick()
+    modePollRef.current = setInterval(() => {
+      void tick()
+    }, MODE_SWITCH_POLL_INTERVAL_MS)
+  }
+
+  const handleModeSwitch = (nextMode: 'manual' | 'auto') => {
+    if (mode === nextMode) return
+    setMode(nextMode)
+    if (!selectedTaskId) return
+
+    wsClient.send({
+      type: 'set_mode',
+      content: '',
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+      mode: nextMode,
+    })
+
+    void refreshPlan(selectedTaskId)
+    startModeSyncPolling(selectedTaskId)
+  }
+
+  useEffect(() => () => stopModePoll(), [])
 
   return (
     <aside className="flex flex-col h-full border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -53,7 +115,7 @@ export function ProjectQueue() {
         {(['manual', 'auto'] as const).map((m) => (
           <button
             key={m}
-            onClick={() => setMode(m)}
+            onClick={() => handleModeSwitch(m)}
             className={cn(
               'px-3 py-1 text-xs rounded-full transition-colors capitalize',
               mode === m

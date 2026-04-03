@@ -177,7 +177,7 @@ export interface NewProjectInput {
 /* ── WebSocket protocol ─────────────────────────── */
 
 export interface WsMessage {
-  type: 'message' | 'command'
+  type: 'message' | 'command' | 'set_mode'
   content: string
   session_id: string
   user_id?: string
