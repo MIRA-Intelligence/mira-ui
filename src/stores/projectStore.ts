@@ -23,13 +23,12 @@ interface ProjectState {
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
   duplicateTask: (id: string) => void
-  createProject: (input: NewProjectInput) => string
+  createProject: (input: NewProjectInput) => Promise<string>
   loadProjects: () => Promise<void>
   nextProjectId: () => string
 }
 
 let dupCounter = 0
-let projectCounter = 0
 
 const PRJ_RE = /^PRJ-(\d+)$/
 const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
@@ -56,11 +55,20 @@ function normalizeExperimentStatus(value: unknown): ExperimentStatus {
   return 'pending'
 }
 
-function syncCounterFromTasks(tasks: ProjectTask[]) {
-  for (const t of tasks) {
-    const m = PRJ_RE.exec(t.id)
-    if (m) projectCounter = Math.max(projectCounter, parseInt(m[1], 10))
+function collectProjectNumbers(ids: Iterable<string>): Set<number> {
+  const numbers = new Set<number>()
+  for (const id of ids) {
+    const match = PRJ_RE.exec(id)
+    if (!match) continue
+    numbers.add(parseInt(match[1], 10))
   }
+  return numbers
+}
+
+function findFirstMissingProjectNumber(used: Set<number>): number {
+  let n = 1
+  while (used.has(n)) n += 1
+  return n
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -245,13 +253,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   nextProjectId: () => {
-    syncCounterFromTasks(get().tasks)
-    return `PRJ-${String(projectCounter + 1).padStart(4, '0')}`
+    const used = collectProjectNumbers(get().tasks.map((t) => t.id))
+    return `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
   },
 
-  createProject: (input) => {
-    syncCounterFromTasks(get().tasks)
-    const id = `PRJ-${String(++projectCounter).padStart(4, '0')}`
+  createProject: async (input) => {
+    const remotes = await fetchProjects()
+    const used = collectProjectNumbers([
+      ...remotes.map((r) => r.id),
+      ...get().tasks.map((t) => t.id),
+    ])
+    const id = `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
     const task: ProjectTask = {
       id,
       label: id,
@@ -284,9 +296,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     for (const r of remotes) {
       if (SKIP_DIRS.has(r.id)) continue
-      const m = PRJ_RE.exec(r.id)
-      if (m) projectCounter = Math.max(projectCounter, parseInt(m[1], 10))
-
       if (existingIds.has(r.id)) continue
       newTasks.push({
         id: r.id,
@@ -301,9 +310,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         startedAt: r.started_at || new Date().toISOString(),
       })
     }
-
-    // Also sync counter from existing in-memory tasks
-    syncCounterFromTasks(tasks)
 
     const merged = newTasks.length > 0 ? [...tasks, ...newTasks] : tasks
     set({ tasks: merged, stats: computeStats(merged), projectsLoaded: true })

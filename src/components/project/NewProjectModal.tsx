@@ -44,6 +44,7 @@ function buildAgentMessage(
   workspacePath: string,
   projectId: string,
   uploadedPaths: string[],
+  runMode: 'manual' | 'auto',
 ): string {
   const lines = [
     `New research project initialized.`,
@@ -72,9 +73,12 @@ function buildAgentMessage(
     lines.push('', `**Compute Budget**: ${input.computeBudget}`)
   }
   lines.push('', `**Output Goal**: ${input.outputGoal}`)
+  const modeInstruction = runMode === 'manual'
+    ? 'After completing the research survey, STOP and report your findings.'
+    : 'After completing the research survey, continue automatically into the next pending experiment.'
   lines.push(
     '',
-    `Please begin by creating a task_plan.json, then start with the **Research** phase: search for relevant literature, add references and notes to the research section of task_plan.json. After completing the research survey, STOP and report your findings.`,
+    `Please begin by creating a task_plan.json, then start with the **Research** phase: search for relevant literature, add references and notes to the research section of task_plan.json. ${modeInstruction}`,
   )
 
   return lines.join('\n')
@@ -83,6 +87,7 @@ function buildAgentMessage(
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
   const { createProject, deleteTask, projectsLoaded } = useProjectStore()
+  const mode = useProjectStore((s) => s.mode)
   const connected = useAgentStore((s) => s.connected)
   const { workspacePath, language: lang } = useSettingsStore()
 
@@ -136,7 +141,7 @@ export function NewProjectModal() {
       outputGoal,
     }
 
-    const projectId = createProject(input)
+    const projectId = await createProject(input)
     let uploadedPaths: string[] = []
 
     try {
@@ -149,7 +154,7 @@ export function NewProjectModal() {
       return
     }
 
-    const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths)
+    const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths, mode)
     useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -162,6 +167,7 @@ export function NewProjectModal() {
       content: agentMsg,
       session_id: projectId,
       user_id: 'ui_user',
+      mode,
     })
 
     // Reset form

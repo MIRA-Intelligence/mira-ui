@@ -182,6 +182,7 @@ export interface WsMessage {
   session_id: string
   user_id?: string
   media?: string[]
+  mode?: 'manual' | 'auto'
 }
 
 export interface WsResponse {

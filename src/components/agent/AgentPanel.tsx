@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useAutoContinue } from '@/hooks/useAutoContinue'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
@@ -10,7 +9,6 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 
-const AUTO_DELAY_MS = 4000
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
@@ -20,7 +18,8 @@ export function AgentPanel() {
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const lang = useSettingsStore((s) => s.language)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
-  const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
+  const mode = useProjectStore((s) => s.mode)
+  const isAuto = mode === 'auto'
 
   const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
 
@@ -85,8 +84,6 @@ export function AgentPanel() {
     const text = input.trim()
     if (!text || !selectedTaskId) return
 
-    cancelAuto()
-
     useAgentStore.getState().addLog(selectedTaskId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -100,13 +97,13 @@ export function AgentPanel() {
       content: text,
       session_id: selectedTaskId,
       user_id: 'ui_user',
+      mode,
     })
     setInput('')
   }
 
   const handleResend = (content: string) => {
     if (!selectedTaskId) return
-    cancelAuto()
 
     useAgentStore.getState().addLog(selectedTaskId, {
       id: `user-${Date.now()}`,
@@ -121,13 +118,13 @@ export function AgentPanel() {
       content,
       session_id: selectedTaskId,
       user_id: 'ui_user',
+      mode,
     })
   }
 
   const handleStop = () => {
     if (!selectedTaskId) return
 
-    cancelAuto()
     wsClient.send({
       type: 'message',
       content: '/stop',
@@ -135,10 +132,6 @@ export function AgentPanel() {
       user_id: 'ui_user',
     })
   }
-
-  const countdownProgress = countdown !== null
-    ? Math.max(0, countdown / AUTO_DELAY_MS)
-    : null
 
   return (
     <div className="flex flex-col h-full">
@@ -269,33 +262,6 @@ export function AgentPanel() {
           </div>
         )}
       </div>
-
-      {/* Auto-continue countdown */}
-      {countdownProgress !== null && (
-        <div className="px-3 shrink-0">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-success)]/8 border border-[var(--color-success)]/20">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[var(--color-success)] font-medium">
-                  {t('autoContinuingIn', lang, { seconds: Math.ceil((countdown ?? 0) / 1000) })}
-                </span>
-                <button
-                  onClick={cancelAuto}
-                  className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors font-medium"
-                >
-                  {t('cancel', lang)}
-                </button>
-              </div>
-              <div className="h-1 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--color-success)] rounded-full transition-all duration-75 ease-linear"
-                  style={{ width: `${(1 - countdownProgress) * 100}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Input */}
       <div className="p-3 border-t border-[var(--color-border)] shrink-0">
