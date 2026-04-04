@@ -4,18 +4,30 @@ import { t } from '@/i18n'
 
 export function StatusBar() {
   const { stats } = useProjectStore()
-  const lang = useSettingsStore((s) => s.language)
+  const { language: lang, engineStatus, engineMessage } = useSettingsStore((s) => ({
+    language: s.language,
+    engineStatus: s.engineStatus,
+    engineMessage: s.engineMessage,
+  }))
+  const showEngineWarning = engineStatus === 'incompatible' || engineStatus === 'unreachable'
 
   return (
-    <footer className="flex items-center justify-between px-6 py-2.5 border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">
-      <div className="flex items-center gap-6">
-        <StatBlock value={stats.experiments} label={t('experiments', lang)} />
-        <StatBlock value={stats.completed} label={t('completed', lang)} />
-      </div>
+    <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">
+      {showEngineWarning && (
+        <div className="px-6 py-2 text-xs text-amber-300 bg-amber-950/40 border-b border-amber-500/30">
+          {engineMessage || 'Local engine is not reachable or incompatible. Open settings and update your engine.'}
+        </div>
+      )}
+      <div className="flex items-center justify-between px-6 py-2.5">
+        <div className="flex items-center gap-6">
+          <StatBlock value={stats.experiments} label={t('experiments', lang)} />
+          <StatBlock value={stats.completed} label={t('completed', lang)} />
+        </div>
 
-      <div className="flex items-center gap-6">
-        <StatBlock value={stats.running} label={t('running', lang)} />
-        <StatBlock value={stats.failed} label={t('failed', lang)} />
+        <div className="flex items-center gap-6">
+          <StatBlock value={stats.running} label={t('running', lang)} />
+          <StatBlock value={stats.failed} label={t('failed', lang)} />
+        </div>
       </div>
     </footer>
   )

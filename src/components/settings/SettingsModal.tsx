@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings, language: lang } = store
+  const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable'
 
   const [draft, setDraft] = useState({
     workspacePath: store.workspacePath,
@@ -184,6 +185,11 @@ export function SettingsModal() {
               onChange={(e) => setDraft({ ...draft, wsUrl: e.target.value })}
               className={inputClass}
             />
+            {showEngineWarning && (
+              <p className="text-[11px] text-amber-300 mt-3 leading-relaxed">
+                {store.engineMessage || 'Local engine is unavailable or incompatible. Upgrade and restart medpilot-agent.'}
+              </p>
+            )}
           </Section>
         </div>
 
