@@ -2,7 +2,8 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
-import type { PipelineStage } from '@/types'
+import { cn } from '@/lib/utils'
+import type { AgentProfile, PipelineStage } from '@/types'
 import { t } from '@/i18n'
 
 const STAGES: { key: PipelineStage; icon: string }[] = [
@@ -10,6 +11,18 @@ const STAGES: { key: PipelineStage; icon: string }[] = [
   { key: 'experiment', icon: '🔬' },
   { key: 'result', icon: '📝' },
 ]
+
+const AGENT_PROFILES: { key: AgentProfile; labelKey: 'engineerMode' | 'balancedMode' | 'researchMode' }[] = [
+  { key: 'engineer', labelKey: 'engineerMode' },
+  { key: 'default', labelKey: 'balancedMode' },
+  { key: 'research', labelKey: 'researchMode' },
+]
+
+const AGENT_PROFILE_OFFSET: Record<AgentProfile, number> = {
+  engineer: 0,
+  default: 100,
+  research: 200,
+}
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
   if (stage === 'research') {
@@ -29,12 +42,64 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
 }
 
 export function PipelineProgress() {
-  const { tasks, selectedTaskId, activeStage, setActiveStage } = useProjectStore()
+  const {
+    tasks,
+    selectedTaskId,
+    activeStage,
+    mode,
+    agentProfile,
+    setActiveStage,
+    setAgentProfile,
+  } = useProjectStore()
   const isStreaming = useAgentStore((s) => s.isStreaming)
   const lang = useSettingsStore((s) => s.language)
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const task = tasks.find((t) => t.id === selectedTaskId)
+  const canSwitchAgentProfile = mode === 'manual'
+  const agentProfileSlider = (
+    <div className="min-w-[210px] shrink-0">
+      <div
+        className={cn(
+          'relative w-full rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1 transition-opacity',
+          !canSwitchAgentProfile && 'opacity-60',
+        )}
+        title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
+      >
+        <span
+          aria-hidden
+          className="pointer-events-none absolute left-1 top-1 bottom-1 rounded-full bg-[var(--color-accent)]/25 transition-transform duration-200 ease-out"
+          style={{
+            width: 'calc((100% - 0.5rem) / 3)',
+            transform: `translateX(${AGENT_PROFILE_OFFSET[agentProfile]}%)`,
+          }}
+        />
+        <div className="relative z-10 grid grid-cols-3">
+          {AGENT_PROFILES.map((profile) => (
+            <button
+              key={profile.key}
+              type="button"
+              onClick={() => {
+                if (!canSwitchAgentProfile) return
+                setAgentProfile(profile.key)
+              }}
+              disabled={!canSwitchAgentProfile}
+              className={cn(
+                'py-1 text-xs font-medium rounded-full transition-colors',
+                agentProfile === profile.key
+                  ? 'text-[var(--color-text-primary)]'
+                  : 'text-[var(--color-text-muted)]',
+                canSwitchAgentProfile && 'hover:text-[var(--color-text-secondary)]',
+                !canSwitchAgentProfile && 'cursor-not-allowed',
+              )}
+            >
+              {t(profile.labelKey, lang)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
   const toolButtons = (
     <div className="shrink-0 flex items-center gap-1">
       <button
@@ -66,6 +131,8 @@ export function PipelineProgress() {
       <div className="flex items-center gap-3 py-2.5 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
         {toolButtons}
         <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
+        {agentProfileSlider}
+        <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
         <span className="text-xs text-[var(--color-text-muted)]">{t('noProjectSelected', lang)}</span>
       </div>
     )
@@ -75,12 +142,7 @@ export function PipelineProgress() {
     <div className="flex items-center gap-3 py-2 px-6 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {toolButtons}
       <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
-      {/* Project title */}
-      <div className="min-w-0 shrink-0 max-w-[200px]">
-        <h1 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
-          {task.title || task.label}
-        </h1>
-      </div>
+      {agentProfileSlider}
 
       <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 

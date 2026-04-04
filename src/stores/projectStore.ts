@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData,
+  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile,
 } from '@/types'
 import { fetchPlan, fetchProjects, deleteProjectFiles } from '@/services/api'
 
@@ -10,6 +10,7 @@ interface ProjectState {
   selectedTaskId: string | null
   selectedExpId: string | null
   activeStage: PipelineStage
+  agentProfile: AgentProfile
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
@@ -18,6 +19,7 @@ interface ProjectState {
   selectTask: (id: string) => void
   selectExperiment: (id: string | null) => void
   setActiveStage: (stage: PipelineStage) => void
+  setAgentProfile: (profile: AgentProfile) => void
   setMode: (mode: 'manual' | 'auto') => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
@@ -192,6 +194,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedTaskId: null,
   selectedExpId: null,
   activeStage: 'research',
+  agentProfile: 'default',
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
@@ -212,6 +215,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   selectExperiment: (id) => set({ selectedExpId: id, activeStage: 'experiment' }),
   setActiveStage: (stage) => set({ activeStage: stage }),
+  setAgentProfile: (agentProfile) => set({ agentProfile }),
   setMode: (mode) => set({ mode }),
 
   renameTask: (id, label) => {

@@ -1,6 +1,7 @@
 /* ── Pipeline stages ───────────────────────────── */
 
 export type PipelineStage = 'research' | 'experiment' | 'result'
+export type AgentProfile = 'engineer' | 'default' | 'research'
 
 /* ── Experiment status ──────────────────────────── */
 
@@ -183,6 +184,7 @@ export interface WsMessage {
   user_id?: string
   media?: string[]
   mode?: 'manual' | 'auto'
+  agent_profile?: AgentProfile
 }
 
 export interface WsResponse {

@@ -87,7 +87,6 @@ function buildAgentMessage(
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
   const { createProject, deleteTask, projectsLoaded } = useProjectStore()
-  const mode = useProjectStore((s) => s.mode)
   const connected = useAgentStore((s) => s.connected)
   const { workspacePath, language: lang } = useSettingsStore()
 
@@ -154,6 +153,7 @@ export function NewProjectModal() {
       return
     }
 
+    const { mode, agentProfile } = useProjectStore.getState()
     const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths, mode)
     useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
@@ -168,6 +168,7 @@ export function NewProjectModal() {
       session_id: projectId,
       user_id: 'ui_user',
       mode,
+      agent_profile: agentProfile,
     })
 
     // Reset form

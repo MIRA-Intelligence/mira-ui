@@ -92,12 +92,14 @@ export function AgentPanel() {
       metadata: { _user: true },
     })
 
+    const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
       type: 'message',
       content: text,
       session_id: selectedTaskId,
       user_id: 'ui_user',
-      mode,
+      mode: currentMode,
+      agent_profile: currentAgentProfile,
     })
     setInput('')
   }
@@ -113,12 +115,14 @@ export function AgentPanel() {
       metadata: { _user: true },
     })
 
+    const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
       type: 'message',
       content,
       session_id: selectedTaskId,
       user_id: 'ui_user',
-      mode,
+      mode: currentMode,
+      agent_profile: currentAgentProfile,
     })
   }
 
