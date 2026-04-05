@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
+import { probeEngineCompatibility } from '@/services/engine'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -19,22 +20,46 @@ async function syncOnConnect() {
 
 export function useWebSocket() {
   const { handleWsMessage, setConnected } = useAgentStore()
+  const setEngineBootstrap = useSettingsStore((s) => s.setEngineBootstrap)
 
   useEffect(() => {
-    wsClient.connect()
+    let disposed = false
+    let unsubMsg = () => {}
+    let unsubStatus = () => {}
 
-    const unsubMsg = wsClient.onMessage(handleWsMessage)
-    const unsubStatus = wsClient.onStatus((connected) => {
-      setConnected(connected)
-      if (connected) {
-        syncOnConnect()
+    const bootstrap = async () => {
+      const { apiUrl } = useSettingsStore.getState()
+      const probe = await probeEngineCompatibility(apiUrl)
+      if (disposed) return
+
+      setEngineBootstrap({
+        status: probe.status,
+        message: probe.status === 'compatible' ? null : probe.message,
+        version: probe.version,
+      })
+
+      if (probe.status !== 'compatible') {
+        setConnected(false)
+        return
       }
-    })
+
+      wsClient.connect()
+      unsubMsg = wsClient.onMessage(handleWsMessage)
+      unsubStatus = wsClient.onStatus((connected) => {
+        setConnected(connected)
+        if (connected) {
+          syncOnConnect()
+        }
+      })
+    }
+
+    bootstrap()
 
     return () => {
+      disposed = true
       unsubMsg()
       unsubStatus()
       wsClient.disconnect()
     }
-  }, [handleWsMessage, setConnected])
+  }, [handleWsMessage, setConnected, setEngineBootstrap])
 }
