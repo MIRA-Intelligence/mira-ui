@@ -12,5 +12,11 @@ interface ImportMeta {
 interface Window {
   electronAPI?: {
     platform: string
+    upgradeLocalEngine?: (packageName?: string) => Promise<{
+      ok: boolean
+      code: number
+      stdout: string
+      stderr: string
+    }>
   }
 }

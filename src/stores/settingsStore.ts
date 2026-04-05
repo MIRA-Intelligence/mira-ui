@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
+export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable'
 
 const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
@@ -25,6 +26,9 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   settingsOpen: boolean
+  engineStatus: EngineStatus
+  engineMessage: string | null
+  engineVersion: string | null
 
   setWorkspacePath: (p: string) => void
   setTheme: (t: Theme) => void
@@ -32,6 +36,11 @@ interface SettingsState {
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
   setShowProgressMessages: (v: boolean) => void
+  setEngineBootstrap: (payload: {
+    status: EngineStatus
+    message: string | null
+    version?: string | null
+  }) => void
   openSettings: () => void
   closeSettings: () => void
 }
@@ -84,6 +93,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: saved.wsUrl ?? defaultWsUrl(),
   showProgressMessages: saved.showProgressMessages ?? true,
   settingsOpen: false,
+  engineStatus: 'unknown',
+  engineMessage: null,
+  engineVersion: null,
 
   setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
   setTheme: (t) => { set({ theme: t }); persist(get()); applyTheme(t) },
@@ -91,6 +103,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
+  setEngineBootstrap: ({ status, message, version }) => {
+    set({ engineStatus: status, engineMessage: message, engineVersion: version ?? null })
+  },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
 }))
