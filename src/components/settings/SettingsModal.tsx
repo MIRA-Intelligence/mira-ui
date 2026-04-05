@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSettingsStore, type Theme, type Language } from '@/stores/settingsStore'
+import { probeEngineCompatibility } from '@/services/engine'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
@@ -16,6 +17,9 @@ export function SettingsModal() {
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
   })
+  const [upgrading, setUpgrading] = useState(false)
+  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null)
+  const [upgradeError, setUpgradeError] = useState(false)
 
   useEffect(() => {
     if (settingsOpen) {
@@ -27,6 +31,9 @@ export function SettingsModal() {
         wsUrl: store.wsUrl,
         showProgressMessages: store.showProgressMessages,
       })
+      setUpgrading(false)
+      setUpgradeError(false)
+      setUpgradeMessage(null)
     }
   }, [
     settingsOpen,
@@ -56,6 +63,43 @@ export function SettingsModal() {
     }).catch(() => {})
 
     closeSettings()
+  }
+
+  const handleUpgradeEngine = async () => {
+    setUpgradeError(false)
+    setUpgradeMessage('Upgrading local engine...')
+    setUpgrading(true)
+    try {
+      if (!window.electronAPI?.upgradeLocalEngine) {
+        setUpgradeError(true)
+        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: medpilot-agent upgrade --package medpilot-ai')
+        return
+      }
+
+      const result = await window.electronAPI.upgradeLocalEngine('medpilot-ai')
+      if (!result.ok) {
+        setUpgradeError(true)
+        setUpgradeMessage(result.stderr || 'Local engine upgrade failed.')
+        return
+      }
+
+      const probe = await probeEngineCompatibility(draft.apiUrl)
+      store.setEngineBootstrap({
+        status: probe.status,
+        message: probe.status === 'compatible' ? null : probe.message,
+        version: probe.version,
+      })
+
+      if (probe.status === 'compatible') {
+        setUpgradeMessage('Local engine upgraded and verified. Reconnecting...')
+        setTimeout(() => window.location.reload(), 800)
+      } else {
+        setUpgradeError(true)
+        setUpgradeMessage(`Upgrade finished but verification failed: ${probe.message}`)
+      }
+    } finally {
+      setUpgrading(false)
+    }
   }
 
   const curLang = draft.language
@@ -190,6 +234,26 @@ export function SettingsModal() {
                 {store.engineMessage || 'Local engine is unavailable or incompatible. Upgrade and restart medpilot-agent.'}
               </p>
             )}
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUpgradeEngine}
+                disabled={upgrading}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded-lg border transition-colors',
+                  upgrading
+                    ? 'opacity-60 cursor-not-allowed border-[var(--color-border)] text-[var(--color-text-muted)]'
+                    : 'border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10',
+                )}
+              >
+                {upgrading ? 'Upgrading...' : 'Upgrade local engine'}
+              </button>
+              {upgradeMessage && (
+                <span className={cn('text-[11px]', upgradeError ? 'text-red-300' : 'text-[var(--color-text-muted)]')}>
+                  {upgradeMessage}
+                </span>
+              )}
+            </div>
           </Section>
         </div>
 
