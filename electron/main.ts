@@ -82,7 +82,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
-    return runEngineUpgrade(packageName || 'medpilot-ai')
+    return runEngineUpgrade(packageName || 'medpilot')
   })
   createWindow()
 })

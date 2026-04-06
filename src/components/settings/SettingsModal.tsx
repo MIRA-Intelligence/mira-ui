@@ -72,11 +72,11 @@ export function SettingsModal() {
     try {
       if (!window.electronAPI?.upgradeLocalEngine) {
         setUpgradeError(true)
-        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: medpilot-agent upgrade --package medpilot-ai')
+        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: medpilot-agent upgrade --package medpilot')
         return
       }
 
-      const result = await window.electronAPI.upgradeLocalEngine('medpilot-ai')
+      const result = await window.electronAPI.upgradeLocalEngine('medpilot')
       if (!result.ok) {
         setUpgradeError(true)
         setUpgradeMessage(result.stderr || 'Local engine upgrade failed.')

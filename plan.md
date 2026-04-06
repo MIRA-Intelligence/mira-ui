@@ -26,7 +26,7 @@ UI 布局参考 [FARS](https://analemma.ai/fars)（Fully Automated Research Syst
 | 项 | 值 |
 |---|---|
 | 源码位置 | `/Users/cwang/Code/medpilot/medpilot/` |
-| 包名 | `medpilot-ai 0.1`（pip editable install） |
+| 包名 | `medpilot 0.1`（pip editable install） |
 | Conda 环境 | `nanobot` |
 | CLI 入口 | `medpilot` |
 | 关键命令 | `medpilot gateway` / `medpilot agent -m "msg"` |
