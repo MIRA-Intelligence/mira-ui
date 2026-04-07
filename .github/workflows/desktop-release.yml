@@ -30,6 +30,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Align package version with release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node <<'EOF'
+          const fs = require('fs')
+
+          const tag = process.env.RELEASE_TAG || ''
+          const match = /^v(\d+\.\d+\.\d+)(?:rc(\d+))?$/.exec(tag)
+          if (!match) {
+            console.error(`Unsupported tag format: "${tag}". Expected vX.Y.Z or vX.Y.ZrcN.`)
+            process.exit(1)
+          }
+
+          const version = match[2] ? `${match[1]}-rc.${match[2]}` : match[1]
+          const pkgPath = 'package.json'
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `DESKTOP_VERSION=${version}\n`)
+          }
+
+          console.log(`Set ${pkgPath} version to ${version} from tag ${tag}`)
+          EOF
+
+      - name: Show resolved desktop version
+        run: echo "Desktop version = ${{ env.DESKTOP_VERSION }}"
+
       - name: Build macOS artifacts
         if: matrix.os == 'macos-latest'
         run: npm run dist:mac
