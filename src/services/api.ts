@@ -36,11 +36,13 @@ export async function fetchStatus(): Promise<Record<string, unknown> | null> {
 
 export interface RemoteProject {
   id: string
+  display_name?: string
   title?: string
   status?: string
   core_question?: string
   started_at?: string
   has_plan: boolean
+  has_meta?: boolean
 }
 
 export async function fetchProjects(): Promise<RemoteProject[]> {
@@ -52,6 +54,22 @@ export async function fetchProjects(): Promise<RemoteProject[]> {
   } catch {
     return []
   }
+}
+
+export async function updateProjectDisplayName(sessionId: string, displayName: string): Promise<string> {
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/meta`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ display_name: displayName }),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  if (typeof data?.display_name === 'string' && data.display_name.trim().length > 0) {
+    return data.display_name.trim()
+  }
+  return sessionId
 }
 
 export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]> {
