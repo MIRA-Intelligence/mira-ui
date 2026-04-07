@@ -196,5 +196,5 @@ npm run dist:all
 
 ### Desktop release artifacts
 - CI workflow: `.github/workflows/desktop-release.yml`
-- Trigger with GitHub Actions `workflow_dispatch` or push/PR to `deploy`
+- Trigger with GitHub Actions `workflow_dispatch` or push/PR to `release`
 - Generated installers are uploaded as workflow artifacts and also written to local `release/` when run locally
