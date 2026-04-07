@@ -11,6 +11,11 @@ AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tai
 - Zustand state management and lightweight component architecture
 - Responsive layouts and shared design tokens for easy UI iterations
 
+## Contributing / CLA
+
+All external contributions require acceptance of the Contributor License Agreement.
+See `CLA.md` for details. By submitting a PR, you confirm acceptance of this CLA.
+
 ## Prerequisites
 
 - Node.js 18+ (Node 20+ recommended)

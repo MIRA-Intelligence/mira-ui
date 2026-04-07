@@ -2,6 +2,11 @@
 
 - Implements Project-MedPilot/MedPilot#<issue-id>
 
+## CLA Acknowledgement
+
+- [ ] I have read `CLA.md` and agree to the Contributor License Agreement.
+- [ ] I confirm I have the right to submit this contribution.
+
 ## What Changed
 
 - [ ] UI/desktop behavior

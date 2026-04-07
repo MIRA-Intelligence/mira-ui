@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "AI Agent UI for radiology workflows",
   "author": "Project MedPilot",
+  "license": "GPL-3.0-or-later",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
