@@ -3,7 +3,7 @@ import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
   NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile,
 } from '@/types'
-import { fetchPlan, fetchProjects, deleteProjectFiles } from '@/services/api'
+import { deleteProjectFiles, fetchPlan, fetchProjects, updateProjectDisplayName } from '@/services/api'
 
 interface ProjectState {
   tasks: ProjectTask[]
@@ -33,6 +33,7 @@ interface ProjectState {
 let dupCounter = 0
 
 const PRJ_RE = /^PRJ-(\d+)$/
+const PROJECT_FOLDER_PREFIX = 'PRJ'
 const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'pending',
   'running',
@@ -71,6 +72,10 @@ function findFirstMissingProjectNumber(used: Set<number>): number {
   let n = 1
   while (used.has(n)) n += 1
   return n
+}
+
+function isProjectFolderId(id: string): boolean {
+  return id.startsWith(PROJECT_FOLDER_PREFIX)
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -219,9 +224,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setMode: (mode) => set({ mode }),
 
   renameTask: (id, label) => {
+    const nextLabel = label.trim()
+    if (!nextLabel) return
+    const previousLabel = get().tasks.find((task) => task.id === id)?.label ?? id
+
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? { ...t, label } : t)),
+      tasks: state.tasks.map((t) => (t.id === id ? { ...t, label: nextLabel } : t)),
     }))
+
+    void updateProjectDisplayName(id, nextLabel)
+      .then((savedLabel) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === id ? { ...task, label: savedLabel } : task
+          )),
+        }))
+      })
+      .catch(() => {
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === id ? { ...task, label: previousLabel } : task
+          )),
+        }))
+      })
   },
 
   deleteTask: async (id, deleteFiles = false) => {
@@ -292,18 +317,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   loadProjects: async () => {
     const remotes = await fetchProjects()
 
-    const { tasks } = get()
-    const existingIds = new Set(tasks.map((t) => t.id))
+    const { tasks, selectedTaskId } = get()
+    const keptTasks = tasks.filter((t) => isProjectFolderId(t.id))
+    const existingIds = new Set(keptTasks.map((t) => t.id))
     const newTasks: ProjectTask[] = []
 
-    const SKIP_DIRS = new Set(['skills', 'memory', 'sessions', 'media', 'cron', 'logs'])
-
     for (const r of remotes) {
-      if (SKIP_DIRS.has(r.id)) continue
+      if (!isProjectFolderId(r.id)) continue
       if (existingIds.has(r.id)) continue
       newTasks.push({
         id: r.id,
-        label: r.id,
+        label: (r.display_name && r.display_name.trim()) || r.id,
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
@@ -315,8 +339,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
     }
 
-    const merged = newTasks.length > 0 ? [...tasks, ...newTasks] : tasks
-    set({ tasks: merged, stats: computeStats(merged), projectsLoaded: true })
+    const refreshedTasks = keptTasks.map((task) => {
+      const remote = remotes.find((item) => item.id === task.id)
+      if (!remote) return task
+      const displayName = (remote.display_name && remote.display_name.trim()) || task.id
+      return task.label === displayName ? task : { ...task, label: displayName }
+    })
+
+    const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
+    const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
+    set({
+      tasks: merged,
+      stats: computeStats(merged),
+      projectsLoaded: true,
+      selectedTaskId: hasSelected ? selectedTaskId : (merged[0]?.id ?? null),
+      selectedExpId: hasSelected ? get().selectedExpId : null,
+    })
 
     for (const t of newTasks) {
       get().refreshPlan(t.id)
