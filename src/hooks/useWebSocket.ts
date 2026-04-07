@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
+import { probeEngineCompatibility } from '@/services/engine'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -18,23 +19,62 @@ async function syncOnConnect() {
 }
 
 export function useWebSocket() {
-  const { handleWsMessage, setConnected } = useAgentStore()
+  const handleWsMessage = useAgentStore((s) => s.handleWsMessage)
+  const setConnected = useAgentStore((s) => s.setConnected)
+  const setEngineBootstrap = useSettingsStore((s) => s.setEngineBootstrap)
 
   useEffect(() => {
-    wsClient.connect()
+    let disposed = false
+    let unsubMsg = () => {}
+    let unsubStatus = () => {}
 
-    const unsubMsg = wsClient.onMessage(handleWsMessage)
-    const unsubStatus = wsClient.onStatus((connected) => {
-      setConnected(connected)
-      if (connected) {
-        syncOnConnect()
+    const bootstrap = async () => {
+      try {
+        const { apiUrl } = useSettingsStore.getState()
+        const safeApiUrl = typeof apiUrl === 'string' ? apiUrl : 'http://127.0.0.1:18790/api'
+        const probe = await probeEngineCompatibility(safeApiUrl)
+        if (disposed) return
+
+        setEngineBootstrap({
+          status: probe.status,
+          message: probe.status === 'compatible' ? null : probe.message,
+          version: probe.version,
+        })
+
+        if (probe.status !== 'compatible') {
+          setConnected(false)
+          return
+        }
+
+        wsClient.connect()
+        unsubMsg = wsClient.onMessage(handleWsMessage)
+        unsubStatus = wsClient.onStatus((connected) => {
+          if (useAgentStore.getState().connected !== connected) {
+            setConnected(connected)
+          }
+          if (connected) {
+            void syncOnConnect()
+          }
+        })
+      } catch (error) {
+        if (disposed) return
+        const message = error instanceof Error ? error.message : String(error)
+        setEngineBootstrap({
+          status: 'unreachable',
+          message: `UI bootstrap failed: ${message}`,
+          version: null,
+        })
+        setConnected(false)
       }
-    })
+    }
+
+    bootstrap()
 
     return () => {
+      disposed = true
       unsubMsg()
       unsubStatus()
       wsClient.disconnect()
     }
-  }, [handleWsMessage, setConnected])
+  }, [handleWsMessage, setConnected, setEngineBootstrap])
 }

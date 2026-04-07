@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
+export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable'
 
 const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
@@ -25,6 +26,9 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   settingsOpen: boolean
+  engineStatus: EngineStatus
+  engineMessage: string | null
+  engineVersion: string | null
 
   setWorkspacePath: (p: string) => void
   setTheme: (t: Theme) => void
@@ -32,11 +36,20 @@ interface SettingsState {
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
   setShowProgressMessages: (v: boolean) => void
+  setEngineBootstrap: (payload: {
+    status: EngineStatus
+    message: string | null
+    version?: string | null
+  }) => void
   openSettings: () => void
   closeSettings: () => void
 }
 
 const STORAGE_KEY = 'medpilot-ui-settings'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 function isStaleLocalhost(url: string | undefined): boolean {
   if (!url) return false
@@ -51,13 +64,37 @@ function loadPersisted(): Partial<SettingsState> {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw)
-    if (isStaleLocalhost(parsed.apiUrl)) {
-      delete parsed.apiUrl
+    if (!isRecord(parsed)) {
+      return {}
     }
-    if (isStaleLocalhost(parsed.wsUrl)) {
-      delete parsed.wsUrl
+
+    const sanitized: Partial<SettingsState> = {}
+
+    if (typeof parsed.workspacePath === 'string') {
+      sanitized.workspacePath = parsed.workspacePath
     }
-    return parsed
+    if (parsed.theme === 'dark' || parsed.theme === 'light') {
+      sanitized.theme = parsed.theme
+    }
+    if (parsed.language === 'en' || parsed.language === 'zh') {
+      sanitized.language = parsed.language
+    }
+
+    const apiUrl = typeof parsed.apiUrl === 'string' ? parsed.apiUrl : undefined
+    if (apiUrl && !isStaleLocalhost(apiUrl)) {
+      sanitized.apiUrl = apiUrl
+    }
+
+    const wsUrl = typeof parsed.wsUrl === 'string' ? parsed.wsUrl : undefined
+    if (wsUrl && !isStaleLocalhost(wsUrl)) {
+      sanitized.wsUrl = wsUrl
+    }
+
+    if (typeof parsed.showProgressMessages === 'boolean') {
+      sanitized.showProgressMessages = parsed.showProgressMessages
+    }
+
+    return sanitized
   } catch { /* ignore */ }
   return {}
 }
@@ -84,6 +121,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: saved.wsUrl ?? defaultWsUrl(),
   showProgressMessages: saved.showProgressMessages ?? true,
   settingsOpen: false,
+  engineStatus: 'unknown',
+  engineMessage: null,
+  engineVersion: null,
 
   setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
   setTheme: (t) => { set({ theme: t }); persist(get()); applyTheme(t) },
@@ -91,6 +131,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
+  setEngineBootstrap: ({ status, message, version }) => {
+    const nextVersion = version ?? null
+    set((state) => {
+      if (
+        state.engineStatus === status &&
+        state.engineMessage === message &&
+        state.engineVersion === nextVersion
+      ) {
+        return state
+      }
+      return { engineStatus: status, engineMessage: message, engineVersion: nextVersion }
+    })
+  },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
 }))
