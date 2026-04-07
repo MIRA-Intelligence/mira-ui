@@ -4,11 +4,9 @@ import { t } from '@/i18n'
 
 export function StatusBar() {
   const { stats } = useProjectStore()
-  const { language: lang, engineStatus, engineMessage } = useSettingsStore((s) => ({
-    language: s.language,
-    engineStatus: s.engineStatus,
-    engineMessage: s.engineMessage,
-  }))
+  const lang = useSettingsStore((s) => s.language)
+  const engineStatus = useSettingsStore((s) => s.engineStatus)
+  const engineMessage = useSettingsStore((s) => s.engineMessage)
   const showEngineWarning = engineStatus === 'incompatible' || engineStatus === 'unreachable'
 
   return (

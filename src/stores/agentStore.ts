@@ -87,7 +87,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  setConnected: (connected) => set({ connected }),
+  setConnected: (connected) =>
+    set((state) => (state.connected === connected ? state : { connected })),
 
   clearLogs: (projectId) =>
     set((state) => {
