@@ -103,6 +103,13 @@ export interface UploadedProjectFile {
   size: number
 }
 
+export interface DataPathValidationResult {
+  ok: boolean
+  error?: string
+  kind?: 'file' | 'directory'
+  resolved_path?: string
+}
+
 export async function uploadProjectFiles(sessionId: string, files: File[]): Promise<UploadedProjectFile[]> {
   if (files.length === 0) return []
 
@@ -128,6 +135,31 @@ export async function uploadProjectFiles(sessionId: string, files: File[]): Prom
 
   const data = await resp.json()
   return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
+}
+
+export async function validateDataPath(path: string): Promise<DataPathValidationResult> {
+  const resp = await fetch(`${getApiUrl()}/data-path/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!resp.ok) {
+    let msg = ''
+    try {
+      const data = await resp.json()
+      msg = typeof data?.error === 'string' ? data.error : JSON.stringify(data)
+    } catch {
+      msg = await resp.text()
+    }
+    return { ok: false, error: msg || 'validation request failed' }
+  }
+  const data = await resp.json()
+  return {
+    ok: !!data?.ok,
+    error: typeof data?.error === 'string' ? data.error : undefined,
+    kind: data?.kind === 'file' || data?.kind === 'directory' ? data.kind : undefined,
+    resolved_path: typeof data?.resolved_path === 'string' ? data.resolved_path : undefined,
+  }
 }
 
 export function getProjectArtifactUrl(sessionId: string, artifactPath: string): string {

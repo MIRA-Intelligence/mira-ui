@@ -170,6 +170,7 @@ export interface NewProjectInput {
   description: string
   title?: string
   domain?: string
+  dataPath?: string
   references?: string
   computeBudget?: string
   outputGoal: OutputGoal
