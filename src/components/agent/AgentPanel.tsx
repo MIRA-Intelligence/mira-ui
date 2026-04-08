@@ -270,13 +270,19 @@ export function AgentPanel() {
       {/* Input */}
       <div className="p-3 border-t border-[var(--color-border)] shrink-0">
         <div className="flex gap-2">
-          <input
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
             placeholder={selectedTaskId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
             disabled={!selectedTaskId}
-            className="flex-1 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50"
+            rows={1}
+            className="flex-1 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
           />
           <button
             onClick={handleSend}
