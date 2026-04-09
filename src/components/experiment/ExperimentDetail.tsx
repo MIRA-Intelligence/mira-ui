@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Experiment } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -116,25 +116,68 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const lang = useSettingsStore((s) => s.language)
   const [expandedImageArtifacts, setExpandedImageArtifacts] = useState<Record<string, boolean>>({})
-  const badgeLabel = experiment.status === 'completed'
+  const [useSnapshotView, setUseSnapshotView] = useState(false)
+
+  useEffect(() => {
+    setUseSnapshotView(false)
+    setExpandedImageArtifacts({})
+  }, [experiment.id])
+
+  const liveSignature = JSON.stringify({
+    title: experiment.title,
+    question: experiment.question,
+    hypothesis: experiment.hypothesis,
+    prediction: experiment.prediction,
+    method: experiment.method,
+    results: experiment.results,
+    conclusion: experiment.conclusion,
+    next: experiment.next,
+    commit: experiment.commit,
+  })
+  const snapshotSignature = experiment.snapshot ? JSON.stringify({
+    title: experiment.snapshot.title,
+    question: experiment.snapshot.question,
+    hypothesis: experiment.snapshot.hypothesis,
+    prediction: experiment.snapshot.prediction,
+    method: experiment.snapshot.method,
+    results: experiment.snapshot.results,
+    conclusion: experiment.snapshot.conclusion,
+    next: experiment.snapshot.next,
+    commit: experiment.snapshot.commit,
+  }) : ''
+  const snapshotDiffers = !!experiment.snapshot && liveSignature !== snapshotSignature
+  const showSnapshotToggle = experiment.status === 'completed'
+    && !!experiment.snapshot
+    && (snapshotDiffers || useSnapshotView)
+
+  const viewedExperiment: Experiment = useSnapshotView && experiment.snapshot
+    ? {
+        ...experiment,
+        ...experiment.snapshot,
+        id: experiment.id,
+        status: experiment.status,
+      }
+    : experiment
+
+  const badgeLabel = viewedExperiment.status === 'completed'
     ? t('completed', lang)
-    : experiment.status === 'failed'
+    : viewedExperiment.status === 'failed'
       ? t('failed', lang)
-      : experiment.status === 'skipped'
+      : viewedExperiment.status === 'skipped'
         ? t('skipped', lang)
-        : experiment.status === 'running'
+        : viewedExperiment.status === 'running'
           ? t('running', lang)
           : t('pending', lang)
-  const badgeClass = STATUS_BADGE_CLASS[experiment.status] ?? STATUS_BADGE_CLASS.pending
+  const badgeClass = STATUS_BADGE_CLASS[viewedExperiment.status] ?? STATUS_BADGE_CLASS.pending
   const hasScientificDetail = Boolean(
-    experiment.question
-    || experiment.hypothesis
-    || experiment.prediction
-    || experiment.method
-    || experiment.results
-    || experiment.conclusion
-    || experiment.next
-    || experiment.progress,
+    viewedExperiment.question
+    || viewedExperiment.hypothesis
+    || viewedExperiment.prediction
+    || viewedExperiment.method
+    || viewedExperiment.results
+    || viewedExperiment.conclusion
+    || viewedExperiment.next
+    || viewedExperiment.progress,
   )
 
   return (
@@ -143,29 +186,39 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         {/* Header */}
         <div className="mb-5">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-[var(--color-text-muted)]">{experiment.id}</span>
+            <span className="font-mono text-xs text-[var(--color-text-muted)]">{viewedExperiment.id}</span>
             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeClass}`}>{badgeLabel}</span>
-            {experiment.commit && (
+            {showSnapshotToggle && (
+              <button
+                type="button"
+                onClick={() => setUseSnapshotView((prev) => !prev)}
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors"
+                title={useSnapshotView ? t('live', lang) : t('snapshot', lang)}
+              >
+                {useSnapshotView ? t('live', lang) : t('snapshot', lang)}
+              </button>
+            )}
+            {viewedExperiment.commit && (
               <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-                @ {experiment.commit.slice(0, 7)}
+                @ {viewedExperiment.commit.slice(0, 7)}
               </span>
             )}
           </div>
           <h2 className={[
             'text-lg font-semibold',
-            experiment.status === 'failed' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]',
-            experiment.status === 'skipped' ? 'line-through text-[var(--color-text-muted)]' : '',
+            viewedExperiment.status === 'failed' ? 'text-[var(--color-error)]' : 'text-[var(--color-text-primary)]',
+            viewedExperiment.status === 'skipped' ? 'line-through text-[var(--color-text-muted)]' : '',
           ].join(' ')}>
-            {experiment.title}
+            {viewedExperiment.title}
           </h2>
         </div>
 
         {!hasScientificDetail && (
-          <Section icon="○" label={experiment.status === 'pending' ? t('planned', lang) : t('progress', lang)}>
+          <Section icon="○" label={viewedExperiment.status === 'pending' ? t('planned', lang) : t('progress', lang)}>
             <p className="text-[var(--color-text-secondary)]">
-              {experiment.status === 'pending'
+              {viewedExperiment.status === 'pending'
                 ? t('experimentPendingHint', lang)
-                : experiment.status === 'skipped'
+                : viewedExperiment.status === 'skipped'
                   ? t('experimentSkippedHint', lang)
                   : t('experimentDetailsPending', lang)}
             </p>
@@ -173,53 +226,53 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         )}
 
         {/* Scientific method sections */}
-        {experiment.question && (
+        {viewedExperiment.question && (
           <Section icon="?" label={t('question', lang)}>
-            <p>{experiment.question}</p>
+            <p>{viewedExperiment.question}</p>
           </Section>
         )}
 
-        {experiment.hypothesis && (
+        {viewedExperiment.hypothesis && (
           <Section icon="!" label={t('hypothesis', lang)}>
-            <p>{experiment.hypothesis}</p>
+            <p>{viewedExperiment.hypothesis}</p>
           </Section>
         )}
 
-        {experiment.prediction && (
+        {viewedExperiment.prediction && (
           <Section icon="→" label={t('prediction', lang)}>
-            <p>{experiment.prediction}</p>
+            <p>{viewedExperiment.prediction}</p>
           </Section>
         )}
 
-        {experiment.method && (
+        {viewedExperiment.method && (
           <Section icon="⚙" label={t('method', lang)}>
-            <p className="text-[var(--color-text-secondary)]">{experiment.method}</p>
+            <p className="text-[var(--color-text-secondary)]">{viewedExperiment.method}</p>
           </Section>
         )}
 
         {/* Running progress */}
-        {experiment.status === 'running' && experiment.progress && (
+        {viewedExperiment.status === 'running' && viewedExperiment.progress && (
           <Section icon="▶" label={t('progress', lang)}>
             <ProgressBar
-              epoch={experiment.progress.epoch}
-              total={experiment.progress.total_epochs}
-              metric={experiment.progress.current_metric}
-              value={experiment.progress.current_value}
+              epoch={viewedExperiment.progress.epoch}
+              total={viewedExperiment.progress.total_epochs}
+              metric={viewedExperiment.progress.current_metric}
+              value={viewedExperiment.progress.current_value}
               epochLabel={t('epoch', lang)}
             />
           </Section>
         )}
 
         {/* Results */}
-        {experiment.results && (
+        {viewedExperiment.results && (
           <Section icon="📊" label={t('results', lang)}>
-            {experiment.results.metrics && <MetricsTable metrics={experiment.results.metrics} />}
-            {experiment.results.findings && (
-              <p className="mt-2 text-[var(--color-text-secondary)]">{experiment.results.findings}</p>
+            {viewedExperiment.results.metrics && <MetricsTable metrics={viewedExperiment.results.metrics} />}
+            {viewedExperiment.results.findings && (
+              <p className="mt-2 text-[var(--color-text-secondary)]">{viewedExperiment.results.findings}</p>
             )}
-            {experiment.results.artifacts && experiment.results.artifacts.length > 0 && (
+            {viewedExperiment.results.artifacts && viewedExperiment.results.artifacts.length > 0 && (
               <div className="mt-2 space-y-2">
-                {experiment.results.artifacts.map((a) => {
+                {viewedExperiment.results.artifacts.map((a) => {
                   const canOpen = !!selectedTaskId
                   const isImage = isImageArtifact(a)
                   const expanded = !!expandedImageArtifacts[a]
@@ -262,16 +315,16 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         )}
 
         {/* Conclusion */}
-        {experiment.conclusion && (
+        {viewedExperiment.conclusion && (
           <Section icon="✓" label={t('conclusion', lang)}>
-            <p>{experiment.conclusion}</p>
+            <p>{viewedExperiment.conclusion}</p>
           </Section>
         )}
 
         {/* Next */}
-        {experiment.next && (
+        {viewedExperiment.next && (
           <Section icon="➡" label={t('next', lang)}>
-            <p className="text-[var(--color-accent)]">{experiment.next}</p>
+            <p className="text-[var(--color-accent)]">{viewedExperiment.next}</p>
           </Section>
         )}
       </div>

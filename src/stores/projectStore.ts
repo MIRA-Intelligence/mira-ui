@@ -79,6 +79,23 @@ function isProjectFolderId(id: string): boolean {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function parseExperimentSnapshot(raw: any): Experiment['snapshot'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  return {
+    title: raw.title as string | undefined,
+    question: raw.question as string | undefined,
+    hypothesis: raw.hypothesis as string | undefined,
+    prediction: raw.prediction as string | undefined,
+    method: raw.method as string | undefined,
+    results: raw.results ? safeClone(raw.results) : undefined,
+    conclusion: raw.conclusion as string | undefined,
+    next: raw.next as string | undefined,
+    commit: raw.commit as string | undefined,
+    capturedAt: raw.captured_at as string | undefined,
+    source: raw.source as string | undefined,
+  }
+}
+
 function parseExperiment(raw: any, fallbackIdx: number): Experiment {
   return {
     id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
@@ -94,6 +111,7 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     commit: raw.commit as string | undefined,
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
+    snapshot: parseExperimentSnapshot(raw.snapshot),
   }
 }
 

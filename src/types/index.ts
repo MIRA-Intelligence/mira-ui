@@ -24,6 +24,20 @@ export interface ExperimentProgress {
   current_value?: number | string
 }
 
+export interface ExperimentSnapshot {
+  title?: string
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: ExperimentResult
+  conclusion?: string
+  next?: string
+  commit?: string
+  capturedAt?: string
+  source?: string
+}
+
 /* ── Single experiment ─────────────────────────── */
 
 export interface Experiment {
@@ -40,6 +54,7 @@ export interface Experiment {
   commit?: string
   progress?: ExperimentProgress
   parent?: string
+  snapshot?: ExperimentSnapshot
 }
 
 /* ── Research data (literature & references) ───── */
@@ -160,6 +175,23 @@ export interface TaskPlanExperiment {
     current_value?: number | string
   }
   parent?: string
+  snapshot?: {
+    title?: string
+    question?: string
+    hypothesis?: string
+    prediction?: string
+    method?: string
+    results?: {
+      metrics?: Record<string, unknown>
+      findings?: string
+      artifacts?: string[]
+    }
+    conclusion?: string
+    next?: string
+    commit?: string
+    captured_at?: string
+    source?: string
+  }
 }
 
 /* ── New Project creation ────────────────────────── */
