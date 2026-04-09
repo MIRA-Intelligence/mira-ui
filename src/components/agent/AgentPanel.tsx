@@ -13,6 +13,69 @@ type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
 
+function ChatComposer({
+  selectedTaskId,
+  isStreaming,
+  lang,
+  onSend,
+  onStop,
+}: {
+  selectedTaskId: string | null
+  isStreaming: boolean
+  lang: ReturnType<typeof useSettingsStore.getState>['language']
+  onSend: (text: string) => void
+  onStop: () => void
+}) {
+  const [input, setInput] = useState('')
+
+  useEffect(() => {
+    setInput('')
+  }, [selectedTaskId])
+
+  const sendCurrent = () => {
+    const text = input.trim()
+    if (!text || !selectedTaskId) return
+    onSend(text)
+    setInput('')
+  }
+
+  return (
+    <div className="p-3 border-t border-[var(--color-border)] shrink-0">
+      <div className="flex gap-2">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+              e.preventDefault()
+              sendCurrent()
+            }
+          }}
+          placeholder={selectedTaskId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
+          disabled={!selectedTaskId}
+          rows={1}
+          className="flex-1 h-9 overflow-y-auto bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
+        />
+        <button
+          onClick={sendCurrent}
+          disabled={!selectedTaskId}
+          className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
+        >
+          {t('send', lang)}
+        </button>
+        <button
+          onClick={onStop}
+          disabled={!selectedTaskId}
+          title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
+          className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
+        >
+          {t('stop', lang)}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function AgentPanel() {
   const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
@@ -23,7 +86,6 @@ export function AgentPanel() {
 
   const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
 
-  const [input, setInput] = useState('')
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -66,7 +128,6 @@ export function AgentPanel() {
 
   useEffect(() => {
     if (!selectedTaskId) return
-    if ((logsByProject[selectedTaskId] ?? []).length > 0) return
 
     let cancelled = false
     void (async () => {
@@ -78,12 +139,21 @@ export function AgentPanel() {
     return () => {
       cancelled = true
     }
-  }, [selectedTaskId, logsByProject, hydrateLogs])
+  }, [selectedTaskId, hydrateLogs])
 
-  const handleSend = () => {
-    const text = input.trim()
-    if (!text || !selectedTaskId) return
+  useEffect(() => {
+    if (!connected || !selectedTaskId) return
+    // Re-bind current session after websocket reconnects so progress streaming resumes.
+    wsClient.send({
+      type: 'bind',
+      content: '',
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+    })
+  }, [connected, selectedTaskId])
 
+  const handleSend = (text: string) => {
+    if (!selectedTaskId) return
     useAgentStore.getState().addLog(selectedTaskId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -101,7 +171,6 @@ export function AgentPanel() {
       mode: currentMode,
       agent_profile: currentAgentProfile,
     })
-    setInput('')
   }
 
   const handleResend = (content: string) => {
@@ -267,40 +336,13 @@ export function AgentPanel() {
         )}
       </div>
 
-      {/* Input */}
-      <div className="p-3 border-t border-[var(--color-border)] shrink-0">
-        <div className="flex gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.shiftKey) {
-                e.preventDefault()
-                handleSend()
-              }
-            }}
-            placeholder={selectedTaskId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
-            disabled={!selectedTaskId}
-            rows={1}
-            className="flex-1 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!selectedTaskId}
-            className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
-          >
-            {t('send', lang)}
-          </button>
-          <button
-            onClick={handleStop}
-            disabled={!selectedTaskId}
-            title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
-            className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
-          >
-            {t('stop', lang)}
-          </button>
-        </div>
-      </div>
+      <ChatComposer
+        selectedTaskId={selectedTaskId}
+        isStreaming={isStreaming}
+        lang={lang}
+        onSend={handleSend}
+        onStop={handleStop}
+      />
     </div>
   )
 }

@@ -20,6 +20,12 @@ let logIdCounter = 0
 const PLAN_POLL_INTERVAL = 3000
 const _pollTimers: Record<string, ReturnType<typeof setInterval>> = {}
 
+function logDedupKey(entry: LogEntry): string {
+  const fromUser = entry.metadata?._user ? 'user' : 'agent'
+  const fromAuto = entry.metadata?._auto ? 'auto' : 'manual'
+  return `${entry.timestamp}|${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
+}
+
 function ensurePlanPolling(sessionId: string) {
   if (_pollTimers[sessionId]) return
   _pollTimers[sessionId] = setInterval(() => {
@@ -50,13 +56,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   hydrateLogs: (projectId, entries) =>
     set((state) => {
-      if (entries.length === 0 || (state.logsByProject[projectId]?.length ?? 0) > 0) {
+      if (entries.length === 0) {
+        return state
+      }
+      const existing = state.logsByProject[projectId] ?? []
+      if (existing.length === 0) {
+        return {
+          logsByProject: {
+            ...state.logsByProject,
+            [projectId]: entries,
+          },
+        }
+      }
+      const merged: LogEntry[] = []
+      const seen = new Set<string>()
+      for (const entry of [...entries, ...existing]) {
+        const key = logDedupKey(entry)
+        if (seen.has(key)) continue
+        seen.add(key)
+        merged.push(entry)
+      }
+      if (merged.length === existing.length) {
         return state
       }
       return {
         logsByProject: {
           ...state.logsByProject,
-          [projectId]: entries,
+          [projectId]: merged,
         },
       }
     }),

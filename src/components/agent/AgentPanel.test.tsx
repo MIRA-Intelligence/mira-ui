@@ -48,16 +48,20 @@ describe('AgentPanel keyboard behavior', () => {
     fireEvent.change(textarea, { target: { value: 'hello world' } })
 
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
-    expect(sendSpy).not.toHaveBeenCalled()
+    let payloads = sendSpy.mock.calls.map((call) => call[0])
+    expect(payloads.filter((p) => p?.type === 'message')).toHaveLength(0)
 
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
-    expect(sendSpy).toHaveBeenCalledTimes(1)
-    expect(sendSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'message',
-        content: 'hello world',
-        session_id: 'PRJ-0001',
-      }),
+    expect(sendSpy).toHaveBeenCalled()
+    payloads = sendSpy.mock.calls.map((call) => call[0])
+    expect(payloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'message',
+          content: 'hello world',
+          session_id: 'PRJ-0001',
+        }),
+      ]),
     )
     expect((textarea as HTMLTextAreaElement).value).toBe('')
   })
