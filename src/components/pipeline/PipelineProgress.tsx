@@ -56,7 +56,8 @@ export function PipelineProgress() {
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const task = tasks.find((t) => t.id === selectedTaskId)
-  const canSwitchAgentProfile = mode === 'manual'
+  const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
+  const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
   const agentProfileSlider = (
     <div className="min-w-[210px] shrink-0">
       <div

@@ -98,6 +98,8 @@ export interface ProjectTask {
   status: 'in_progress' | 'completed' | 'pending'
   title: string
   coreQuestion?: string
+  runMode?: 'manual' | 'auto'
+  agentProfile?: AgentProfile
   currentExperiment?: string
   experiments: Experiment[]
   knowledge: string[]

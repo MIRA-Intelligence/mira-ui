@@ -3,7 +3,13 @@ import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
   NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile,
 } from '@/types'
-import { deleteProjectFiles, fetchPlan, fetchProjects, updateProjectDisplayName } from '@/services/api'
+import {
+  deleteProjectFiles,
+  fetchPlan,
+  fetchProjects,
+  updateProjectDisplayName,
+  updateProjectRuntimePreferences,
+} from '@/services/api'
 
 interface ProjectState {
   tasks: ProjectTask[]
@@ -41,6 +47,20 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'failed',
   'skipped',
 ])
+const MODE_SET = new Set(['manual', 'auto'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'default', 'research'] as const)
+
+function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
+  return typeof value === 'string' && MODE_SET.has(value as 'manual' | 'auto')
+    ? value as 'manual' | 'auto'
+    : fallback
+}
+
+function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'default'): AgentProfile {
+  return typeof value === 'string' && AGENT_PROFILE_SET.has(value as AgentProfile)
+    ? value as AgentProfile
+    : fallback
+}
 
 function safeClone<T>(value: T): T {
   if (value == null) return value
@@ -230,6 +250,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedTaskId: id,
       selectedExpId: activeExp,
       activeStage: 'research',
+      mode: normalizeRunMode(task?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
@@ -238,8 +260,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   selectExperiment: (id) => set({ selectedExpId: id, activeStage: 'experiment' }),
   setActiveStage: (stage) => set({ activeStage: stage }),
-  setAgentProfile: (agentProfile) => set({ agentProfile }),
-  setMode: (mode) => set({ mode }),
+  setAgentProfile: (agentProfile) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      agentProfile,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, agentProfile } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { agentProfile })
+  },
+  setMode: (mode) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      mode,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, runMode: mode } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { runMode: mode })
+  },
 
   renameTask: (id, label) => {
     const nextLabel = label.trim()
@@ -273,11 +319,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
+    const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
+    const nextSelectedTask = filtered.find((t) => t.id === nextSelectedTaskId)
     set({
       tasks: filtered,
       stats: computeStats(filtered),
-      selectedTaskId: selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId,
+      selectedTaskId: nextSelectedTaskId,
       selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
+      mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
     })
   },
 
@@ -305,6 +355,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (input) => {
+    const { mode, agentProfile } = get()
     const remotes = await fetchProjects()
     const used = collectProjectNumbers([
       ...remotes.map((r) => r.id),
@@ -317,6 +368,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
+      runMode: mode,
+      agentProfile,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
@@ -349,6 +402,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
+        runMode: normalizeRunMode(r.run_mode, 'auto'),
+        agentProfile: normalizeAgentProfile(r.agent_profile, 'default'),
         experiments: [],
         knowledge: [],
         research: { references: [], notes: [] },
@@ -361,17 +416,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const remote = remotes.find((item) => item.id === task.id)
       if (!remote) return task
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
-      return task.label === displayName ? task : { ...task, label: displayName }
+      const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
+      const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
+      if (
+        task.label === displayName
+        && task.runMode === runMode
+        && task.agentProfile === agentProfile
+      ) {
+        return task
+      }
+      return { ...task, label: displayName, runMode, agentProfile }
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
     const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
+    const nextSelectedTaskId = hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
+    const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
     set({
       tasks: merged,
       stats: computeStats(merged),
       projectsLoaded: true,
-      selectedTaskId: hasSelected ? selectedTaskId : (merged[0]?.id ?? null),
+      selectedTaskId: nextSelectedTaskId,
       selectedExpId: hasSelected ? get().selectedExpId : null,
+      mode: normalizeRunMode(selectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(selectedTask?.agentProfile, get().agentProfile),
     })
 
     for (const t of newTasks) {

@@ -79,6 +79,7 @@ function ChatComposer({
 export function AgentPanel() {
   const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
+  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? true)
   const lang = useSettingsStore((s) => s.language)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const mode = useProjectStore((s) => s.mode)
@@ -105,6 +106,9 @@ export function AgentPanel() {
     }
 
     for (const entry of logs) {
+      if (entry.type === 'tool_call' && !showToolCallHistory) {
+        continue
+      }
       if (entry.type === 'progress' || entry.type === 'tool_call') {
         activityBuffer.push(entry)
         continue
@@ -114,7 +118,7 @@ export function AgentPanel() {
     }
     flushActivity()
     return items
-  }, [logs])
+  }, [logs, showToolCallHistory])
 
   useEffect(() => {
     if (scrollRef.current) {

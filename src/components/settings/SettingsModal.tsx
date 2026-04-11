@@ -16,6 +16,7 @@ export function SettingsModal() {
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
+    showToolCallHistory: store.showToolCallHistory ?? true,
   })
   const [upgrading, setUpgrading] = useState(false)
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null)
@@ -30,6 +31,7 @@ export function SettingsModal() {
         apiUrl: store.apiUrl,
         wsUrl: store.wsUrl,
         showProgressMessages: store.showProgressMessages,
+        showToolCallHistory: store.showToolCallHistory ?? true,
       })
       setUpgrading(false)
       setUpgradeError(false)
@@ -43,6 +45,7 @@ export function SettingsModal() {
     store.apiUrl,
     store.wsUrl,
     store.showProgressMessages,
+    store.showToolCallHistory,
   ])
 
   if (!settingsOpen) return null
@@ -54,6 +57,7 @@ export function SettingsModal() {
     store.setApiUrl(draft.apiUrl)
     store.setWsUrl(draft.wsUrl)
     store.setShowProgressMessages(draft.showProgressMessages)
+    store.setShowToolCallHistory(draft.showToolCallHistory)
 
     // Notify gateway of workspace path change
     fetch(`${draft.apiUrl}/config`, {
@@ -212,6 +216,33 @@ export function SettingsModal() {
             </div>
             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
               {t('progressMessagesHint', curLang)}
+            </p>
+
+            {/* Tool-call history */}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <Label text={t('toolCallHistory', curLang)} className="mb-0" />
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draft.showToolCallHistory}
+                onClick={() => setDraft({ ...draft, showToolCallHistory: !draft.showToolCallHistory })}
+                className={cn(
+                  'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
+                  draft.showToolCallHistory
+                    ? 'bg-[var(--color-accent)]'
+                    : 'bg-[var(--color-bg-tertiary)]',
+                )}
+              >
+                <span
+                  className={cn(
+                    'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+                    draft.showToolCallHistory ? 'translate-x-5' : 'translate-x-0',
+                  )}
+                />
+              </button>
+            </div>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+              {t('toolCallHistoryHint', curLang)}
             </p>
           </Section>
 

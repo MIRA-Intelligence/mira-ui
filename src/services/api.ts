@@ -1,5 +1,6 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import type {
+  AgentProfile,
   LogEntry,
   SkillPlugin,
   SkillPluginScope,
@@ -41,6 +42,8 @@ export interface RemoteProject {
   status?: string
   core_question?: string
   started_at?: string
+  run_mode?: 'manual' | 'auto'
+  agent_profile?: AgentProfile
   has_plan: boolean
   has_meta?: boolean
 }
@@ -70,6 +73,35 @@ export async function updateProjectDisplayName(sessionId: string, displayName: s
     return data.display_name.trim()
   }
   return sessionId
+}
+
+export async function updateProjectRuntimePreferences(
+  sessionId: string,
+  payload: {
+    runMode?: 'manual' | 'auto'
+    agentProfile?: AgentProfile
+  },
+): Promise<{ runMode?: 'manual' | 'auto'; agentProfile?: AgentProfile }> {
+  const body: Record<string, unknown> = {}
+  if (payload.runMode) body.run_mode = payload.runMode
+  if (payload.agentProfile) body.agent_profile = payload.agentProfile
+  if (Object.keys(body).length === 0) return {}
+
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/meta`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return {
+    runMode: (data?.run_mode === 'manual' || data?.run_mode === 'auto') ? data.run_mode : undefined,
+    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'default' || data?.agent_profile === 'research')
+      ? data.agent_profile
+      : undefined,
+  }
 }
 
 export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]> {
