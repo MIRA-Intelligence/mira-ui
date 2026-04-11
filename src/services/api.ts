@@ -1,6 +1,7 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import type {
   AgentProfile,
+  ContractVersion,
   LogEntry,
   SkillPlugin,
   SkillPluginScope,
@@ -44,6 +45,7 @@ export interface RemoteProject {
   started_at?: string
   run_mode?: 'manual' | 'auto'
   agent_profile?: AgentProfile
+  contract_version?: ContractVersion
   has_plan: boolean
   has_meta?: boolean
 }
@@ -80,11 +82,13 @@ export async function updateProjectRuntimePreferences(
   payload: {
     runMode?: 'manual' | 'auto'
     agentProfile?: AgentProfile
+    contractVersion?: ContractVersion
   },
-): Promise<{ runMode?: 'manual' | 'auto'; agentProfile?: AgentProfile }> {
+): Promise<{ runMode?: 'manual' | 'auto'; agentProfile?: AgentProfile; contractVersion?: ContractVersion }> {
   const body: Record<string, unknown> = {}
   if (payload.runMode) body.run_mode = payload.runMode
   if (payload.agentProfile) body.agent_profile = payload.agentProfile
+  if (payload.contractVersion) body.contract_version = payload.contractVersion
   if (Object.keys(body).length === 0) return {}
 
   const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/meta`, {
@@ -100,6 +104,9 @@ export async function updateProjectRuntimePreferences(
     runMode: (data?.run_mode === 'manual' || data?.run_mode === 'auto') ? data.run_mode : undefined,
     agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'default' || data?.agent_profile === 'research')
       ? data.agent_profile
+      : undefined,
+    contractVersion: (data?.contract_version === 1 || data?.contract_version === 2)
+      ? data.contract_version
       : undefined,
   }
 }

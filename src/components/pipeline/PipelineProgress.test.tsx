@@ -84,4 +84,23 @@ describe('PipelineProgress agent profile switch', () => {
     fireEvent.click(engineer)
     expect(useProjectStore.getState().agentProfile).toBe('default')
   })
+
+  it('allows switching contract mode when idle', () => {
+    useProjectStore.setState({
+      tasks: [makeTask(false)],
+      selectedTaskId: 'PRJ-0001',
+      mode: 'auto',
+      agentProfile: 'default',
+      activeStage: 'research',
+    })
+    useAgentStore.setState({ isStreaming: false })
+
+    render(<PipelineProgress />)
+
+    const strict = screen.getByRole('button', { name: 'Strict' })
+    expect(strict).not.toBeDisabled()
+    fireEvent.click(strict)
+    const updatedTask = useProjectStore.getState().tasks.find((task) => task.id === 'PRJ-0001')
+    expect(updatedTask?.contractVersion).toBe(2)
+  })
 })

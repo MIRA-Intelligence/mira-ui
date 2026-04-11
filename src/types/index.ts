@@ -2,6 +2,7 @@
 
 export type PipelineStage = 'research' | 'experiment' | 'result'
 export type AgentProfile = 'engineer' | 'default' | 'research'
+export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
 
@@ -100,6 +101,7 @@ export interface ProjectTask {
   coreQuestion?: string
   runMode?: 'manual' | 'auto'
   agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
   currentExperiment?: string
   experiments: Experiment[]
   knowledge: string[]

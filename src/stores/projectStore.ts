@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile,
+  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile, ContractVersion,
 } from '@/types'
 import {
   deleteProjectFiles,
@@ -27,6 +27,7 @@ interface ProjectState {
   setActiveStage: (stage: PipelineStage) => void
   setAgentProfile: (profile: AgentProfile) => void
   setMode: (mode: 'manual' | 'auto') => void
+  setContractVersion: (version: ContractVersion) => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
@@ -49,6 +50,7 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
 ])
 const MODE_SET = new Set(['manual', 'auto'] as const)
 const AGENT_PROFILE_SET = new Set(['engineer', 'default', 'research'] as const)
+const CONTRACT_VERSION_SET = new Set([1, 2] as const)
 
 function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
   return typeof value === 'string' && MODE_SET.has(value as 'manual' | 'auto')
@@ -59,6 +61,12 @@ function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'):
 function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'default'): AgentProfile {
   return typeof value === 'string' && AGENT_PROFILE_SET.has(value as AgentProfile)
     ? value as AgentProfile
+    : fallback
+}
+
+function normalizeContractVersion(value: unknown, fallback: ContractVersion = 1): ContractVersion {
+  return typeof value === 'number' && CONTRACT_VERSION_SET.has(value as ContractVersion)
+    ? value as ContractVersion
     : fallback
 }
 
@@ -286,6 +294,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!selectedId) return
     void updateProjectRuntimePreferences(selectedId, { runMode: mode })
   },
+  setContractVersion: (contractVersion) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, contractVersion } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { contractVersion })
+  },
 
   renameTask: (id, label) => {
     const nextLabel = label.trim()
@@ -370,6 +390,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       coreQuestion: input.description,
       runMode: mode,
       agentProfile,
+      contractVersion: 1,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
@@ -404,6 +425,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         coreQuestion: r.core_question,
         runMode: normalizeRunMode(r.run_mode, 'auto'),
         agentProfile: normalizeAgentProfile(r.agent_profile, 'default'),
+        contractVersion: normalizeContractVersion(r.contract_version, 1),
         experiments: [],
         knowledge: [],
         research: { references: [], notes: [] },
@@ -418,14 +440,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
       const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
       const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
+      const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
       if (
         task.label === displayName
         && task.runMode === runMode
         && task.agentProfile === agentProfile
+        && task.contractVersion === contractVersion
       ) {
         return task
       }
-      return { ...task, label: displayName, runMode, agentProfile }
+      return { ...task, label: displayName, runMode, agentProfile, contractVersion }
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
