@@ -1,9 +1,15 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile,
+  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile, ContractVersion,
 } from '@/types'
-import { deleteProjectFiles, fetchPlan, fetchProjects, updateProjectDisplayName } from '@/services/api'
+import {
+  deleteProjectFiles,
+  fetchPlan,
+  fetchProjects,
+  updateProjectDisplayName,
+  updateProjectRuntimePreferences,
+} from '@/services/api'
 
 interface ProjectState {
   tasks: ProjectTask[]
@@ -21,6 +27,7 @@ interface ProjectState {
   setActiveStage: (stage: PipelineStage) => void
   setAgentProfile: (profile: AgentProfile) => void
   setMode: (mode: 'manual' | 'auto') => void
+  setContractVersion: (version: ContractVersion) => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
@@ -41,6 +48,27 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'failed',
   'skipped',
 ])
+const MODE_SET = new Set(['manual', 'auto'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'default', 'research'] as const)
+const CONTRACT_VERSION_SET = new Set([1, 2] as const)
+
+function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
+  return typeof value === 'string' && MODE_SET.has(value as 'manual' | 'auto')
+    ? value as 'manual' | 'auto'
+    : fallback
+}
+
+function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'default'): AgentProfile {
+  return typeof value === 'string' && AGENT_PROFILE_SET.has(value as AgentProfile)
+    ? value as AgentProfile
+    : fallback
+}
+
+function normalizeContractVersion(value: unknown, fallback: ContractVersion = 1): ContractVersion {
+  return typeof value === 'number' && CONTRACT_VERSION_SET.has(value as ContractVersion)
+    ? value as ContractVersion
+    : fallback
+}
 
 function safeClone<T>(value: T): T {
   if (value == null) return value
@@ -79,6 +107,23 @@ function isProjectFolderId(id: string): boolean {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function parseExperimentSnapshot(raw: any): Experiment['snapshot'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  return {
+    title: raw.title as string | undefined,
+    question: raw.question as string | undefined,
+    hypothesis: raw.hypothesis as string | undefined,
+    prediction: raw.prediction as string | undefined,
+    method: raw.method as string | undefined,
+    results: raw.results ? safeClone(raw.results) : undefined,
+    conclusion: raw.conclusion as string | undefined,
+    next: raw.next as string | undefined,
+    commit: raw.commit as string | undefined,
+    capturedAt: raw.captured_at as string | undefined,
+    source: raw.source as string | undefined,
+  }
+}
+
 function parseExperiment(raw: any, fallbackIdx: number): Experiment {
   return {
     id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
@@ -94,6 +139,7 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     commit: raw.commit as string | undefined,
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
+    snapshot: parseExperimentSnapshot(raw.snapshot),
   }
 }
 
@@ -212,6 +258,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedTaskId: id,
       selectedExpId: activeExp,
       activeStage: 'research',
+      mode: normalizeRunMode(task?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
@@ -220,8 +268,44 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   selectExperiment: (id) => set({ selectedExpId: id, activeStage: 'experiment' }),
   setActiveStage: (stage) => set({ activeStage: stage }),
-  setAgentProfile: (agentProfile) => set({ agentProfile }),
-  setMode: (mode) => set({ mode }),
+  setAgentProfile: (agentProfile) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      agentProfile,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, agentProfile } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { agentProfile })
+  },
+  setMode: (mode) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      mode,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, runMode: mode } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { runMode: mode })
+  },
+  setContractVersion: (contractVersion) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, contractVersion } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { contractVersion })
+  },
 
   renameTask: (id, label) => {
     const nextLabel = label.trim()
@@ -255,11 +339,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
+    const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
+    const nextSelectedTask = filtered.find((t) => t.id === nextSelectedTaskId)
     set({
       tasks: filtered,
       stats: computeStats(filtered),
-      selectedTaskId: selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId,
+      selectedTaskId: nextSelectedTaskId,
       selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
+      mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
     })
   },
 
@@ -287,6 +375,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (input) => {
+    const { mode, agentProfile } = get()
     const remotes = await fetchProjects()
     const used = collectProjectNumbers([
       ...remotes.map((r) => r.id),
@@ -299,6 +388,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
+      runMode: mode,
+      agentProfile,
+      contractVersion: 1,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
@@ -331,6 +423,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
+        runMode: normalizeRunMode(r.run_mode, 'auto'),
+        agentProfile: normalizeAgentProfile(r.agent_profile, 'default'),
+        contractVersion: normalizeContractVersion(r.contract_version, 1),
         experiments: [],
         knowledge: [],
         research: { references: [], notes: [] },
@@ -343,17 +438,32 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const remote = remotes.find((item) => item.id === task.id)
       if (!remote) return task
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
-      return task.label === displayName ? task : { ...task, label: displayName }
+      const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
+      const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
+      const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
+      if (
+        task.label === displayName
+        && task.runMode === runMode
+        && task.agentProfile === agentProfile
+        && task.contractVersion === contractVersion
+      ) {
+        return task
+      }
+      return { ...task, label: displayName, runMode, agentProfile, contractVersion }
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
     const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
+    const nextSelectedTaskId = hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
+    const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
     set({
       tasks: merged,
       stats: computeStats(merged),
       projectsLoaded: true,
-      selectedTaskId: hasSelected ? selectedTaskId : (merged[0]?.id ?? null),
+      selectedTaskId: nextSelectedTaskId,
       selectedExpId: hasSelected ? get().selectedExpId : null,
+      mode: normalizeRunMode(selectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(selectedTask?.agentProfile, get().agentProfile),
     })
 
     for (const t of newTasks) {

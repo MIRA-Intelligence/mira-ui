@@ -2,6 +2,7 @@
 
 export type PipelineStage = 'research' | 'experiment' | 'result'
 export type AgentProfile = 'engineer' | 'default' | 'research'
+export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
 
@@ -24,6 +25,20 @@ export interface ExperimentProgress {
   current_value?: number | string
 }
 
+export interface ExperimentSnapshot {
+  title?: string
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: ExperimentResult
+  conclusion?: string
+  next?: string
+  commit?: string
+  capturedAt?: string
+  source?: string
+}
+
 /* ── Single experiment ─────────────────────────── */
 
 export interface Experiment {
@@ -40,6 +55,7 @@ export interface Experiment {
   commit?: string
   progress?: ExperimentProgress
   parent?: string
+  snapshot?: ExperimentSnapshot
 }
 
 /* ── Research data (literature & references) ───── */
@@ -83,6 +99,9 @@ export interface ProjectTask {
   status: 'in_progress' | 'completed' | 'pending'
   title: string
   coreQuestion?: string
+  runMode?: 'manual' | 'auto'
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
   currentExperiment?: string
   experiments: Experiment[]
   knowledge: string[]
@@ -160,6 +179,23 @@ export interface TaskPlanExperiment {
     current_value?: number | string
   }
   parent?: string
+  snapshot?: {
+    title?: string
+    question?: string
+    hypothesis?: string
+    prediction?: string
+    method?: string
+    results?: {
+      metrics?: Record<string, unknown>
+      findings?: string
+      artifacts?: string[]
+    }
+    conclusion?: string
+    next?: string
+    commit?: string
+    captured_at?: string
+    source?: string
+  }
 }
 
 /* ── New Project creation ────────────────────────── */
@@ -170,6 +206,7 @@ export interface NewProjectInput {
   description: string
   title?: string
   domain?: string
+  dataPath?: string
   references?: string
   computeBudget?: string
   outputGoal: OutputGoal
@@ -178,7 +215,7 @@ export interface NewProjectInput {
 /* ── WebSocket protocol ─────────────────────────── */
 
 export interface WsMessage {
-  type: 'message' | 'command' | 'set_mode'
+  type: 'message' | 'command' | 'set_mode' | 'bind'
   content: string
   session_id: string
   user_id?: string
