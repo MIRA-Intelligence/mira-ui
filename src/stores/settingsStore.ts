@@ -8,12 +8,14 @@ const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
 
 function defaultApiUrl(): string {
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   return `http://${host}:${GATEWAY_PORT}/api`
 }
 
 function defaultWsUrl(): string {
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${host}:${GATEWAY_PORT}/ws`
 }
@@ -36,6 +38,7 @@ interface SettingsState {
   setLanguage: (l: Language) => void
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
+  setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
   setEngineBootstrap: (payload: {
@@ -145,6 +148,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setLanguage: (l) => { set({ language: l }); persist(get()) },
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
+  setConnectionEndpoints: (apiUrl, wsUrl) => {
+    set((state) => (
+      state.apiUrl === apiUrl && state.wsUrl === wsUrl
+        ? state
+        : { apiUrl, wsUrl }
+    ))
+    persist(get())
+  },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
