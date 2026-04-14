@@ -69,6 +69,26 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: npm run dist:win
 
+      - name: Package Windows setup and portable executables as zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem -Path release -Filter "MedPilotUI-*-win-*-setup.exe" | Select-Object -First 1
+          if (-not $setupExe) {
+            Write-Error "Setup executable not found in release/"
+            exit 1
+          }
+          $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
+          Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
+
+          $portableExe = Get-ChildItem -Path release -Filter "MedPilotUI-*-win-*-portable.exe" | Select-Object -First 1
+          if (-not $portableExe) {
+            Write-Error "Portable executable not found in release/"
+            exit 1
+          }
+          $portableZip = [System.IO.Path]::ChangeExtension($portableExe.FullName, ".zip")
+          Compress-Archive -Path $portableExe.FullName -DestinationPath $portableZip -Force
+
       - name: Upload macOS release assets
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
@@ -88,10 +108,8 @@ jobs:
         with:
           name: medpilotui-windows
           path: |
-            release/MedPilotUI-*-win-*.exe
-            release/MedPilotUI-*-win-*.exe.blockmap
-            release/latest.yml
-            release/app-update.yml
+            release/MedPilotUI-*-win-*-setup.zip
+            release/MedPilotUI-*-win-*-portable.zip
 
   publish-release:
     needs: build-desktop
@@ -115,7 +133,5 @@ jobs:
             release-assets/*.dmg.blockmap
             release-assets/*.zip
             release-assets/*.zip.blockmap
-            release-assets/*.exe
-            release-assets/*.exe.blockmap
             release-assets/latest*.yml
             release-assets/app-update.yml

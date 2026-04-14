@@ -117,7 +117,7 @@ Target specific desktop platforms:
 # macOS artifacts (dmg + zip)
 npm run dist:mac
 
-# Windows artifacts (nsis + portable)
+# Windows artifacts (nsis setup + portable)
 npm run dist:win
 
 # Build both (best used in CI)
@@ -135,7 +135,7 @@ npm run dist:all
 - `npm run pack` → generate unpacked desktop app into `release/`
 - `npm run dist` → generate installers for the current OS into `release/`
 - `npm run dist:mac` → generate macOS `dmg` and `zip` packages
-- `npm run dist:win` → generate Windows `nsis` and `portable` packages
+- `npm run dist:win` → generate Windows setup/portable executables (CI wraps each into zip before release upload)
 - `npm run dist:all` → attempt both macOS and Windows packaging in one run
 - `npm run dist:mac` uses local Electron distribution and unsigned packaging (`mac.identity=null`) for local release preparation
 
