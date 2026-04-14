@@ -6,6 +6,7 @@ import type {
   SkillPlugin,
   SkillPluginScope,
   SkillPluginTargetType,
+  TaskPlanContract,
   TaskPlan,
 } from '@/types'
 
@@ -21,6 +22,20 @@ export async function fetchPlan(sessionId?: string): Promise<TaskPlan | null> {
     const data = await resp.json()
     if (!data || data.error) return null
     return data as TaskPlan
+  } catch {
+    return null
+  }
+}
+
+export async function fetchPlanContract(sessionId?: string): Promise<TaskPlanContract | null> {
+  if (!sessionId) return null
+  try {
+    const qs = `?session_id=${encodeURIComponent(sessionId)}`
+    const resp = await fetch(`${getApiUrl()}/plan/contract${qs}`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!data || data.error) return null
+    return data as TaskPlanContract
   } catch {
     return null
   }

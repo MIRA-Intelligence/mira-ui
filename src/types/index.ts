@@ -25,6 +25,27 @@ export interface ExperimentProgress {
   current_value?: number | string
 }
 
+export interface ExperimentIsolationTest {
+  control?: string
+  treatment?: string
+  isolated_variable?: string
+  result?: string
+}
+
+export interface ExperimentPostMortem {
+  residual_analysis?: string
+  implementation_fidelity?: string
+  five_whys?: string[]
+}
+
+export interface ExperimentEvidenceRef {
+  ref_id?: string
+  relevance?: string
+  metric_key?: string
+  artifact?: string
+  [key: string]: unknown
+}
+
 export interface ExperimentSnapshot {
   title?: string
   question?: string
@@ -35,6 +56,10 @@ export interface ExperimentSnapshot {
   conclusion?: string
   next?: string
   commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
   capturedAt?: string
   source?: string
 }
@@ -53,6 +78,10 @@ export interface Experiment {
   conclusion?: string
   next?: string
   commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
   progress?: ExperimentProgress
   parent?: string
   snapshot?: ExperimentSnapshot
@@ -172,6 +201,10 @@ export interface TaskPlanExperiment {
   conclusion?: string
   next?: string
   commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
   progress?: {
     epoch?: number
     total_epochs?: number
@@ -193,9 +226,21 @@ export interface TaskPlanExperiment {
     conclusion?: string
     next?: string
     commit?: string
+    theoretical_proof?: string
+    isolation_test?: ExperimentIsolationTest
+    post_mortem?: ExperimentPostMortem
+    evidence_refs?: Array<ExperimentEvidenceRef | string>
     captured_at?: string
     source?: string
   }
+}
+
+export interface TaskPlanContract {
+  profile: AgentProfile
+  contract_version: ContractVersion
+  required_completed_fields: string[]
+  required_falsify_fields: string[]
+  falsify_keywords: string[]
 }
 
 /* ── New Project creation ────────────────────────── */

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Experiment } from '@/types'
+import type { Experiment, ExperimentEvidenceRef } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getProjectArtifactUrl } from '@/services/api'
@@ -26,6 +26,38 @@ function Section({ icon, label, children }: { icon: string; label: string; child
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNonEmpty(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0
+  if (typeof value === 'number' || typeof value === 'boolean') return true
+  if (Array.isArray(value)) return value.some((item) => isNonEmpty(item))
+  if (isRecord(value)) return Object.values(value).some((item) => isNonEmpty(item))
+  return value != null
+}
+
+function getNestedValue(payload: unknown, dottedPath: string): unknown {
+  let current: unknown = payload
+  for (const segment of dottedPath.split('.')) {
+    if (!isRecord(current) || !(segment in current)) return undefined
+    current = current[segment]
+  }
+  return current
+}
+
+function looksLikeHypothesisRejection(conclusion: string | undefined, keywords: string[] | undefined): boolean {
+  if (!conclusion || !keywords || keywords.length === 0) return false
+  const lowered = conclusion.toLowerCase()
+  return keywords.some((keyword) => lowered.includes(keyword.toLowerCase()))
+}
+
+function formatEvidenceRef(ref: ExperimentEvidenceRef, index: number): string {
+  const parts: string[] = []
+  if (typeof ref.ref_id === 'string' && ref.ref_id.trim()) parts.push(ref.ref_id.trim())
+  if (typeof ref.metric_key === 'string' && ref.metric_key.trim()) parts.push(`metric=${ref.metric_key.trim()}`)
+  if (typeof ref.artifact === 'string' && ref.artifact.trim()) parts.push(`artifact=${ref.artifact.trim()}`)
+  if (typeof ref.relevance === 'string' && ref.relevance.trim()) parts.push(ref.relevance.trim())
+  return parts.length > 0 ? parts.join(' - ') : `#${index + 1}`
 }
 
 function formatDecimal(value: unknown, digits: number): string | null {
@@ -114,6 +146,8 @@ function ProgressBar({ epoch, total, metric, value, epochLabel }: {
 
 export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const selectedTask = useProjectStore((s) => s.tasks.find((task) => task.id === s.selectedTaskId))
+  const taskPlanContract = useProjectStore((s) => (s.selectedTaskId ? s.contractsByTask[s.selectedTaskId] : undefined))
   const lang = useSettingsStore((s) => s.language)
   const [expandedImageArtifacts, setExpandedImageArtifacts] = useState<Record<string, boolean>>({})
   const [useSnapshotView, setUseSnapshotView] = useState(false)
@@ -133,6 +167,10 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
     conclusion: experiment.conclusion,
     next: experiment.next,
     commit: experiment.commit,
+    theoretical_proof: experiment.theoretical_proof,
+    isolation_test: experiment.isolation_test,
+    post_mortem: experiment.post_mortem,
+    evidence_refs: experiment.evidence_refs,
   })
   const snapshotSignature = experiment.snapshot ? JSON.stringify({
     title: experiment.snapshot.title,
@@ -144,6 +182,10 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
     conclusion: experiment.snapshot.conclusion,
     next: experiment.snapshot.next,
     commit: experiment.snapshot.commit,
+    theoretical_proof: experiment.snapshot.theoretical_proof,
+    isolation_test: experiment.snapshot.isolation_test,
+    post_mortem: experiment.snapshot.post_mortem,
+    evidence_refs: experiment.snapshot.evidence_refs,
   }) : ''
   const snapshotDiffers = !!experiment.snapshot && liveSignature !== snapshotSignature
   const showSnapshotToggle = experiment.status === 'completed'
@@ -177,7 +219,24 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
     || viewedExperiment.results
     || viewedExperiment.conclusion
     || viewedExperiment.next
+    || viewedExperiment.theoretical_proof
+    || viewedExperiment.isolation_test
+    || viewedExperiment.post_mortem
+    || viewedExperiment.evidence_refs
     || viewedExperiment.progress,
+  )
+  const isHypothesisRejected = looksLikeHypothesisRejection(
+    viewedExperiment.conclusion,
+    taskPlanContract?.falsify_keywords,
+  )
+  const requiredFields = taskPlanContract
+    ? Array.from(new Set([
+        ...taskPlanContract.required_completed_fields,
+        ...(isHypothesisRejected ? taskPlanContract.required_falsify_fields : []),
+      ]))
+    : []
+  const missingRequiredFields = requiredFields.filter(
+    (field) => !isNonEmpty(getNestedValue(viewedExperiment as unknown, field)),
   )
 
   return (
@@ -247,6 +306,85 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         {viewedExperiment.method && (
           <Section icon="⚙" label={t('method', lang)}>
             <p className="text-[var(--color-text-secondary)]">{viewedExperiment.method}</p>
+          </Section>
+        )}
+
+        {viewedExperiment.theoretical_proof && (
+          <Section icon="∑" label={t('theoreticalProof', lang)}>
+            <p className="text-[var(--color-text-secondary)]">{viewedExperiment.theoretical_proof}</p>
+          </Section>
+        )}
+
+        {viewedExperiment.isolation_test && (
+          <Section icon="🧪" label={t('isolationTest', lang)}>
+            {viewedExperiment.isolation_test.control && (
+              <p><span className="text-[var(--color-text-muted)]">{t('controlGroup', lang)}: </span>{viewedExperiment.isolation_test.control}</p>
+            )}
+            {viewedExperiment.isolation_test.treatment && (
+              <p><span className="text-[var(--color-text-muted)]">{t('treatmentGroup', lang)}: </span>{viewedExperiment.isolation_test.treatment}</p>
+            )}
+            {viewedExperiment.isolation_test.isolated_variable && (
+              <p><span className="text-[var(--color-text-muted)]">{t('isolatedVariable', lang)}: </span>{viewedExperiment.isolation_test.isolated_variable}</p>
+            )}
+            {viewedExperiment.isolation_test.result && (
+              <p><span className="text-[var(--color-text-muted)]">{t('results', lang)}: </span>{viewedExperiment.isolation_test.result}</p>
+            )}
+          </Section>
+        )}
+
+        {viewedExperiment.post_mortem && (
+          <Section icon="🩺" label={t('postMortem', lang)}>
+            {viewedExperiment.post_mortem.residual_analysis && (
+              <p><span className="text-[var(--color-text-muted)]">{t('residualAnalysis', lang)}: </span>{viewedExperiment.post_mortem.residual_analysis}</p>
+            )}
+            {viewedExperiment.post_mortem.implementation_fidelity && (
+              <p><span className="text-[var(--color-text-muted)]">{t('implementationFidelity', lang)}: </span>{viewedExperiment.post_mortem.implementation_fidelity}</p>
+            )}
+            {Array.isArray(viewedExperiment.post_mortem.five_whys) && viewedExperiment.post_mortem.five_whys.length > 0 && (
+              <div className="mt-2">
+                <div className="text-[var(--color-text-muted)]">{t('fiveWhys', lang)}:</div>
+                <ol className="list-decimal pl-5 mt-1 space-y-1">
+                  {viewedExperiment.post_mortem.five_whys.map((item, idx) => (
+                    <li key={`${item}-${idx}`}>{item}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {Array.isArray(viewedExperiment.evidence_refs) && viewedExperiment.evidence_refs.length > 0 && (
+          <Section icon="📚" label={t('evidenceReferences', lang)}>
+            <ul className="space-y-1">
+              {viewedExperiment.evidence_refs.map((ref, idx) => (
+                <li key={`${idx}-${typeof ref === 'object' ? JSON.stringify(ref) : String(ref)}`}>
+                  {typeof ref === 'string' ? ref : formatEvidenceRef(ref, idx)}
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {taskPlanContract && viewedExperiment.status === 'completed' && (
+          <Section icon="🧭" label={t('contractRequirements', lang)}>
+            <p className="text-[var(--color-text-muted)] mb-2">
+              {selectedTask?.agentProfile ?? taskPlanContract.profile} · v{taskPlanContract.contract_version}
+              {isHypothesisRejected ? ` · ${t('hypothesisRejected', lang)}` : ''}
+            </p>
+            {requiredFields.length === 0 ? (
+              <p className="text-[var(--color-text-muted)]">{t('noContractRequirements', lang)}</p>
+            ) : (
+              <ul className="space-y-1">
+                {requiredFields.map((field) => {
+                  const missing = missingRequiredFields.includes(field)
+                  return (
+                    <li key={field} className={missing ? 'text-[var(--color-error)]' : 'text-[var(--color-success)]'}>
+                      {missing ? '✗' : '✓'} <span className="font-mono">{field}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </Section>
         )}
 
