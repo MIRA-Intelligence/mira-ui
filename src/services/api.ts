@@ -1,9 +1,12 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import type {
+  AgentProfile,
+  ContractVersion,
   LogEntry,
   SkillPlugin,
   SkillPluginScope,
   SkillPluginTargetType,
+  TaskPlanContract,
   TaskPlan,
 } from '@/types'
 
@@ -19,6 +22,20 @@ export async function fetchPlan(sessionId?: string): Promise<TaskPlan | null> {
     const data = await resp.json()
     if (!data || data.error) return null
     return data as TaskPlan
+  } catch {
+    return null
+  }
+}
+
+export async function fetchPlanContract(sessionId?: string): Promise<TaskPlanContract | null> {
+  if (!sessionId) return null
+  try {
+    const qs = `?session_id=${encodeURIComponent(sessionId)}`
+    const resp = await fetch(`${getApiUrl()}/plan/contract${qs}`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!data || data.error) return null
+    return data as TaskPlanContract
   } catch {
     return null
   }
@@ -41,6 +58,9 @@ export interface RemoteProject {
   status?: string
   core_question?: string
   started_at?: string
+  run_mode?: 'manual' | 'auto'
+  agent_profile?: AgentProfile
+  contract_version?: ContractVersion
   has_plan: boolean
   has_meta?: boolean
 }
@@ -70,6 +90,40 @@ export async function updateProjectDisplayName(sessionId: string, displayName: s
     return data.display_name.trim()
   }
   return sessionId
+}
+
+export async function updateProjectRuntimePreferences(
+  sessionId: string,
+  payload: {
+    runMode?: 'manual' | 'auto'
+    agentProfile?: AgentProfile
+    contractVersion?: ContractVersion
+  },
+): Promise<{ runMode?: 'manual' | 'auto'; agentProfile?: AgentProfile; contractVersion?: ContractVersion }> {
+  const body: Record<string, unknown> = {}
+  if (payload.runMode) body.run_mode = payload.runMode
+  if (payload.agentProfile) body.agent_profile = payload.agentProfile
+  if (payload.contractVersion) body.contract_version = payload.contractVersion
+  if (Object.keys(body).length === 0) return {}
+
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/meta`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  const data = await resp.json()
+  return {
+    runMode: (data?.run_mode === 'manual' || data?.run_mode === 'auto') ? data.run_mode : undefined,
+    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'default' || data?.agent_profile === 'research')
+      ? data.agent_profile
+      : undefined,
+    contractVersion: (data?.contract_version === 1 || data?.contract_version === 2)
+      ? data.contract_version
+      : undefined,
+  }
 }
 
 export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]> {
@@ -103,6 +157,13 @@ export interface UploadedProjectFile {
   size: number
 }
 
+export interface DataPathValidationResult {
+  ok: boolean
+  error?: string
+  kind?: 'file' | 'directory'
+  resolved_path?: string
+}
+
 export async function uploadProjectFiles(sessionId: string, files: File[]): Promise<UploadedProjectFile[]> {
   if (files.length === 0) return []
 
@@ -128,6 +189,31 @@ export async function uploadProjectFiles(sessionId: string, files: File[]): Prom
 
   const data = await resp.json()
   return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
+}
+
+export async function validateDataPath(path: string): Promise<DataPathValidationResult> {
+  const resp = await fetch(`${getApiUrl()}/data-path/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!resp.ok) {
+    let msg = ''
+    try {
+      const data = await resp.json()
+      msg = typeof data?.error === 'string' ? data.error : JSON.stringify(data)
+    } catch {
+      msg = await resp.text()
+    }
+    return { ok: false, error: msg || 'validation request failed' }
+  }
+  const data = await resp.json()
+  return {
+    ok: !!data?.ok,
+    error: typeof data?.error === 'string' ? data.error : undefined,
+    kind: data?.kind === 'file' || data?.kind === 'directory' ? data.kind : undefined,
+    resolved_path: typeof data?.resolved_path === 'string' ? data.resolved_path : undefined,
+  }
 }
 
 export function getProjectArtifactUrl(sessionId: string, artifactPath: string): string {

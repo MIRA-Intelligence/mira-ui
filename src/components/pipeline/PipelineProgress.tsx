@@ -3,7 +3,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
-import type { AgentProfile, PipelineStage } from '@/types'
+import type { AgentProfile, ContractVersion, PipelineStage } from '@/types'
 import { t } from '@/i18n'
 
 const STAGES: { key: PipelineStage; icon: string }[] = [
@@ -23,6 +23,11 @@ const AGENT_PROFILE_OFFSET: Record<AgentProfile, number> = {
   default: 100,
   research: 200,
 }
+
+const CONTRACT_MODES: { key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }[] = [
+  { key: 1, labelKey: 'contractCompat' },
+  { key: 2, labelKey: 'contractStrict' },
+]
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
   if (stage === 'research') {
@@ -50,13 +55,17 @@ export function PipelineProgress() {
     agentProfile,
     setActiveStage,
     setAgentProfile,
+    setContractVersion,
   } = useProjectStore()
   const isStreaming = useAgentStore((s) => s.isStreaming)
   const lang = useSettingsStore((s) => s.language)
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const task = tasks.find((t) => t.id === selectedTaskId)
-  const canSwitchAgentProfile = mode === 'manual'
+  const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
+  const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
+  const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
+  const contractVersion = task?.contractVersion ?? 1
   const agentProfileSlider = (
     <div className="min-w-[210px] shrink-0">
       <div
@@ -143,6 +152,35 @@ export function PipelineProgress() {
       {toolButtons}
       <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
       {agentProfileSlider}
+      <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
+      <div
+        className={cn(
+          'flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5',
+          !canSwitchContractVersion && 'opacity-60',
+        )}
+        title={!canSwitchContractVersion ? t('contractSwitchManualOnly', lang) : undefined}
+      >
+        {CONTRACT_MODES.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            disabled={!canSwitchContractVersion}
+            onClick={() => {
+              if (!canSwitchContractVersion) return
+              setContractVersion(item.key)
+            }}
+            className={cn(
+              'px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors',
+              contractVersion === item.key
+                ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+              !canSwitchContractVersion && 'cursor-not-allowed',
+            )}
+          >
+            {t(item.labelKey, lang)}
+          </button>
+        ))}
+      </div>
 
       <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 

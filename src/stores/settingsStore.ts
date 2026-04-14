@@ -8,12 +8,14 @@ const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
 
 function defaultApiUrl(): string {
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   return `http://${host}:${GATEWAY_PORT}/api`
 }
 
 function defaultWsUrl(): string {
-  const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost'
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${host}:${GATEWAY_PORT}/ws`
 }
@@ -25,6 +27,7 @@ interface SettingsState {
   apiUrl: string
   wsUrl: string
   showProgressMessages: boolean
+  showToolCallHistory: boolean
   settingsOpen: boolean
   engineStatus: EngineStatus
   engineMessage: string | null
@@ -35,7 +38,9 @@ interface SettingsState {
   setLanguage: (l: Language) => void
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
+  setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
+  setShowToolCallHistory: (v: boolean) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
     message: string | null
@@ -93,6 +98,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.showProgressMessages === 'boolean') {
       sanitized.showProgressMessages = parsed.showProgressMessages
     }
+    if (typeof parsed.showToolCallHistory === 'boolean') {
+      sanitized.showToolCallHistory = parsed.showToolCallHistory
+    }
 
     return sanitized
   } catch { /* ignore */ }
@@ -100,7 +108,15 @@ function loadPersisted(): Partial<SettingsState> {
 }
 
 function persist(state: SettingsState) {
-  const { workspacePath, theme, language, apiUrl, wsUrl, showProgressMessages } = state
+  const {
+    workspacePath,
+    theme,
+    language,
+    apiUrl,
+    wsUrl,
+    showProgressMessages,
+    showToolCallHistory,
+  } = state
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     workspacePath,
     theme,
@@ -108,6 +124,7 @@ function persist(state: SettingsState) {
     apiUrl,
     wsUrl,
     showProgressMessages,
+    showToolCallHistory,
   }))
 }
 
@@ -120,6 +137,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   apiUrl: saved.apiUrl ?? defaultApiUrl(),
   wsUrl: saved.wsUrl ?? defaultWsUrl(),
   showProgressMessages: saved.showProgressMessages ?? true,
+  showToolCallHistory: saved.showToolCallHistory ?? true,
   settingsOpen: false,
   engineStatus: 'unknown',
   engineMessage: null,
@@ -130,7 +148,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setLanguage: (l) => { set({ language: l }); persist(get()) },
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
+  setConnectionEndpoints: (apiUrl, wsUrl) => {
+    set((state) => (
+      state.apiUrl === apiUrl && state.wsUrl === wsUrl
+        ? state
+        : { apiUrl, wsUrl }
+    ))
+    persist(get())
+  },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
+  setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
     const nextVersion = version ?? null
     set((state) => {

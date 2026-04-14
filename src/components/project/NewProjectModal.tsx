@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
-import { uploadProjectFiles } from '@/services/api'
+import { uploadProjectFiles, validateDataPath } from '@/services/api'
 import { cn } from '@/lib/utils'
 import type { OutputGoal, NewProjectInput } from '@/types'
 import { t } from '@/i18n'
@@ -72,6 +72,9 @@ function buildAgentMessage(
   if (input.computeBudget) {
     lines.push('', `**Compute Budget**: ${input.computeBudget}`)
   }
+  if (input.dataPath) {
+    lines.push('', `## Server Data Path`, input.dataPath)
+  }
   lines.push('', `**Output Goal**: ${input.outputGoal}`)
   const modeInstruction = runMode === 'manual'
     ? 'After completing the research survey, STOP and report your findings.'
@@ -84,6 +87,11 @@ function buildAgentMessage(
   return lines.join('\n')
 }
 
+type PathCheckState = {
+  status: 'idle' | 'testing' | 'success' | 'error'
+  message: string
+}
+
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
   const { createProject, deleteTask, projectsLoaded } = useProjectStore()
@@ -91,8 +99,12 @@ export function NewProjectModal() {
   const { workspacePath, language: lang } = useSettingsStore()
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const pathCheckSeqRef = useRef(0)
+  const pathCheckTimerRef = useRef<number | null>(null)
   const [description, setDescription] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [serverDataPath, setServerDataPath] = useState('')
+  const [pathCheck, setPathCheck] = useState<PathCheckState>({ status: 'idle', message: '' })
   const [creating, setCreating] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [title, setTitle] = useState('')
@@ -102,9 +114,54 @@ export function NewProjectModal() {
   const [outputGoal, setOutputGoal] = useState<OutputGoal>('paper')
   const [showAdvanced, setShowAdvanced] = useState(false)
 
-  if (!newProjectOpen) return null
-
   const canCreate = description.trim().length > 0 && connected && projectsLoaded && !creating
+
+  const clearPathCheckTimer = () => {
+    if (pathCheckTimerRef.current !== null) {
+      window.clearTimeout(pathCheckTimerRef.current)
+      pathCheckTimerRef.current = null
+    }
+  }
+
+  const runPathValidation = async (rawPath: string) => {
+    const value = rawPath.trim()
+    if (!value) {
+      setPathCheck({ status: 'idle', message: '' })
+      return
+    }
+    const seq = ++pathCheckSeqRef.current
+    setPathCheck({ status: 'testing', message: t('dataPathChecking', lang) })
+    const result = await validateDataPath(value)
+    if (seq !== pathCheckSeqRef.current) return
+    if (result.ok) {
+      const target = result.resolved_path || value
+      const kind = result.kind === 'directory' ? t('directoryLabel', lang) : t('fileLabel', lang)
+      setPathCheck({
+        status: 'success',
+        message: t('dataPathVisible', lang, { kind, path: target }),
+      })
+      return
+    }
+    setPathCheck({
+      status: 'error',
+      message: t('dataPathInvisible', lang, { reason: result.error || t('unknownError', lang) }),
+    })
+  }
+
+  const schedulePathValidation = (value: string) => {
+    clearPathCheckTimer()
+    if (!value.trim()) {
+      setPathCheck({ status: 'idle', message: '' })
+      return
+    }
+    pathCheckTimerRef.current = window.setTimeout(() => {
+      void runPathValidation(value)
+    }, 500)
+  }
+
+  useEffect(() => () => clearPathCheckTimer(), [])
+
+  if (!newProjectOpen) return null
 
   const handleFilesAdded = (files: FileList | File[]) => {
     setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
@@ -135,6 +192,7 @@ export function NewProjectModal() {
       description: description.trim(),
       title: title.trim() || undefined,
       domain: domain.trim() || undefined,
+      dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
       outputGoal,
@@ -174,6 +232,8 @@ export function NewProjectModal() {
     // Reset form
     setDescription('')
     setSelectedFiles([])
+    setServerDataPath('')
+    setPathCheck({ status: 'idle', message: '' })
     setTitle('')
     setDomain('')
     setReferences('')
@@ -239,12 +299,41 @@ export function NewProjectModal() {
                   e.currentTarget.value = ''
                 }}
               />
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-[var(--color-text-muted)]">
-                  {selectedFiles.length > 0
-                    ? t('filesSelected', lang, { count: selectedFiles.length })
-                    : t('dragFilesHint', lang)}
-                </p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={serverDataPath}
+                  onChange={(e) => {
+                    setServerDataPath(e.target.value)
+                    schedulePathValidation(e.target.value)
+                  }}
+                  onBlur={() => { void runPathValidation(serverDataPath) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      void runPathValidation(serverDataPath)
+                    }
+                  }}
+                  placeholder={t('dataPathPlaceholder', lang)}
+                  className="flex-1 min-w-0 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+                />
+                <span
+                  aria-label={
+                    pathCheck.status === 'success'
+                      ? t('success', lang)
+                      : pathCheck.status === 'error'
+                        ? t('failed', lang)
+                        : pathCheck.status === 'testing'
+                          ? t('checking', lang)
+                          : t('idle', lang)
+                  }
+                  className={cn(
+                    'h-2 w-2 rounded-full shrink-0 transition-all',
+                    pathCheck.status === 'success' && 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]',
+                    pathCheck.status === 'error' && 'bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.75)]',
+                    pathCheck.status === 'testing' && 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.75)]',
+                    pathCheck.status === 'idle' && 'bg-[var(--color-text-muted)]/60 shadow-[0_0_4px_rgba(148,163,184,0.35)]',
+                  )}
+                />
                 <button
                   type="button"
                   onClick={handleBrowse}
@@ -253,6 +342,11 @@ export function NewProjectModal() {
                   {t('browse', lang)}
                 </button>
               </div>
+              {selectedFiles.length > 0 && (
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  {t('filesSelected', lang, { count: selectedFiles.length })}
+                </p>
+              )}
               {selectedFiles.length > 0 && (
                 <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
                   {selectedFiles.map((file, idx) => (
@@ -268,6 +362,19 @@ export function NewProjectModal() {
                     </div>
                   ))}
                 </div>
+              )}
+              {pathCheck.message && (
+                <p
+                  className={cn(
+                    'mt-1.5 text-[11px]',
+                    pathCheck.status === 'success' && 'text-emerald-400',
+                    pathCheck.status === 'error' && 'text-red-400',
+                    pathCheck.status === 'testing' && 'text-amber-400',
+                    pathCheck.status === 'idle' && 'text-[var(--color-text-muted)]',
+                  )}
+                >
+                  {pathCheck.message}
+                </p>
               )}
             </div>
             {uploadError && (
