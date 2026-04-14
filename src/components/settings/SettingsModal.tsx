@@ -51,16 +51,23 @@ export function SettingsModal() {
   if (!settingsOpen) return null
 
   const handleSave = () => {
+    const nextApiUrl = draft.apiUrl.trim()
+    const nextWsUrl = draft.wsUrl.trim()
+    const connectionChanged = nextApiUrl !== store.apiUrl || nextWsUrl !== store.wsUrl
+
     store.setWorkspacePath(draft.workspacePath)
     store.setTheme(draft.theme)
     store.setLanguage(draft.language)
-    store.setApiUrl(draft.apiUrl)
-    store.setWsUrl(draft.wsUrl)
+    if (connectionChanged) {
+      // Trigger useWebSocket bootstrap only when endpoint changes.
+      store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
+      store.setEngineBootstrap({ status: 'unknown', message: null, version: null })
+    }
     store.setShowProgressMessages(draft.showProgressMessages)
     store.setShowToolCallHistory(draft.showToolCallHistory)
 
     // Notify gateway of workspace path change
-    fetch(`${draft.apiUrl}/config`, {
+    fetch(`${nextApiUrl}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ projects_root: draft.workspacePath }),

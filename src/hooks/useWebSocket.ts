@@ -22,6 +22,8 @@ export function useWebSocket() {
   const handleWsMessage = useAgentStore((s) => s.handleWsMessage)
   const setConnected = useAgentStore((s) => s.setConnected)
   const setEngineBootstrap = useSettingsStore((s) => s.setEngineBootstrap)
+  const apiUrl = useSettingsStore((s) => s.apiUrl)
+  const wsUrl = useSettingsStore((s) => s.wsUrl)
 
   useEffect(() => {
     let disposed = false
@@ -30,8 +32,16 @@ export function useWebSocket() {
 
     const bootstrap = async () => {
       try {
-        const { apiUrl } = useSettingsStore.getState()
         const safeApiUrl = typeof apiUrl === 'string' ? apiUrl : 'http://127.0.0.1:18790/api'
+        if (!wsUrl || !wsUrl.trim()) {
+          setEngineBootstrap({
+            status: 'unreachable',
+            message: 'WebSocket URL is empty. Update wsUrl in settings and retry.',
+            version: null,
+          })
+          setConnected(false)
+          return
+        }
         const probe = await probeEngineCompatibility(safeApiUrl)
         if (disposed) return
 
@@ -76,5 +86,5 @@ export function useWebSocket() {
       unsubStatus()
       wsClient.disconnect()
     }
-  }, [handleWsMessage, setConnected, setEngineBootstrap])
+  }, [apiUrl, wsUrl, handleWsMessage, setConnected, setEngineBootstrap])
 }
