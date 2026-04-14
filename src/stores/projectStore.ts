@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData, AgentProfile, ContractVersion,
+  NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AgentProfile, ContractVersion,
 } from '@/types'
 import {
   deleteProjectFiles,
   fetchPlan,
+  fetchPlanContract,
   fetchProjects,
   updateProjectDisplayName,
   updateProjectRuntimePreferences,
@@ -21,6 +22,7 @@ interface ProjectState {
   stats: Stats
   startedAt: number
   projectsLoaded: boolean
+  contractsByTask: Record<string, TaskPlanContract>
 
   selectTask: (id: string) => void
   selectExperiment: (id: string | null) => void
@@ -119,6 +121,10 @@ function parseExperimentSnapshot(raw: any): Experiment['snapshot'] {
     conclusion: raw.conclusion as string | undefined,
     next: raw.next as string | undefined,
     commit: raw.commit as string | undefined,
+    theoretical_proof: raw.theoretical_proof as string | undefined,
+    isolation_test: raw.isolation_test ? safeClone(raw.isolation_test) : undefined,
+    post_mortem: raw.post_mortem ? safeClone(raw.post_mortem) : undefined,
+    evidence_refs: Array.isArray(raw.evidence_refs) ? safeClone(raw.evidence_refs) : undefined,
     capturedAt: raw.captured_at as string | undefined,
     source: raw.source as string | undefined,
   }
@@ -137,6 +143,10 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     conclusion: raw.conclusion as string | undefined,
     next: raw.next as string | undefined,
     commit: raw.commit as string | undefined,
+    theoretical_proof: raw.theoretical_proof as string | undefined,
+    isolation_test: raw.isolation_test ? safeClone(raw.isolation_test) : undefined,
+    post_mortem: raw.post_mortem ? safeClone(raw.post_mortem) : undefined,
+    evidence_refs: Array.isArray(raw.evidence_refs) ? safeClone(raw.evidence_refs) : undefined,
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
     snapshot: parseExperimentSnapshot(raw.snapshot),
@@ -250,6 +260,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
   projectsLoaded: false,
+  contractsByTask: {},
 
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
@@ -346,6 +357,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       stats: computeStats(filtered),
       selectedTaskId: nextSelectedTaskId,
       selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
+      contractsByTask: Object.fromEntries(
+        Object.entries(get().contractsByTask).filter(([taskId]) => taskId !== id),
+      ),
       mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
     })
@@ -453,11 +467,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
+    const mergedTaskIds = new Set(merged.map((task) => task.id))
+    const nextContractsByTask = Object.fromEntries(
+      Object.entries(get().contractsByTask).filter(([taskId]) => mergedTaskIds.has(taskId)),
+    )
     const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
     const nextSelectedTaskId = hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
     const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
     set({
       tasks: merged,
+      contractsByTask: nextContractsByTask,
       stats: computeStats(merged),
       projectsLoaded: true,
       selectedTaskId: nextSelectedTaskId,
@@ -472,12 +491,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   refreshPlan: async (projectId: string) => {
-    const plan = await fetchPlan(projectId) as TaskPlan | null
-    if (!plan) return
+    const [plan, contract] = await Promise.all([
+      fetchPlan(projectId) as Promise<TaskPlan | null>,
+      fetchPlanContract(projectId),
+    ])
+    if (!plan && !contract) return
 
-    const { tasks, selectedTaskId } = get()
+    const { tasks, selectedTaskId, contractsByTask } = get()
     const idx = tasks.findIndex((t) => t.id === projectId)
-    if (idx < 0) return
+    const nextContracts = contract ? { ...contractsByTask, [projectId]: contract } : contractsByTask
+    if (!plan) {
+      if (contract) {
+        set({ contractsByTask: nextContracts })
+      }
+      return
+    }
+    if (idx < 0) {
+      if (contract) {
+        set({ contractsByTask: nextContracts })
+      }
+      return
+    }
 
     const updated = [...tasks]
     updated[idx] = applyPlanToTask(tasks[idx], plan)
@@ -487,6 +521,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       tasks: updated,
       stats: computeStats(updated),
+      contractsByTask: nextContracts,
       ...(isSelected && {
         selectedExpId: resolveSelectedExperimentId(applied, get().selectedExpId),
         startedAt: applied.startedAt
