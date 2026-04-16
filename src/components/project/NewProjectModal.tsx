@@ -22,19 +22,8 @@ const OUTPUT_GOALS: { value: OutputGoal; label: string; icon: string }[] = [
   { value: 'code', label: 'Code', icon: '💻' },
 ]
 
-const DOMAIN_SUGGESTIONS = [
-  'Medical Imaging',
-  'NLP',
-  'Computer Vision',
-  'Reinforcement Learning',
-  'Drug Discovery',
-  'Genomics',
-  'Signal Processing',
-  'Robotics',
-]
-
 const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
-const DEFAULT_GOAL: AutomationGoal = { metric: 'Dice', operator: '>', value: 0.8 }
+const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
 
 function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
   const next = [...existing]
@@ -108,9 +97,6 @@ function buildAgentMessage(
     )
   }
 
-  if (input.domain) {
-    lines.push('', `**Domain**: ${input.domain}`)
-  }
   if (input.references) {
     lines.push('', `## References`, input.references)
   }
@@ -177,14 +163,13 @@ export function NewProjectModal() {
   const [creating, setCreating] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [title, setTitle] = useState('')
-  const [domain, setDomain] = useState('')
   const [references, setReferences] = useState('')
   const [computeBudget, setComputeBudget] = useState('')
   const [outputGoal, setOutputGoal] = useState<OutputGoal>('paper')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [goalLogic, setGoalLogic] = useState<AutomationGoalLogic>('AND')
   const [goals, setGoals] = useState<AutomationGoal[]>([{ ...DEFAULT_GOAL }])
-  const [goalValueInputs, setGoalValueInputs] = useState<string[]>([String(DEFAULT_GOAL.value)])
+  const [goalValueInputs, setGoalValueInputs] = useState<string[]>([''])
   const [maxExperiments, setMaxExperiments] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
 
@@ -285,8 +270,8 @@ export function NewProjectModal() {
   }
 
   const addGoal = () => {
-    setGoals((prev) => [...prev, { metric: '', operator: '>', value: 0 }])
-    setGoalValueInputs((prev) => [...prev, '0'])
+    setGoals((prev) => [...prev, { ...DEFAULT_GOAL }])
+    setGoalValueInputs((prev) => [...prev, ''])
   }
 
   const updateGoal = (index: number, patch: Partial<AutomationGoal>) => {
@@ -301,12 +286,12 @@ export function NewProjectModal() {
   const removeGoal = (index: number) => {
     setGoals((prev) => (
       prev.length <= 1
-        ? [{ metric: '', operator: '>', value: 0 }]
+        ? [{ ...DEFAULT_GOAL }]
         : prev.filter((_, i) => i !== index)
     ))
     setGoalValueInputs((prev) => (
       prev.length <= 1
-        ? ['0']
+        ? ['']
         : prev.filter((_, i) => i !== index)
     ))
   }
@@ -346,7 +331,6 @@ export function NewProjectModal() {
     const input: NewProjectInput = {
       description: description.trim(),
       title: title.trim() || undefined,
-      domain: domain.trim() || undefined,
       dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
@@ -407,13 +391,12 @@ export function NewProjectModal() {
     setServerDataPath('')
     setPathCheck({ status: 'idle', message: '' })
     setTitle('')
-    setDomain('')
     setReferences('')
     setComputeBudget('')
     setOutputGoal('paper')
     setGoalLogic('AND')
     setGoals([{ ...DEFAULT_GOAL }])
-    setGoalValueInputs([String(DEFAULT_GOAL.value)])
+    setGoalValueInputs([''])
     setMaxExperiments('')
     setMaxTokens('')
     setShowAdvanced(false)
@@ -581,6 +564,84 @@ export function NewProjectModal() {
             </div>
           </div>
 
+          {/* Automation Policy */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('autoStopPolicyLabel', lang)}</label>
+            <div className="flex gap-2">
+              {(['AND', 'OR'] as AutomationGoalLogic[]).map((logic) => (
+                <button
+                  key={logic}
+                  type="button"
+                  onClick={() => setGoalLogic(logic)}
+                  className={cn(
+                    'px-3 py-1 rounded-lg border text-xs font-medium transition-colors',
+                    goalLogic === logic
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]',
+                  )}
+                >
+                  {logic}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2">
+              {goals.map((goal, idx) => (
+                <div key={`goal-${idx}`} className="grid grid-cols-[1fr_auto_120px_auto] gap-2 items-center">
+                  <input
+                    value={goal.metric}
+                    onChange={(e) => updateGoal(idx, { metric: e.target.value })}
+                    placeholder={t('goalMetricPlaceholder', lang)}
+                    className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <select
+                    value={goal.operator}
+                    onChange={(e) => updateGoal(idx, { operator: e.target.value as AutomationGoalOperator })}
+                    className="bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  >
+                    {GOAL_OPERATORS.map((op) => (
+                      <option key={op} value={op}>{op}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={goalValueInputs[idx] ?? ''}
+                    onChange={(e) => updateGoalValueInput(idx, e.target.value)}
+                    placeholder={t('goalValuePlaceholder', lang)}
+                    className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeGoal(idx)}
+                    className="px-2 py-1 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {t('remove', lang)}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addGoal}
+              className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('addGoalButton', lang)}
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={maxExperiments}
+                onChange={(e) => setMaxExperiments(e.target.value)}
+                placeholder={t('maxExperimentsPlaceholder', lang)}
+                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+              />
+              <input
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                placeholder={t('maxTokensPlaceholder', lang)}
+                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+              />
+            </div>
+            <p className="text-[11px] text-[var(--color-text-muted)]">{t('autoStopPolicyHint', lang)}</p>
+          </div>
+
           {/* Advanced toggle */}
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
@@ -611,33 +672,6 @@ export function NewProjectModal() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('titlePlaceholder', lang)}
-                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
-              />
-            </div>
-
-            {/* Research Domain */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('researchDomain', lang)}</label>
-              <div className="flex flex-wrap gap-1.5">
-                {DOMAIN_SUGGESTIONS.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDomain(domain === d ? '' : d)}
-                    className={cn(
-                      'px-2.5 py-1 rounded-full text-xs transition-colors',
-                      domain === d
-                        ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/40'
-                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                    )}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                placeholder={t('domainPlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
@@ -719,83 +753,6 @@ export function NewProjectModal() {
               />
             </div>
 
-            {/* Automation Policy */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('autoStopPolicyLabel', lang)}</label>
-              <div className="flex gap-2">
-                {(['AND', 'OR'] as AutomationGoalLogic[]).map((logic) => (
-                  <button
-                    key={logic}
-                    type="button"
-                    onClick={() => setGoalLogic(logic)}
-                    className={cn(
-                      'px-3 py-1 rounded-lg border text-xs font-medium transition-colors',
-                      goalLogic === logic
-                        ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                        : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]',
-                    )}
-                  >
-                    {logic}
-                  </button>
-                ))}
-              </div>
-              <div className="space-y-2">
-                {goals.map((goal, idx) => (
-                  <div key={`goal-${idx}`} className="grid grid-cols-[1fr_auto_120px_auto] gap-2 items-center">
-                    <input
-                      value={goal.metric}
-                      onChange={(e) => updateGoal(idx, { metric: e.target.value })}
-                      placeholder={t('goalMetricPlaceholder', lang)}
-                      className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
-                    />
-                    <select
-                      value={goal.operator}
-                      onChange={(e) => updateGoal(idx, { operator: e.target.value as AutomationGoalOperator })}
-                      className="bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
-                    >
-                      {GOAL_OPERATORS.map((op) => (
-                        <option key={op} value={op}>{op}</option>
-                      ))}
-                    </select>
-                    <input
-                      value={goalValueInputs[idx] ?? ''}
-                      onChange={(e) => updateGoalValueInput(idx, e.target.value)}
-                      placeholder={t('goalValuePlaceholder', lang)}
-                      className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeGoal(idx)}
-                      className="px-2 py-1 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
-                    >
-                      {t('remove', lang)}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                onClick={addGoal}
-                className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-              >
-                {t('addGoalButton', lang)}
-              </button>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  value={maxExperiments}
-                  onChange={(e) => setMaxExperiments(e.target.value)}
-                  placeholder={t('maxExperimentsPlaceholder', lang)}
-                  className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
-                />
-                <input
-                  value={maxTokens}
-                  onChange={(e) => setMaxTokens(e.target.value)}
-                  placeholder={t('maxTokensPlaceholder', lang)}
-                  className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
-                />
-              </div>
-              <p className="text-[11px] text-[var(--color-text-muted)]">{t('autoStopPolicyHint', lang)}</p>
-            </div>
           </div>
         </div>
 
