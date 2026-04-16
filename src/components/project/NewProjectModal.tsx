@@ -10,17 +10,9 @@ import type {
   AutomationGoal,
   AutomationGoalLogic,
   AutomationGoalOperator,
-  OutputGoal,
   NewProjectInput,
 } from '@/types'
 import { t } from '@/i18n'
-
-const OUTPUT_GOALS: { value: OutputGoal; label: string; icon: string }[] = [
-  { value: 'paper', label: 'Paper', icon: '📄' },
-  { value: 'report', label: 'Report', icon: '📊' },
-  { value: 'analysis', label: 'Analysis', icon: '🔬' },
-  { value: 'code', label: 'Code', icon: '💻' },
-]
 
 const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
 const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
@@ -106,7 +98,6 @@ function buildAgentMessage(
   if (input.dataPath) {
     lines.push('', `## Server Data Path`, input.dataPath)
   }
-  lines.push('', `**Output Goal**: ${input.outputGoal}`)
 
   if (input.automationPolicy) {
     lines.push('', '## Automation Policy', `Logic: ${input.automationPolicy.logic}`)
@@ -165,7 +156,6 @@ export function NewProjectModal() {
   const [title, setTitle] = useState('')
   const [references, setReferences] = useState('')
   const [computeBudget, setComputeBudget] = useState('')
-  const [outputGoal, setOutputGoal] = useState<OutputGoal>('paper')
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [goalLogic, setGoalLogic] = useState<AutomationGoalLogic>('AND')
   const [goals, setGoals] = useState<AutomationGoal[]>([{ ...DEFAULT_GOAL }])
@@ -334,7 +324,6 @@ export function NewProjectModal() {
       dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
-      outputGoal,
       automationPolicy,
     }
 
@@ -393,7 +382,6 @@ export function NewProjectModal() {
     setTitle('')
     setReferences('')
     setComputeBudget('')
-    setOutputGoal('paper')
     setGoalLogic('AND')
     setGoals([{ ...DEFAULT_GOAL }])
     setGoalValueInputs([''])
@@ -540,28 +528,6 @@ export function NewProjectModal() {
             {uploadError && (
               <p className="text-[11px] text-[var(--color-error)]">{uploadError}</p>
             )}
-          </div>
-
-          {/* Output Goal */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('outputGoal', lang)}</label>
-            <div className="flex gap-2">
-              {OUTPUT_GOALS.map((g) => (
-                <button
-                  key={g.value}
-                  onClick={() => setOutputGoal(g.value)}
-                  className={cn(
-                    'flex-1 py-2 rounded-lg border text-xs font-medium transition-colors',
-                    outputGoal === g.value
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]',
-                  )}
-                >
-                  <span className="block text-base mb-0.5">{g.icon}</span>
-                  {t(g.value, lang)}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* Automation Policy */}

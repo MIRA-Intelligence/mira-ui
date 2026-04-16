@@ -245,7 +245,6 @@ export interface TaskPlanContract {
 
 /* ── New Project creation ────────────────────────── */
 
-export type OutputGoal = 'paper' | 'report' | 'analysis' | 'code'
 export type AutomationGoalOperator = '>' | '>=' | '<' | '<=' | '=='
 export type AutomationGoalLogic = 'AND' | 'OR'
 
@@ -269,7 +268,6 @@ export interface NewProjectInput {
   dataPath?: string
   references?: string
   computeBudget?: string
-  outputGoal: OutputGoal
   automationPolicy?: AutomationPolicy
 }
 

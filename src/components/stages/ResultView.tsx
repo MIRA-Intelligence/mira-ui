@@ -1,10 +1,89 @@
 import type { ResultData, ProjectTask } from '@/types'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useProjectStore } from '@/stores/projectStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { wsClient } from '@/services/websocket'
 import { t } from '@/i18n'
+
+type ExportFormat = 'experiment_report' | 'paper_article' | 'experiment_code' | 'experiment_charts'
+
+const EXPORT_CONFIG: Record<ExportFormat, {
+  title: string
+  skillPath: string
+  outputPath: string
+  outputType: string
+  requirements: string
+}> = {
+  experiment_report: {
+    title: 'Experiment Report',
+    skillPath: 'medpilot/skills/documents/docx/SKILL.md',
+    outputPath: 'result/exports/experiment_report.docx',
+    outputType: 'report',
+    requirements: 'Produce a concise but complete experiment report with methods, metrics, and conclusions.',
+  },
+  paper_article: {
+    title: 'Paper Article',
+    skillPath: 'medpilot/skills/documents/pdf/SKILL.md',
+    outputPath: 'result/exports/paper_article.pdf',
+    outputType: 'paper',
+    requirements: 'Produce a paper-style article with abstract, methodology, results, and discussion.',
+  },
+  experiment_code: {
+    title: 'Experiment Code',
+    skillPath: 'medpilot/skills/engineering/test-driven-development/SKILL.md',
+    outputPath: 'result/exports/experiment_code.zip',
+    outputType: 'code',
+    requirements: 'Export reproducible experiment code and runnable instructions from validated pipeline assets.',
+  },
+  experiment_charts: {
+    title: 'Experiment Charts',
+    skillPath: 'medpilot/skills/visualization/scientific-visualization/SKILL.md',
+    outputPath: 'result/exports/experiment_charts.zip',
+    outputType: 'analysis',
+    requirements: 'Export publication-ready visualizations for key experiment metrics and comparisons.',
+  },
+}
+
+function buildExportMessage(task: ProjectTask, format: ExportFormat): string {
+  const cfg = EXPORT_CONFIG[format]
+  return [
+    `Manual export request for ${task.id}.`,
+    '',
+    `Target format: ${cfg.title}`,
+    `Required skill: ${cfg.skillPath}`,
+    `Output path: ${cfg.outputPath}`,
+    `Output type: ${cfg.outputType}`,
+    '',
+    `Requirements: ${cfg.requirements}`,
+    'Use task_plan.json and existing experiment artifacts as the source of truth.',
+    'After finishing export, update task_plan.json.result with output_path, output_type, summary, and sections.',
+  ].join('\n')
+}
 
 export function ResultView({ data, task }: { data: ResultData; task: ProjectTask }) {
   const lang = useSettingsStore((s) => s.language)
+  const mode = useProjectStore((s) => s.mode)
+  const agentProfile = useProjectStore((s) => s.agentProfile)
   const hasContent = data.summary || (data.sections?.length ?? 0) > 0
+
+  const handleExport = (format: ExportFormat) => {
+    const content = buildExportMessage(task, format)
+    useAgentStore.getState().addLog(task.id, {
+      id: `user-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      content,
+      type: 'response',
+      metadata: { _user: true },
+    })
+    wsClient.send({
+      type: 'message',
+      content,
+      session_id: task.id,
+      user_id: 'ui_user',
+      mode: task.runMode ?? mode,
+      agent_profile: task.agentProfile ?? agentProfile,
+    })
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -15,6 +94,45 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
         <p className="text-xs text-[var(--color-text-muted)] mb-5">
           {t('resultSubtitle', lang)}
         </p>
+
+        <div className="mb-5 p-3 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
+          <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-1.5">
+            {t('exportResultsLabel', lang)}
+          </h3>
+          <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+            {t('exportResultsHint', lang)}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleExport('experiment_report')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatReport', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('paper_article')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatPaper', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('experiment_code')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatCode', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('experiment_charts')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatCharts', lang)}
+            </button>
+          </div>
+        </div>
 
         {!hasContent && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
