@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
+import { mapClientPathToServerPath } from '@/lib/pathMapping'
 import { cn } from '@/lib/utils'
 import type { OutputGoal, NewProjectInput } from '@/types'
 import { t } from '@/i18n'
@@ -96,7 +97,7 @@ export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
   const { createProject, deleteTask, projectsLoaded } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
-  const { workspacePath, language: lang } = useSettingsStore()
+  const { workspacePath, language: lang, pathMappings } = useSettingsStore()
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const pathCheckSeqRef = useRef(0)
@@ -129,12 +130,13 @@ export function NewProjectModal() {
       setPathCheck({ status: 'idle', message: '' })
       return
     }
+    const mapped = mapClientPathToServerPath(value, pathMappings)
     const seq = ++pathCheckSeqRef.current
     setPathCheck({ status: 'testing', message: t('dataPathChecking', lang) })
-    const result = await validateDataPath(value)
+    const result = await validateDataPath(mapped.path)
     if (seq !== pathCheckSeqRef.current) return
     if (result.ok) {
-      const target = result.resolved_path || value
+      const target = result.resolved_path || mapped.path
       const kind = result.kind === 'directory' ? t('directoryLabel', lang) : t('fileLabel', lang)
       setPathCheck({
         status: 'success',
@@ -188,11 +190,12 @@ export function NewProjectModal() {
     setCreating(true)
     setUploadError('')
 
+    const mappedDataPath = mapClientPathToServerPath(serverDataPath, pathMappings).path.trim()
     const input: NewProjectInput = {
       description: description.trim(),
       title: title.trim() || undefined,
       domain: domain.trim() || undefined,
-      dataPath: serverDataPath.trim() || undefined,
+      dataPath: mappedDataPath || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
       outputGoal,
@@ -244,6 +247,9 @@ export function NewProjectModal() {
     setUploadError('')
     closeNewProject()
   }
+
+  const pathMappingPreview = mapClientPathToServerPath(serverDataPath, pathMappings)
+  const pathMappingApplied = serverDataPath.trim().length > 0 && pathMappingPreview.applied
 
   return (
     <div
@@ -345,6 +351,14 @@ export function NewProjectModal() {
               {selectedFiles.length > 0 && (
                 <p className="mt-2 text-xs text-[var(--color-text-muted)]">
                   {t('filesSelected', lang, { count: selectedFiles.length })}
+                </p>
+              )}
+              {pathMappingApplied && (
+                <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                  {t('pathMappingPreview', lang, {
+                    source: serverDataPath.trim(),
+                    target: pathMappingPreview.path,
+                  })}
                 </p>
               )}
               {selectedFiles.length > 0 && (

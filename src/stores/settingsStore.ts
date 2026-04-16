@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { PathMapping } from '@/lib/pathMapping'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
@@ -28,6 +29,7 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  pathMappings: PathMapping[]
   settingsOpen: boolean
   engineStatus: EngineStatus
   engineMessage: string | null
@@ -41,6 +43,7 @@ interface SettingsState {
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
+  setPathMappings: (mappings: PathMapping[]) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
     message: string | null
@@ -62,6 +65,19 @@ function isStaleLocalhost(url: string | undefined): boolean {
     const u = new URL(url)
     return u.hostname === 'localhost' || u.hostname === '127.0.0.1'
   } catch { return false }
+}
+
+function sanitizePathMappings(value: unknown): PathMapping[] {
+  if (!Array.isArray(value)) return []
+  const next: PathMapping[] = []
+  for (const item of value) {
+    if (!isRecord(item)) continue
+    const localPath = typeof item.localPath === 'string' ? item.localPath.trim() : ''
+    const serverPath = typeof item.serverPath === 'string' ? item.serverPath.trim() : ''
+    if (!localPath || !serverPath) continue
+    next.push({ localPath, serverPath })
+  }
+  return next
 }
 
 function loadPersisted(): Partial<SettingsState> {
@@ -101,6 +117,7 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.showToolCallHistory === 'boolean') {
       sanitized.showToolCallHistory = parsed.showToolCallHistory
     }
+    sanitized.pathMappings = sanitizePathMappings(parsed.pathMappings)
 
     return sanitized
   } catch { /* ignore */ }
@@ -116,6 +133,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    pathMappings,
   } = state
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     workspacePath,
@@ -125,6 +143,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    pathMappings,
   }))
 }
 
@@ -138,6 +157,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: saved.wsUrl ?? defaultWsUrl(),
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? true,
+  pathMappings: saved.pathMappings ?? [],
   settingsOpen: false,
   engineStatus: 'unknown',
   engineMessage: null,
@@ -158,6 +178,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
+  setPathMappings: (mappings) => { set({ pathMappings: sanitizePathMappings(mappings) }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
     const nextVersion = version ?? null
     set((state) => {
