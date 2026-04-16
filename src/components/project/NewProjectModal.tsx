@@ -184,6 +184,7 @@ export function NewProjectModal() {
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [goalLogic, setGoalLogic] = useState<AutomationGoalLogic>('AND')
   const [goals, setGoals] = useState<AutomationGoal[]>([{ ...DEFAULT_GOAL }])
+  const [goalValueInputs, setGoalValueInputs] = useState<string[]>([String(DEFAULT_GOAL.value)])
   const [maxExperiments, setMaxExperiments] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
 
@@ -285,17 +286,29 @@ export function NewProjectModal() {
 
   const addGoal = () => {
     setGoals((prev) => [...prev, { metric: '', operator: '>', value: 0 }])
+    setGoalValueInputs((prev) => [...prev, '0'])
   }
 
   const updateGoal = (index: number, patch: Partial<AutomationGoal>) => {
     setGoals((prev) => prev.map((goal, i) => (i === index ? { ...goal, ...patch } : goal)))
   }
 
+  const updateGoalValueInput = (index: number, raw: string) => {
+    setGoalValueInputs((prev) => prev.map((value, i) => (i === index ? raw : value)))
+    updateGoal(index, { value: raw.trim() === '' ? Number.NaN : Number(raw) })
+  }
+
   const removeGoal = (index: number) => {
-    setGoals((prev) => {
-      if (prev.length <= 1) return [{ metric: '', operator: '>', value: 0 }]
-      return prev.filter((_, i) => i !== index)
-    })
+    setGoals((prev) => (
+      prev.length <= 1
+        ? [{ metric: '', operator: '>', value: 0 }]
+        : prev.filter((_, i) => i !== index)
+    ))
+    setGoalValueInputs((prev) => (
+      prev.length <= 1
+        ? ['0']
+        : prev.filter((_, i) => i !== index)
+    ))
   }
 
   const handleCreate = async () => {
@@ -304,11 +317,15 @@ export function NewProjectModal() {
     setUploadError('')
 
     const normalizedGoals = goals
-      .map((goal) => ({
+      .map((goal, idx) => {
+        const raw = (goalValueInputs[idx] ?? '').trim()
+        const value = raw === '' ? Number.NaN : Number(raw)
+        return {
         metric: goal.metric.trim(),
         operator: goal.operator,
-        value: Number(goal.value),
-      }))
+        value,
+      }
+      })
       .filter((goal) => goal.metric.length > 0 && Number.isFinite(goal.value))
 
     const parsedMaxExperiments = parsePositiveInt(maxExperiments)
@@ -396,6 +413,7 @@ export function NewProjectModal() {
     setOutputGoal('paper')
     setGoalLogic('AND')
     setGoals([{ ...DEFAULT_GOAL }])
+    setGoalValueInputs([String(DEFAULT_GOAL.value)])
     setMaxExperiments('')
     setMaxTokens('')
     setShowAdvanced(false)
@@ -740,11 +758,8 @@ export function NewProjectModal() {
                       ))}
                     </select>
                     <input
-                      value={Number.isFinite(goal.value) ? goal.value : ''}
-                      onChange={(e) => {
-                        const raw = e.target.value
-                        updateGoal(idx, { value: raw.trim() === '' ? Number.NaN : Number(raw) })
-                      }}
+                      value={goalValueInputs[idx] ?? ''}
+                      onChange={(e) => updateGoalValueInput(idx, e.target.value)}
                       placeholder={t('goalValuePlaceholder', lang)}
                       className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
                     />
