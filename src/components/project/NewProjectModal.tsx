@@ -99,6 +99,7 @@ export function NewProjectModal() {
   const { workspacePath, language: lang } = useSettingsStore()
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
   const pathCheckSeqRef = useRef(0)
   const pathCheckTimerRef = useRef<number | null>(null)
   const [description, setDescription] = useState('')
@@ -159,7 +160,14 @@ export function NewProjectModal() {
     }, 500)
   }
 
-  useEffect(() => () => clearPathCheckTimer(), [])
+  useEffect(() => {
+    const folderInput = folderInputRef.current
+    if (folderInput) {
+      folderInput.setAttribute('webkitdirectory', '')
+      folderInput.setAttribute('directory', '')
+    }
+    return () => clearPathCheckTimer()
+  }, [])
 
   if (!newProjectOpen) return null
 
@@ -174,6 +182,10 @@ export function NewProjectModal() {
 
   const handleBrowse = () => {
     fileInputRef.current?.click()
+  }
+
+  const handleBrowseFolder = () => {
+    folderInputRef.current?.click()
   }
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -299,6 +311,16 @@ export function NewProjectModal() {
                   e.currentTarget.value = ''
                 }}
               />
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  if (e.target.files) handleFilesAdded(e.target.files)
+                  e.currentTarget.value = ''
+                }}
+              />
               <div className="flex items-center gap-2">
                 <input
                   value={serverDataPath}
@@ -340,6 +362,13 @@ export function NewProjectModal() {
                   className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
                 >
                   {t('browse', lang)}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBrowseFolder}
+                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                >
+                  {t('browseFolder', lang)}
                 </button>
               </div>
               {selectedFiles.length > 0 && (
