@@ -246,6 +246,21 @@ export interface TaskPlanContract {
 /* ── New Project creation ────────────────────────── */
 
 export type OutputGoal = 'paper' | 'report' | 'analysis' | 'code'
+export type AutomationGoalOperator = '>' | '>=' | '<' | '<=' | '=='
+export type AutomationGoalLogic = 'AND' | 'OR'
+
+export interface AutomationGoal {
+  metric: string
+  operator: AutomationGoalOperator
+  value: number
+}
+
+export interface AutomationPolicy {
+  logic: AutomationGoalLogic
+  goals: AutomationGoal[]
+  maxExperiments?: number
+  maxTokens?: number
+}
 
 export interface NewProjectInput {
   description: string
@@ -255,6 +270,7 @@ export interface NewProjectInput {
   references?: string
   computeBudget?: string
   outputGoal: OutputGoal
+  automationPolicy?: AutomationPolicy
 }
 
 /* ── WebSocket protocol ─────────────────────────── */
@@ -267,6 +283,7 @@ export interface WsMessage {
   media?: string[]
   mode?: 'manual' | 'auto'
   agent_profile?: AgentProfile
+  automation_policy?: AutomationPolicy
 }
 
 export interface WsResponse {
