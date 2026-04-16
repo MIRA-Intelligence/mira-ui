@@ -12,6 +12,15 @@ import {
   updateProjectRuntimePreferences,
 } from '@/services/api'
 
+async function clearAgentLogs(projectId: string): Promise<void> {
+  try {
+    const { useAgentStore } = await import('@/stores/agentStore')
+    useAgentStore.getState().clearLogs(projectId)
+  } catch {
+    // Ignore optional log cleanup failures.
+  }
+}
+
 interface ProjectState {
   tasks: ProjectTask[]
   selectedTaskId: string | null
@@ -348,6 +357,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (deleteFiles) {
       await deleteProjectFiles(id)
     }
+    await clearAgentLogs(id)
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
     const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
@@ -411,6 +421,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       result: {},
       startedAt: new Date().toISOString(),
     }
+    await clearAgentLogs(id)
     set((state) => ({
       tasks: [task, ...state.tasks],
       selectedTaskId: id,
