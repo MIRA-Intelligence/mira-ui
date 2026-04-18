@@ -82,6 +82,7 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
       user_id: 'ui_user',
       mode: task.runMode ?? mode,
       agent_profile: task.agentProfile ?? agentProfile,
+      allow_result_write: true,
     })
   }
 

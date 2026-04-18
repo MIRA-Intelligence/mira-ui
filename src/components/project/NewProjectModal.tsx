@@ -7,15 +7,26 @@ import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
 import { cn } from '@/lib/utils'
 import type {
+  AgentProfile,
   AutomationGoal,
   AutomationGoalLogic,
   AutomationGoalOperator,
+  ContractVersion,
   NewProjectInput,
 } from '@/types'
 import { t } from '@/i18n'
 
 const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
 const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'balancedMode' | 'researchMode' }> = [
+  { key: 'engineer', labelKey: 'engineerMode' },
+  { key: 'default', labelKey: 'balancedMode' },
+  { key: 'research', labelKey: 'researchMode' },
+]
+const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }> = [
+  { key: 1, labelKey: 'contractCompat' },
+  { key: 2, labelKey: 'contractStrict' },
+]
 
 function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
   const next = [...existing]
@@ -138,9 +149,23 @@ type PathCheckState = {
 
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
-  const { createProject, deleteTask, projectsLoaded } = useProjectStore()
+  const {
+    tasks,
+    selectedTaskId,
+    createProject,
+    deleteTask,
+    projectsLoaded,
+    agentProfile,
+    contractVersion,
+    setAgentProfile,
+    setContractVersion,
+  } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
+  const isStreaming = useAgentStore((s) => s.isStreaming)
   const { workspacePath, language: lang } = useSettingsStore()
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId)
+  const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
+  const canSwitchRuntime = !isStreaming && !hasRunningExperiment
 
   const dataFileInputRef = useRef<HTMLInputElement | null>(null)
   const referenceFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -324,6 +349,8 @@ export function NewProjectModal() {
       dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
+      agentProfile,
+      contractVersion,
       automationPolicy,
     }
 
@@ -347,7 +374,11 @@ export function NewProjectModal() {
       return
     }
 
-    const { mode, agentProfile } = useProjectStore.getState()
+    const {
+      mode,
+      agentProfile: runtimeProfile,
+      contractVersion: runtimeContractVersion,
+    } = useProjectStore.getState()
     const agentMsg = buildAgentMessage(
       input,
       workspacePath,
@@ -369,7 +400,8 @@ export function NewProjectModal() {
       session_id: projectId,
       user_id: 'ui_user',
       mode,
-      agent_profile: agentProfile,
+      agent_profile: runtimeProfile,
+      contract_version: runtimeContractVersion,
       automation_policy: input.automationPolicy,
     })
 
@@ -427,6 +459,76 @@ export function NewProjectModal() {
               rows={4}
               className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] resize-none leading-relaxed"
             />
+          </div>
+
+          {/* Runtime Preferences */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('runtimePreferencesLabel', lang)}</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <p className="text-[11px] text-[var(--color-text-muted)]">{t('profileLabel', lang)}</p>
+                <div
+                  className={cn(
+                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
+                    !canSwitchRuntime && 'opacity-60',
+                  )}
+                  title={!canSwitchRuntime ? t('profileSwitchManualOnly', lang) : undefined}
+                >
+                  {PROFILE_OPTIONS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      disabled={!canSwitchRuntime}
+                      onClick={() => {
+                        if (!canSwitchRuntime) return
+                        setAgentProfile(item.key)
+                      }}
+                      className={cn(
+                        'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        agentProfile === item.key
+                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                        !canSwitchRuntime && 'cursor-not-allowed',
+                      )}
+                    >
+                      {t(item.labelKey, lang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[11px] text-[var(--color-text-muted)]">{t('contractModeLabel', lang)}</p>
+                <div
+                  className={cn(
+                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
+                    !canSwitchRuntime && 'opacity-60',
+                  )}
+                  title={!canSwitchRuntime ? t('contractSwitchManualOnly', lang) : undefined}
+                >
+                  {CONTRACT_OPTIONS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      disabled={!canSwitchRuntime}
+                      onClick={() => {
+                        if (!canSwitchRuntime) return
+                        setContractVersion(item.key)
+                      }}
+                      className={cn(
+                        'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        contractVersion === item.key
+                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                        !canSwitchRuntime && 'cursor-not-allowed',
+                      )}
+                    >
+                      {t(item.labelKey, lang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Data Source */}

@@ -27,6 +27,7 @@ interface ProjectState {
   selectedExpId: string | null
   activeStage: PipelineStage
   agentProfile: AgentProfile
+  contractVersion: ContractVersion
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
@@ -265,6 +266,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedExpId: null,
   activeStage: 'research',
   agentProfile: 'default',
+  contractVersion: 1,
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
@@ -280,6 +282,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeStage: 'research',
       mode: normalizeRunMode(task?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(task?.contractVersion, get().contractVersion),
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
@@ -317,6 +320,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setContractVersion: (contractVersion) => {
     const selectedId = get().selectedTaskId
     set((state) => ({
+      contractVersion,
       tasks: selectedId
         ? state.tasks.map((task) => (
             task.id === selectedId ? { ...task, contractVersion } : task
@@ -372,6 +376,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ),
       mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(nextSelectedTask?.contractVersion, get().contractVersion),
     })
   },
 
@@ -399,7 +404,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (input) => {
-    const { mode, agentProfile } = get()
+    const current = get()
+    const mode = normalizeRunMode(current.mode, 'auto')
+    const agentProfile = normalizeAgentProfile(
+      input.agentProfile ?? current.agentProfile,
+      current.agentProfile,
+    )
+    const contractVersion = normalizeContractVersion(
+      input.contractVersion ?? current.contractVersion,
+      current.contractVersion,
+    )
     const remotes = await fetchProjects()
     const used = collectProjectNumbers([
       ...remotes.map((r) => r.id),
@@ -414,7 +428,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       coreQuestion: input.description,
       runMode: mode,
       agentProfile,
-      contractVersion: 1,
+      contractVersion,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
@@ -426,6 +440,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       tasks: [task, ...state.tasks],
       selectedTaskId: id,
       selectedExpId: null,
+      mode,
+      agentProfile,
+      contractVersion,
       startedAt: Date.now(),
     }))
     return id
@@ -494,6 +511,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedExpId: hasSelected ? get().selectedExpId : null,
       mode: normalizeRunMode(selectedTask?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(selectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(selectedTask?.contractVersion, get().contractVersion),
     })
 
     for (const t of newTasks) {

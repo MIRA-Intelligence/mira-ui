@@ -269,6 +269,8 @@ export interface NewProjectInput {
   references?: string
   computeBudget?: string
   automationPolicy?: AutomationPolicy
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
 }
 
 /* ── WebSocket protocol ─────────────────────────── */
@@ -281,7 +283,9 @@ export interface WsMessage {
   media?: string[]
   mode?: 'manual' | 'auto'
   agent_profile?: AgentProfile
+  contract_version?: ContractVersion
   automation_policy?: AutomationPolicy
+  allow_result_write?: boolean
 }
 
 export interface WsResponse {

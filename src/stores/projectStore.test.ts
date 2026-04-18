@@ -12,7 +12,7 @@ describe('projectStore runtime preferences', () => {
     useProjectStore.setState(initialState, true)
     useAgentStore.setState(initialAgentState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ run_mode: 'auto', agent_profile: 'default' }),
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
@@ -25,6 +25,7 @@ describe('projectStore runtime preferences', () => {
         coreQuestion: 'demo',
         runMode: 'auto',
         agentProfile: 'default',
+        contractVersion: 1,
         currentExperiment: 'Exp001',
         experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
         knowledge: [],
@@ -36,19 +37,23 @@ describe('projectStore runtime preferences', () => {
       selectedExpId: 'Exp001',
       mode: 'auto',
       agentProfile: 'default',
+      contractVersion: 1,
     })
   })
 
-  it('stores profile and mode on selected project task', () => {
+  it('stores runtime preferences on selected project task', () => {
     const store = useProjectStore.getState()
     store.setAgentProfile('research')
     store.setMode('manual')
+    store.setContractVersion(2)
 
     const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
     expect(task?.agentProfile).toBe('research')
     expect(task?.runMode).toBe('manual')
+    expect(task?.contractVersion).toBe(2)
     expect(useProjectStore.getState().agentProfile).toBe('research')
     expect(useProjectStore.getState().mode).toBe('manual')
+    expect(useProjectStore.getState().contractVersion).toBe(2)
   })
 
   it('clears stale logs when creating a reused project id', async () => {
