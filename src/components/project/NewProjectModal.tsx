@@ -62,6 +62,14 @@ function dedupePaths(paths: string[]): string[] {
   return result
 }
 
+function detectPreferredReplyLanguage(text: string): 'zh' | 'en' {
+  const hanCount = (text.match(/[\u3400-\u9fff]/g) ?? []).length
+  const latinCount = (text.match(/[A-Za-z]/g) ?? []).length
+  if (hanCount === 0 && latinCount === 0) return 'en'
+  if (hanCount > 0 && hanCount * 2 >= latinCount) return 'zh'
+  return 'en'
+}
+
 function buildAgentMessage(
   input: NewProjectInput,
   workspacePath: string,
@@ -70,6 +78,10 @@ function buildAgentMessage(
   uploadedReferencePaths: string[],
   runMode: 'manual' | 'auto',
 ): string {
+  const preferredLanguage = detectPreferredReplyLanguage([
+    input.description,
+    input.references ?? '',
+  ].join('\n'))
   const lines = [
     `New research project initialized.`,
     ``,
@@ -133,10 +145,13 @@ function buildAgentMessage(
   const referenceInstruction = uploadedReferencePaths.length > 0
     ? `Before external search, first read and synthesize local materials under ${workspacePath}/${projectId}/references.`
     : 'Search for relevant literature and synthesize reliable references.'
+  const languageInstruction = preferredLanguage === 'zh'
+    ? 'Language policy: The user input is primarily Chinese. Respond in Chinese for progress updates, experiment summaries, and final replies unless the user explicitly asks for another language.'
+    : 'Language policy: The user input is primarily English. Respond in English unless the user explicitly asks for another language.'
 
   lines.push(
     '',
-    `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction}`,
+    `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`,
   )
 
   return lines.join('\n')
