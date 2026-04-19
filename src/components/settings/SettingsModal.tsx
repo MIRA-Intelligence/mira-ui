@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useSettingsStore, type Theme, type Language } from '@/stores/settingsStore'
+import type { PathMapping } from '@/lib/pathMapping'
 import { probeEngineCompatibility } from '@/services/engine'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -17,6 +18,7 @@ export function SettingsModal() {
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? true,
+    pathMappings: store.pathMappings,
   })
   const [upgrading, setUpgrading] = useState(false)
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null)
@@ -32,6 +34,7 @@ export function SettingsModal() {
         wsUrl: store.wsUrl,
         showProgressMessages: store.showProgressMessages,
         showToolCallHistory: store.showToolCallHistory ?? true,
+        pathMappings: store.pathMappings,
       })
       setUpgrading(false)
       setUpgradeError(false)
@@ -46,6 +49,7 @@ export function SettingsModal() {
     store.wsUrl,
     store.showProgressMessages,
     store.showToolCallHistory,
+    store.pathMappings,
   ])
 
   if (!settingsOpen) return null
@@ -65,6 +69,7 @@ export function SettingsModal() {
     }
     store.setShowProgressMessages(draft.showProgressMessages)
     store.setShowToolCallHistory(draft.showToolCallHistory)
+    store.setPathMappings(draft.pathMappings)
 
     // Notify gateway of workspace path change
     fetch(`${nextApiUrl}/config`, {
@@ -113,6 +118,27 @@ export function SettingsModal() {
     }
   }
 
+  const updatePathMapping = (index: number, patch: Partial<PathMapping>) => {
+    setDraft((prev) => ({
+      ...prev,
+      pathMappings: prev.pathMappings.map((mapping, i) => (i === index ? { ...mapping, ...patch } : mapping)),
+    }))
+  }
+
+  const addPathMapping = () => {
+    setDraft((prev) => ({
+      ...prev,
+      pathMappings: [...prev.pathMappings, { localPath: '', serverPath: '' }],
+    }))
+  }
+
+  const removePathMapping = (index: number) => {
+    setDraft((prev) => ({
+      ...prev,
+      pathMappings: prev.pathMappings.filter((_, i) => i !== index),
+    }))
+  }
+
   const curLang = draft.language
 
   return (
@@ -153,6 +179,43 @@ export function SettingsModal() {
             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
               {t('workspacePathHint', curLang)}
             </p>
+
+            <Label text={t('pathMappingLabel', curLang)} className="mt-4" />
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1 mb-2">
+              {t('pathMappingHint', curLang)}
+            </p>
+            <div className="space-y-2">
+              {draft.pathMappings.map((mapping, idx) => (
+                <div key={`path-map-${idx}`} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                  <input
+                    value={mapping.localPath}
+                    onChange={(e) => updatePathMapping(idx, { localPath: e.target.value })}
+                    placeholder={t('localPathPlaceholder', curLang)}
+                    className={inputClass}
+                  />
+                  <input
+                    value={mapping.serverPath}
+                    onChange={(e) => updatePathMapping(idx, { serverPath: e.target.value })}
+                    placeholder={t('serverPathPlaceholder', curLang)}
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removePathMapping(idx)}
+                    className="px-2.5 py-2 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+                  >
+                    {t('remove', curLang)}
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addPathMapping}
+                className="px-3 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              >
+                {t('addPathMapping', curLang)}
+              </button>
+            </div>
           </Section>
 
           {/* ── General ───────────────────────── */}
