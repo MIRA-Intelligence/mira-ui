@@ -3,9 +3,10 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
+import { getProjectArtifactUrl } from '@/services/api'
 import { t } from '@/i18n'
 
-type ExportFormat = 'experiment_report' | 'paper_article' | 'experiment_code' | 'experiment_charts'
+type ExportFormat = 'experiment_report' | 'paper_article' | 'presentation' | 'metadata'
 
 const EXPORT_CONFIG: Record<ExportFormat, {
   title: string
@@ -16,31 +17,31 @@ const EXPORT_CONFIG: Record<ExportFormat, {
 }> = {
   experiment_report: {
     title: 'Experiment Report',
-    skillPath: 'medpilot/skills/documents/docx/SKILL.md',
-    outputPath: 'result/exports/experiment_report.docx',
+    skillPath: 'medpilot/skills/export/experiment-report/SKILL.md',
+    outputPath: 'result/exports/experiment_report.md',
     outputType: 'report',
-    requirements: 'Produce a concise but complete experiment report with methods, metrics, and conclusions.',
+    requirements: 'Produce an objective markdown report summarizing project goal, setup, experiments, metrics, findings, and limitations.',
   },
   paper_article: {
     title: 'Paper Article',
-    skillPath: 'medpilot/skills/documents/pdf/SKILL.md',
-    outputPath: 'result/exports/paper_article.pdf',
+    skillPath: 'medpilot/skills/export/paper-article/SKILL.md',
+    outputPath: 'result/exports/paper_article.md',
     outputType: 'paper',
-    requirements: 'Produce a paper-style article with abstract, methodology, results, and discussion.',
+    requirements: 'Write a journal-style article with Introduction, Method, Results, and Discussion sections using project evidence.',
   },
-  experiment_code: {
-    title: 'Experiment Code',
-    skillPath: 'medpilot/skills/engineering/test-driven-development/SKILL.md',
-    outputPath: 'result/exports/experiment_code.zip',
-    outputType: 'code',
-    requirements: 'Export reproducible experiment code and runnable instructions from validated pipeline assets.',
+  presentation: {
+    title: 'Presentation',
+    skillPath: 'medpilot/skills/export/presentation-beamer/SKILL.md',
+    outputPath: 'result/exports/presentation.tex',
+    outputType: 'presentation',
+    requirements: 'Generate a LaTeX Beamer deck for presentation, and include compile instructions (or a compiled PDF when available).',
   },
-  experiment_charts: {
-    title: 'Experiment Charts',
-    skillPath: 'medpilot/skills/visualization/scientific-visualization/SKILL.md',
-    outputPath: 'result/exports/experiment_charts.zip',
-    outputType: 'analysis',
-    requirements: 'Export publication-ready visualizations for key experiment metrics and comparisons.',
+  metadata: {
+    title: 'Meta data',
+    skillPath: 'medpilot/skills/export/project-metadata/SKILL.md',
+    outputPath: 'result/exports/project_metadata.zip',
+    outputType: 'metadata',
+    requirements: 'Package all files under the current project directory into a single zip archive for delivery.',
   },
 }
 
@@ -65,6 +66,19 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
   const mode = useProjectStore((s) => s.mode)
   const agentProfile = useProjectStore((s) => s.agentProfile)
   const hasContent = data.summary || (data.sections?.length ?? 0) > 0
+
+  const handleDownload = () => {
+    if (!data.outputPath || !task.id) return
+    const href = getProjectArtifactUrl(task.id, data.outputPath)
+    const filename = data.outputPath.split('/').filter(Boolean).pop() || 'export'
+    const link = document.createElement('a')
+    link.href = href
+    link.download = filename
+    link.rel = 'noopener noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
 
   const handleExport = (format: ExportFormat) => {
     const content = buildExportMessage(task, format)
@@ -120,17 +134,17 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
             </button>
             <button
               type="button"
-              onClick={() => handleExport('experiment_code')}
+              onClick={() => handleExport('presentation')}
               className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             >
-              {t('exportFormatCode', lang)}
+              {t('exportFormatPresentation', lang)}
             </button>
             <button
               type="button"
-              onClick={() => handleExport('experiment_charts')}
+              onClick={() => handleExport('metadata')}
               className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             >
-              {t('exportFormatCharts', lang)}
+              {t('exportFormatMetadata', lang)}
             </button>
           </div>
         </div>
@@ -159,6 +173,14 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
                 {data.outputPath}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="shrink-0 px-2.5 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              title={t('downloadResultHint', lang)}
+            >
+              {t('downloadResult', lang)}
+            </button>
           </div>
         )}
 

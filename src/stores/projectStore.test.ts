@@ -69,13 +69,7 @@ describe('projectStore runtime preferences', () => {
     await useProjectStore.getState().createProject({
       description: 'new project',
       dataPath: '/tmp/data',
-      methodPrompt: '',
-      references: [],
-      maxRounds: 1,
-      goals: [],
-      goalLogic: 'AND',
-      maxExperiments: undefined,
-      maxTokens: undefined,
+      references: '',
     })
 
     expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-0002')

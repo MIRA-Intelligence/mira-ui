@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ExperimentDetail } from './ExperimentDetail'
 import { useProjectStore } from '@/stores/projectStore'
@@ -96,5 +96,33 @@ describe('ExperimentDetail snapshot toggle', () => {
     expect(screen.getByText('Contract Requirements')).toBeInTheDocument()
     expect(screen.getByText(/theoretical_proof/)).toBeInTheDocument()
     expect(screen.getByText(/isolation_test.control/)).toBeInTheDocument()
+  })
+
+  it('supports mixed evidence refs with natural language and path links', () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    render(
+      <ExperimentDetail
+        experiment={{
+          id: 'Exp010',
+          title: 'Evidence compatibility',
+          status: 'completed',
+          evidence_refs: [
+            {
+              ref_id: 'E1',
+              relevance: 'BG_l高CRLB样本误差显著更高',
+              path: 'experiments/exp001/results.json',
+              type: 'metrics',
+            },
+          ],
+        }}
+      />,
+    )
+
+    expect(screen.getByText(/BG_l高CRLB样本误差显著更高/)).toBeInTheDocument()
+    const linkBtn = screen.getByRole('button', { name: /experiments\/exp001\/results\.json/ })
+    fireEvent.click(linkBtn)
+    expect(openSpy).toHaveBeenCalledTimes(1)
+    expect(openSpy.mock.calls[0][0]).toContain('/api/projects/PRJ-0001/artifacts?path=')
+    openSpy.mockRestore()
   })
 })
