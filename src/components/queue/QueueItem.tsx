@@ -90,8 +90,8 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
           <>
             <span className="truncate">{task.label}</span>
             {isCompleted && (
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 ml-2 text-green-500 shrink-0">
-                <polyline points="20 6 9 17 4 12"></polyline>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 ml-2 text-[var(--color-text-muted)] opacity-60 shrink-0">
+                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
               </svg>
             )}
           </>
