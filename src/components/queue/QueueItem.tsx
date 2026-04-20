@@ -67,12 +67,10 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
         onClick={() => onSelect(task.id)}
         onContextMenu={handleContext}
         className={cn(
-          'w-full px-3 py-2.5 text-left rounded-md text-sm font-mono transition-colors select-none',
+          'w-full px-3 py-2.5 text-left rounded-md text-sm font-mono transition-colors select-none flex items-center justify-between',
           isSelected
             ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent)]/40'
-            : isCompleted
-              ? 'text-[var(--color-text-muted)]/50 hover:bg-[var(--color-bg-hover)]'
-              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
         )}
       >
         {editing ? (
@@ -89,7 +87,14 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
             className="w-full bg-transparent border-b border-[var(--color-accent)] outline-none text-sm font-mono text-[var(--color-text-primary)]"
           />
         ) : (
-          task.label
+          <>
+            <span className="truncate">{task.label}</span>
+            {isCompleted && (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 ml-2 text-green-500 shrink-0">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            )}
+          </>
         )}
       </button>
 
