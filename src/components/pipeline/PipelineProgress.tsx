@@ -53,6 +53,7 @@ export function PipelineProgress() {
     activeStage,
     mode,
     agentProfile,
+    contractVersion,
     setActiveStage,
     setAgentProfile,
     setContractVersion,
@@ -65,7 +66,7 @@ export function PipelineProgress() {
   const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
   const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
-  const contractVersion = task?.contractVersion ?? 1
+  const effectiveContractVersion = task?.contractVersion ?? contractVersion
   const agentProfileSlider = (
     <div className="min-w-[210px] shrink-0">
       <div
@@ -171,7 +172,7 @@ export function PipelineProgress() {
             }}
             className={cn(
               'px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors',
-              contractVersion === item.key
+              effectiveContractVersion === item.key
                 ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
                 : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
               !canSwitchContractVersion && 'cursor-not-allowed',

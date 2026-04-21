@@ -54,10 +54,18 @@ function looksLikeHypothesisRejection(conclusion: string | undefined, keywords: 
 function formatEvidenceRef(ref: ExperimentEvidenceRef, index: number): string {
   const parts: string[] = []
   if (typeof ref.ref_id === 'string' && ref.ref_id.trim()) parts.push(ref.ref_id.trim())
+  if (typeof ref.type === 'string' && ref.type.trim()) parts.push(`type=${ref.type.trim()}`)
   if (typeof ref.metric_key === 'string' && ref.metric_key.trim()) parts.push(`metric=${ref.metric_key.trim()}`)
   if (typeof ref.artifact === 'string' && ref.artifact.trim()) parts.push(`artifact=${ref.artifact.trim()}`)
+  if (typeof ref.path === 'string' && ref.path.trim()) parts.push(`artifact=${ref.path.trim()}`)
   if (typeof ref.relevance === 'string' && ref.relevance.trim()) parts.push(ref.relevance.trim())
   return parts.length > 0 ? parts.join(' - ') : `#${index + 1}`
+}
+
+function getEvidenceArtifactPath(ref: ExperimentEvidenceRef): string | null {
+  if (typeof ref.artifact === 'string' && ref.artifact.trim()) return ref.artifact.trim()
+  if (typeof ref.path === 'string' && ref.path.trim()) return ref.path.trim()
+  return null
 }
 
 function formatDecimal(value: unknown, digits: number): string | null {
@@ -356,11 +364,34 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         {Array.isArray(viewedExperiment.evidence_refs) && viewedExperiment.evidence_refs.length > 0 && (
           <Section icon="📚" label={t('evidenceReferences', lang)}>
             <ul className="space-y-1">
-              {viewedExperiment.evidence_refs.map((ref, idx) => (
-                <li key={`${idx}-${typeof ref === 'object' ? JSON.stringify(ref) : String(ref)}`}>
-                  {typeof ref === 'string' ? ref : formatEvidenceRef(ref, idx)}
-                </li>
-              ))}
+              {viewedExperiment.evidence_refs.map((ref, idx) => {
+                if (typeof ref === 'string') {
+                  return (
+                    <li key={`${idx}-${ref}`}>
+                      {ref}
+                    </li>
+                  )
+                }
+                const line = formatEvidenceRef(ref, idx)
+                const artifactPath = getEvidenceArtifactPath(ref)
+                const canOpenArtifact = !!artifactPath && !!selectedTaskId
+                const artifactUrl = canOpenArtifact ? getProjectArtifactUrl(selectedTaskId, artifactPath) : ''
+                return (
+                  <li key={`${idx}-${JSON.stringify(ref)}`} className="space-y-1">
+                    <div>{line}</div>
+                    {canOpenArtifact && (
+                      <button
+                        type="button"
+                        onClick={() => window.open(artifactUrl, '_blank', 'noopener,noreferrer')}
+                        className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
+                        title={t('openArtifact', lang)}
+                      >
+                        ↗ {artifactPath}
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </Section>
         )}

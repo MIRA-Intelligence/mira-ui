@@ -18,7 +18,9 @@ interface AgentState {
 let logIdCounter = 0
 
 const PLAN_POLL_INTERVAL = 3000
+const PLAN_RESPONSE_REFRESH_DELAYS = [800, 2200] as const
 const _pollTimers: Record<string, ReturnType<typeof setInterval>> = {}
+const _responseRefreshTimers: Record<string, ReturnType<typeof setTimeout>[]> = {}
 
 function logDedupKey(entry: LogEntry): string {
   const fromUser = entry.metadata?._user ? 'user' : 'agent'
@@ -39,6 +41,22 @@ function stopPlanPolling(sessionId: string) {
     clearInterval(timer)
     delete _pollTimers[sessionId]
   }
+}
+
+function clearResponseRefreshTimers(sessionId: string) {
+  const timers = _responseRefreshTimers[sessionId]
+  if (!timers || timers.length === 0) return
+  for (const timer of timers) {
+    clearTimeout(timer)
+  }
+  delete _responseRefreshTimers[sessionId]
+}
+
+function scheduleResponseRefreshes(sessionId: string) {
+  clearResponseRefreshTimers(sessionId)
+  _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
+    void useProjectStore.getState().refreshPlan(sessionId)
+  }, delayMs))
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
@@ -106,10 +124,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }))
 
     if (msg.type === 'progress') {
+      clearResponseRefreshTimers(sessionId)
       ensurePlanPolling(sessionId)
     } else if (msg.type === 'response') {
       stopPlanPolling(sessionId)
-      useProjectStore.getState().refreshPlan(sessionId)
+      void useProjectStore.getState().refreshPlan(sessionId)
+      scheduleResponseRefreshes(sessionId)
     }
   },
 
@@ -118,6 +138,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   clearLogs: (projectId) =>
     set((state) => {
+      stopPlanPolling(projectId)
+      clearResponseRefreshTimers(projectId)
       const updated = { ...state.logsByProject }
       delete updated[projectId]
       return { logsByProject: updated, isStreaming: false }

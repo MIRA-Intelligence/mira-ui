@@ -6,25 +6,26 @@ import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
 import { cn } from '@/lib/utils'
-import type { OutputGoal, NewProjectInput } from '@/types'
+import type {
+  AgentProfile,
+  AutomationGoal,
+  AutomationGoalLogic,
+  AutomationGoalOperator,
+  ContractVersion,
+  NewProjectInput,
+} from '@/types'
 import { t } from '@/i18n'
 
-const OUTPUT_GOALS: { value: OutputGoal; label: string; icon: string }[] = [
-  { value: 'paper', label: 'Paper', icon: '📄' },
-  { value: 'report', label: 'Report', icon: '📊' },
-  { value: 'analysis', label: 'Analysis', icon: '🔬' },
-  { value: 'code', label: 'Code', icon: '💻' },
+const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
+const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'balancedMode' | 'researchMode' }> = [
+  { key: 'engineer', labelKey: 'engineerMode' },
+  { key: 'default', labelKey: 'balancedMode' },
+  { key: 'research', labelKey: 'researchMode' },
 ]
-
-const DOMAIN_SUGGESTIONS = [
-  'Medical Imaging',
-  'NLP',
-  'Computer Vision',
-  'Reinforcement Learning',
-  'Drug Discovery',
-  'Genomics',
-  'Signal Processing',
-  'Robotics',
+const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }> = [
+  { key: 1, labelKey: 'contractCompat' },
+  { key: 2, labelKey: 'contractStrict' },
 ]
 
 function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
@@ -39,13 +40,48 @@ function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File
   return next
 }
 
+function parsePositiveInt(raw: string): number | undefined {
+  const value = Number(raw.trim())
+  if (!Number.isFinite(value) || value <= 0) return undefined
+  return Math.floor(value)
+}
+
+function isReferenceFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return name.endsWith('.pdf') || name.endsWith('.zip')
+}
+
+function dedupePaths(paths: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const path of paths) {
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    result.push(path)
+  }
+  return result
+}
+
+function detectPreferredReplyLanguage(text: string): 'zh' | 'en' {
+  const hanCount = (text.match(/[\u3400-\u9fff]/g) ?? []).length
+  const latinCount = (text.match(/[A-Za-z]/g) ?? []).length
+  if (hanCount === 0 && latinCount === 0) return 'en'
+  if (hanCount > 0 && hanCount * 2 >= latinCount) return 'zh'
+  return 'en'
+}
+
 function buildAgentMessage(
   input: NewProjectInput,
   workspacePath: string,
   projectId: string,
-  uploadedPaths: string[],
+  uploadedDataPaths: string[],
+  uploadedReferencePaths: string[],
   runMode: 'manual' | 'auto',
 ): string {
+  const preferredLanguage = detectPreferredReplyLanguage([
+    input.description,
+    input.references ?? '',
+  ].join('\n'))
   const lines = [
     `New research project initialized.`,
     ``,
@@ -56,16 +92,26 @@ function buildAgentMessage(
     input.description,
   ]
 
-  if (uploadedPaths.length > 0) {
+  if (uploadedDataPaths.length > 0) {
     lines.push('', `## Uploaded Data Files`)
-    for (const path of uploadedPaths) {
+    for (const path of uploadedDataPaths) {
       lines.push(`- ${path}`)
     }
     lines.push('', `These files are saved under ${workspacePath}/${projectId}/data.`)
   }
-  if (input.domain) {
-    lines.push('', `**Domain**: ${input.domain}`)
+
+  if (uploadedReferencePaths.length > 0) {
+    lines.push('', '## Uploaded Reference Materials')
+    for (const path of uploadedReferencePaths) {
+      lines.push(`- ${path}`)
+    }
+    lines.push(
+      '',
+      `These files are saved under ${workspacePath}/${projectId}/references.`,
+      'Prioritize reading and analyzing these reference materials before external literature search.',
+    )
   }
+
   if (input.references) {
     lines.push('', `## References`, input.references)
   }
@@ -75,13 +121,37 @@ function buildAgentMessage(
   if (input.dataPath) {
     lines.push('', `## Server Data Path`, input.dataPath)
   }
-  lines.push('', `**Output Goal**: ${input.outputGoal}`)
+
+  if (input.automationPolicy) {
+    lines.push('', '## Automation Policy', `Logic: ${input.automationPolicy.logic}`)
+    if (input.automationPolicy.goals.length > 0) {
+      lines.push('Goals:')
+      for (const goal of input.automationPolicy.goals) {
+        lines.push(`- ${goal.metric} ${goal.operator} ${goal.value}`)
+      }
+    }
+    if (input.automationPolicy.maxExperiments) {
+      lines.push(`- Max experiments: ${input.automationPolicy.maxExperiments}`)
+    }
+    if (input.automationPolicy.maxTokens) {
+      lines.push(`- Max token budget: ${input.automationPolicy.maxTokens}`)
+    }
+  }
+
   const modeInstruction = runMode === 'manual'
     ? 'After completing the research survey, STOP and report your findings.'
-    : 'After completing the research survey, continue automatically into the next pending experiment.'
+    : 'After completing the research survey, continue automatically into the next pending experiment until stop conditions are met.'
+
+  const referenceInstruction = uploadedReferencePaths.length > 0
+    ? `Before external search, first read and synthesize local materials under ${workspacePath}/${projectId}/references.`
+    : 'Search for relevant literature and synthesize reliable references.'
+  const languageInstruction = preferredLanguage === 'zh'
+    ? 'Language policy: The user input is primarily Chinese. Respond in Chinese for progress updates, experiment summaries, and final replies unless the user explicitly asks for another language.'
+    : 'Language policy: The user input is primarily English. Respond in English unless the user explicitly asks for another language.'
+
   lines.push(
     '',
-    `Please begin by creating a task_plan.json, then start with the **Research** phase: search for relevant literature, add references and notes to the research section of task_plan.json. ${modeInstruction}`,
+    `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`,
   )
 
   return lines.join('\n')
@@ -94,26 +164,45 @@ type PathCheckState = {
 
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject } = useUiStore()
-  const { createProject, deleteTask, projectsLoaded } = useProjectStore()
+  const {
+    tasks,
+    selectedTaskId,
+    createProject,
+    deleteTask,
+    projectsLoaded,
+    agentProfile,
+    contractVersion,
+    setAgentProfile,
+    setContractVersion,
+  } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
+  const isStreaming = useAgentStore((s) => s.isStreaming)
   const { workspacePath, language: lang } = useSettingsStore()
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId)
+  const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
+  const canSwitchRuntime = !isStreaming && !hasRunningExperiment
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const dataFileInputRef = useRef<HTMLInputElement | null>(null)
+  const referenceFileInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   const pathCheckSeqRef = useRef(0)
   const pathCheckTimerRef = useRef<number | null>(null)
   const [description, setDescription] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [selectedReferenceFiles, setSelectedReferenceFiles] = useState<File[]>([])
   const [serverDataPath, setServerDataPath] = useState('')
   const [pathCheck, setPathCheck] = useState<PathCheckState>({ status: 'idle', message: '' })
   const [creating, setCreating] = useState(false)
   const [uploadError, setUploadError] = useState('')
   const [title, setTitle] = useState('')
-  const [domain, setDomain] = useState('')
   const [references, setReferences] = useState('')
   const [computeBudget, setComputeBudget] = useState('')
-  const [outputGoal, setOutputGoal] = useState<OutputGoal>('paper')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [goalLogic, setGoalLogic] = useState<AutomationGoalLogic>('AND')
+  const [goals, setGoals] = useState<AutomationGoal[]>([{ ...DEFAULT_GOAL }])
+  const [goalValueInputs, setGoalValueInputs] = useState<string[]>([''])
+  const [maxExperiments, setMaxExperiments] = useState('')
+  const [maxTokens, setMaxTokens] = useState('')
 
   const canCreate = description.trim().length > 0 && connected && projectsLoaded && !creating
 
@@ -171,28 +260,82 @@ export function NewProjectModal() {
 
   if (!newProjectOpen) return null
 
-  const handleFilesAdded = (files: FileList | File[]) => {
+  const handleDataFilesAdded = (files: FileList | File[]) => {
     setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
     setUploadError('')
   }
 
-  const removeSelectedFile = (index: number) => {
+  const handleReferenceFilesAdded = (files: FileList | File[]) => {
+    const incomingList = Array.from(files)
+    const validFiles = incomingList.filter((file) => isReferenceFile(file))
+    if (validFiles.length !== incomingList.length) {
+      setUploadError(t('referencesFileTypeHint', lang))
+    } else {
+      setUploadError('')
+    }
+    if (validFiles.length === 0) return
+    setSelectedReferenceFiles((prev) => mergeSelectedFiles(prev, validFiles))
+  }
+
+  const removeSelectedDataFile = (index: number) => {
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const handleBrowse = () => {
-    fileInputRef.current?.click()
+  const removeSelectedReferenceFile = (index: number) => {
+    setSelectedReferenceFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const handleDataBrowse = () => {
+    dataFileInputRef.current?.click()
+  }
+
+  const handleReferencesBrowse = () => {
+    referenceFileInputRef.current?.click()
   }
 
   const handleBrowseFolder = () => {
     folderInputRef.current?.click()
   }
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDataDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     if (e.dataTransfer.files?.length) {
-      handleFilesAdded(e.dataTransfer.files)
+      handleDataFilesAdded(e.dataTransfer.files)
     }
+  }
+
+  const handleReferencesDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    if (e.dataTransfer.files?.length) {
+      handleReferenceFilesAdded(e.dataTransfer.files)
+    }
+  }
+
+  const addGoal = () => {
+    setGoals((prev) => [...prev, { ...DEFAULT_GOAL }])
+    setGoalValueInputs((prev) => [...prev, ''])
+  }
+
+  const updateGoal = (index: number, patch: Partial<AutomationGoal>) => {
+    setGoals((prev) => prev.map((goal, i) => (i === index ? { ...goal, ...patch } : goal)))
+  }
+
+  const updateGoalValueInput = (index: number, raw: string) => {
+    setGoalValueInputs((prev) => prev.map((value, i) => (i === index ? raw : value)))
+    updateGoal(index, { value: raw.trim() === '' ? Number.NaN : Number(raw) })
+  }
+
+  const removeGoal = (index: number) => {
+    setGoals((prev) => (
+      prev.length <= 1
+        ? [{ ...DEFAULT_GOAL }]
+        : prev.filter((_, i) => i !== index)
+    ))
+    setGoalValueInputs((prev) => (
+      prev.length <= 1
+        ? ['']
+        : prev.filter((_, i) => i !== index)
+    ))
   }
 
   const handleCreate = async () => {
@@ -200,22 +343,57 @@ export function NewProjectModal() {
     setCreating(true)
     setUploadError('')
 
+    const normalizedGoals = goals
+      .map((goal, idx) => {
+        const raw = (goalValueInputs[idx] ?? '').trim()
+        const value = raw === '' ? Number.NaN : Number(raw)
+        return {
+        metric: goal.metric.trim(),
+        operator: goal.operator,
+        value,
+      }
+      })
+      .filter((goal) => goal.metric.length > 0 && Number.isFinite(goal.value))
+
+    const parsedMaxExperiments = parsePositiveInt(maxExperiments)
+    const parsedMaxTokens = parsePositiveInt(maxTokens)
+    const automationPolicy = (
+      normalizedGoals.length > 0
+      || parsedMaxExperiments !== undefined
+      || parsedMaxTokens !== undefined
+    )
+      ? {
+          logic: goalLogic,
+          goals: normalizedGoals,
+          maxExperiments: parsedMaxExperiments,
+          maxTokens: parsedMaxTokens,
+        }
+      : undefined
+
     const input: NewProjectInput = {
       description: description.trim(),
       title: title.trim() || undefined,
-      domain: domain.trim() || undefined,
       dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
-      outputGoal,
+      agentProfile,
+      contractVersion,
+      automationPolicy,
     }
 
     const projectId = await createProject(input)
-    let uploadedPaths: string[] = []
+    let uploadedDataPaths: string[] = []
+    let uploadedReferencePaths: string[] = []
 
     try {
-      const uploaded = await uploadProjectFiles(projectId, selectedFiles)
-      uploadedPaths = uploaded.map((file) => file.path)
+      const dataUpload = await uploadProjectFiles(projectId, selectedFiles, 'data')
+      uploadedDataPaths = dataUpload.uploaded.map((file) => file.path)
+
+      const referencesUpload = await uploadProjectFiles(projectId, selectedReferenceFiles, 'references')
+      uploadedReferencePaths = dedupePaths([
+        ...referencesUpload.uploaded.map((file) => file.path),
+        ...referencesUpload.extracted.map((item) => item.path),
+      ])
     } catch (err) {
       await deleteTask(projectId, false)
       setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
@@ -223,8 +401,19 @@ export function NewProjectModal() {
       return
     }
 
-    const { mode, agentProfile } = useProjectStore.getState()
-    const agentMsg = buildAgentMessage(input, workspacePath, projectId, uploadedPaths, mode)
+    const {
+      mode,
+      agentProfile: runtimeProfile,
+      contractVersion: runtimeContractVersion,
+    } = useProjectStore.getState()
+    const agentMsg = buildAgentMessage(
+      input,
+      workspacePath,
+      projectId,
+      uploadedDataPaths,
+      uploadedReferencePaths,
+      mode,
+    )
     useAgentStore.getState().addLog(projectId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -238,19 +427,25 @@ export function NewProjectModal() {
       session_id: projectId,
       user_id: 'ui_user',
       mode,
-      agent_profile: agentProfile,
+      agent_profile: runtimeProfile,
+      contract_version: runtimeContractVersion,
+      automation_policy: input.automationPolicy,
     })
 
     // Reset form
     setDescription('')
     setSelectedFiles([])
+    setSelectedReferenceFiles([])
     setServerDataPath('')
     setPathCheck({ status: 'idle', message: '' })
     setTitle('')
-    setDomain('')
     setReferences('')
     setComputeBudget('')
-    setOutputGoal('paper')
+    setGoalLogic('AND')
+    setGoals([{ ...DEFAULT_GOAL }])
+    setGoalValueInputs([''])
+    setMaxExperiments('')
+    setMaxTokens('')
     setShowAdvanced(false)
     setCreating(false)
     setUploadError('')
@@ -293,21 +488,91 @@ export function NewProjectModal() {
             />
           </div>
 
+          {/* Runtime Preferences */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('runtimePreferencesLabel', lang)}</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <p className="text-[11px] text-[var(--color-text-muted)]">{t('profileLabel', lang)}</p>
+                <div
+                  className={cn(
+                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
+                    !canSwitchRuntime && 'opacity-60',
+                  )}
+                  title={!canSwitchRuntime ? t('profileSwitchManualOnly', lang) : undefined}
+                >
+                  {PROFILE_OPTIONS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      disabled={!canSwitchRuntime}
+                      onClick={() => {
+                        if (!canSwitchRuntime) return
+                        setAgentProfile(item.key)
+                      }}
+                      className={cn(
+                        'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        agentProfile === item.key
+                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                        !canSwitchRuntime && 'cursor-not-allowed',
+                      )}
+                    >
+                      {t(item.labelKey, lang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-[11px] text-[var(--color-text-muted)]">{t('contractModeLabel', lang)}</p>
+                <div
+                  className={cn(
+                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
+                    !canSwitchRuntime && 'opacity-60',
+                  )}
+                  title={!canSwitchRuntime ? t('contractSwitchManualOnly', lang) : undefined}
+                >
+                  {CONTRACT_OPTIONS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      disabled={!canSwitchRuntime}
+                      onClick={() => {
+                        if (!canSwitchRuntime) return
+                        setContractVersion(item.key)
+                      }}
+                      className={cn(
+                        'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
+                        contractVersion === item.key
+                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                        !canSwitchRuntime && 'cursor-not-allowed',
+                      )}
+                    >
+                      {t(item.labelKey, lang)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Data Source */}
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('dataSourceFiles', lang)}</label>
             <div
               onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
+              onDrop={handleDataDrop}
               className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
             >
               <input
-                ref={fileInputRef}
+                ref={dataFileInputRef}
                 type="file"
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files) handleFilesAdded(e.target.files)
+                  if (e.target.files) handleDataFilesAdded(e.target.files)
                   e.currentTarget.value = ''
                 }}
               />
@@ -317,7 +582,7 @@ export function NewProjectModal() {
                 multiple
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files) handleFilesAdded(e.target.files)
+                  if (e.target.files) handleDataFilesAdded(e.target.files)
                   e.currentTarget.value = ''
                 }}
               />
@@ -358,7 +623,7 @@ export function NewProjectModal() {
                 />
                 <button
                   type="button"
-                  onClick={handleBrowse}
+                  onClick={handleDataBrowse}
                   className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
                 >
                   {t('browse', lang)}
@@ -383,7 +648,7 @@ export function NewProjectModal() {
                       <span className="truncate">{file.name}</span>
                       <button
                         type="button"
-                        onClick={() => removeSelectedFile(idx)}
+                        onClick={() => removeSelectedDataFile(idx)}
                         className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                       >
                         {t('remove', lang)}
@@ -411,26 +676,82 @@ export function NewProjectModal() {
             )}
           </div>
 
-          {/* Output Goal */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('outputGoal', lang)}</label>
+          {/* Automation Policy */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('autoStopPolicyLabel', lang)}</label>
             <div className="flex gap-2">
-              {OUTPUT_GOALS.map((g) => (
+              {(['AND', 'OR'] as AutomationGoalLogic[]).map((logic) => (
                 <button
-                  key={g.value}
-                  onClick={() => setOutputGoal(g.value)}
+                  key={logic}
+                  type="button"
+                  onClick={() => setGoalLogic(logic)}
                   className={cn(
-                    'flex-1 py-2 rounded-lg border text-xs font-medium transition-colors',
-                    outputGoal === g.value
+                    'px-3 py-1 rounded-lg border text-xs font-medium transition-colors',
+                    goalLogic === logic
                       ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
                       : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-text-muted)]',
                   )}
                 >
-                  <span className="block text-base mb-0.5">{g.icon}</span>
-                  {t(g.value, lang)}
+                  {logic}
                 </button>
               ))}
             </div>
+            <div className="space-y-2">
+              {goals.map((goal, idx) => (
+                <div key={`goal-${idx}`} className="grid grid-cols-[1fr_auto_120px_auto] gap-2 items-center">
+                  <input
+                    value={goal.metric}
+                    onChange={(e) => updateGoal(idx, { metric: e.target.value })}
+                    placeholder={t('goalMetricPlaceholder', lang)}
+                    className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <select
+                    value={goal.operator}
+                    onChange={(e) => updateGoal(idx, { operator: e.target.value as AutomationGoalOperator })}
+                    className="bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  >
+                    {GOAL_OPERATORS.map((op) => (
+                      <option key={op} value={op}>{op}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={goalValueInputs[idx] ?? ''}
+                    onChange={(e) => updateGoalValueInput(idx, e.target.value)}
+                    placeholder={t('goalValuePlaceholder', lang)}
+                    className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeGoal(idx)}
+                    className="px-2 py-1 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+                  >
+                    {t('remove', lang)}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addGoal}
+              className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('addGoalButton', lang)}
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={maxExperiments}
+                onChange={(e) => setMaxExperiments(e.target.value)}
+                placeholder={t('maxExperimentsPlaceholder', lang)}
+                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+              />
+              <input
+                value={maxTokens}
+                onChange={(e) => setMaxTokens(e.target.value)}
+                placeholder={t('maxTokensPlaceholder', lang)}
+                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)]"
+              />
+            </div>
+            <p className="text-[11px] text-[var(--color-text-muted)]">{t('autoStopPolicyHint', lang)}</p>
           </div>
 
           {/* Advanced toggle */}
@@ -451,7 +772,7 @@ export function NewProjectModal() {
           {/* Advanced section */}
           <div className={cn(
             'space-y-4 overflow-hidden transition-all duration-200',
-            showAdvanced ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0',
+            showAdvanced ? 'max-h-[900px] opacity-100' : 'max-h-0 opacity-0',
           )}>
             {/* Project Title */}
             <div className="space-y-1.5">
@@ -463,33 +784,6 @@ export function NewProjectModal() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('titlePlaceholder', lang)}
-                className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
-              />
-            </div>
-
-            {/* Research Domain */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('researchDomain', lang)}</label>
-              <div className="flex flex-wrap gap-1.5">
-                {DOMAIN_SUGGESTIONS.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setDomain(domain === d ? '' : d)}
-                    className={cn(
-                      'px-2.5 py-1 rounded-full text-xs transition-colors',
-                      domain === d
-                        ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/40'
-                        : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                    )}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-              <input
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                placeholder={t('domainPlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
@@ -506,6 +800,60 @@ export function NewProjectModal() {
               />
             </div>
 
+            {/* References Upload */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('referenceFilesLabel', lang)}</label>
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleReferencesDrop}
+                className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
+              >
+                <input
+                  ref={referenceFileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.zip"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) handleReferenceFilesAdded(e.target.files)
+                    e.currentTarget.value = ''
+                  }}
+                />
+                <div className="flex items-center gap-2">
+                  <p className="flex-1 min-w-0 text-xs text-[var(--color-text-muted)]">{t('referenceFilesHint', lang)}</p>
+                  <button
+                    type="button"
+                    onClick={handleReferencesBrowse}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                  >
+                    {t('browse', lang)}
+                  </button>
+                </div>
+                {selectedReferenceFiles.length > 0 && (
+                  <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                    {t('filesSelected', lang, { count: selectedReferenceFiles.length })}
+                  </p>
+                )}
+                {selectedReferenceFiles.length > 0 && (
+                  <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
+                    {selectedReferenceFiles.map((file, idx) => (
+                      <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                        <span className="truncate">{file.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeSelectedReferenceFile(idx)}
+                          className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                        >
+                          {t('remove', lang)}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">{t('referencesFileTypeHint', lang)}</p>
+              </div>
+            </div>
+
             {/* Compute Budget */}
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('computeBudgetLabel', lang)}</label>
@@ -516,6 +864,7 @@ export function NewProjectModal() {
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
             </div>
+
           </div>
         </div>
 

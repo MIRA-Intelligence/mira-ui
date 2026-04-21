@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAgentStore } from './agentStore'
 import { useProjectStore } from './projectStore'
 
 const initialState = useProjectStore.getState()
+const initialAgentState = useAgentStore.getState()
 
 describe('projectStore runtime preferences', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     useProjectStore.setState(initialState, true)
+    useAgentStore.setState(initialAgentState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ run_mode: 'auto', agent_profile: 'default' }),
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
@@ -22,6 +25,7 @@ describe('projectStore runtime preferences', () => {
         coreQuestion: 'demo',
         runMode: 'auto',
         agentProfile: 'default',
+        contractVersion: 1,
         currentExperiment: 'Exp001',
         experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
         knowledge: [],
@@ -33,18 +37,145 @@ describe('projectStore runtime preferences', () => {
       selectedExpId: 'Exp001',
       mode: 'auto',
       agentProfile: 'default',
+      contractVersion: 1,
     })
   })
 
-  it('stores profile and mode on selected project task', () => {
+  it('stores runtime preferences on selected project task', () => {
     const store = useProjectStore.getState()
     store.setAgentProfile('research')
     store.setMode('manual')
+    store.setContractVersion(2)
 
     const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
     expect(task?.agentProfile).toBe('research')
     expect(task?.runMode).toBe('manual')
+    expect(task?.contractVersion).toBe(2)
     expect(useProjectStore.getState().agentProfile).toBe('research')
     expect(useProjectStore.getState().mode).toBe('manual')
+    expect(useProjectStore.getState().contractVersion).toBe(2)
+  })
+
+  it('clears stale logs when creating a reused project id', async () => {
+    useAgentStore.getState().addLog('PRJ-0002', {
+      id: 'stale-log',
+      timestamp: new Date().toISOString(),
+      content: 'stale message',
+      type: 'response',
+      metadata: {},
+    })
+    expect(useAgentStore.getState().logsByProject['PRJ-0002']).toHaveLength(1)
+
+    await useProjectStore.getState().createProject({
+      description: 'new project',
+      dataPath: '/tmp/data',
+      references: '',
+    })
+
+    expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-0002')
+    expect(useAgentStore.getState().logsByProject['PRJ-0002']).toBeUndefined()
+  })
+
+  it('clears project logs when deleting a task', async () => {
+    useAgentStore.getState().addLog('PRJ-0001', {
+      id: 'log-to-delete',
+      timestamp: new Date().toISOString(),
+      content: 'message',
+      type: 'response',
+      metadata: {},
+    })
+    expect(useAgentStore.getState().logsByProject['PRJ-0001']).toHaveLength(1)
+
+    await useProjectStore.getState().deleteTask('PRJ-0001', false)
+
+    expect(useAgentStore.getState().logsByProject['PRJ-0001']).toBeUndefined()
+  })
+
+  it('syncs status for existing projects from remote list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/projects')) {
+        return new Response(
+          JSON.stringify({
+            projects: [{
+              id: 'PRJ-0001',
+              display_name: 'PRJ-0001',
+              status: 'completed',
+              title: 'Demo',
+              has_plan: true,
+              run_mode: 'auto',
+              agent_profile: 'default',
+              contract_version: 1,
+            }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().loadProjects()
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('completed')
+  })
+
+  it('marks task completed when refreshed plan has phase3 result output', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [
+              { id: 'Exp001', title: 'done', status: 'completed' },
+              { id: 'Exp002', title: 'next', status: 'pending' },
+            ],
+            result: {
+              output_path: 'result/exports/presentation.pdf',
+              output_type: 'presentation',
+              summary: 'Export generated',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001')
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('completed')
+  })
+
+  it('keeps task in progress when only experiments are completed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [
+              { id: 'Exp001', title: 'done', status: 'completed', results: { metrics: { Dice: 0.81 } } },
+              { id: 'Exp002', title: 'next', status: 'pending' },
+            ],
+            result: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001')
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('in_progress')
   })
 })

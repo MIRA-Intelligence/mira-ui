@@ -67,12 +67,10 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
         onClick={() => onSelect(task.id)}
         onContextMenu={handleContext}
         className={cn(
-          'w-full px-3 py-2.5 text-left rounded-md text-sm font-mono transition-colors select-none',
+          'w-full px-3 py-2.5 text-left rounded-md text-sm font-mono transition-colors select-none flex items-center justify-between',
           isSelected
             ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent)]/40'
-            : isCompleted
-              ? 'text-[var(--color-text-muted)]/50 hover:bg-[var(--color-bg-hover)]'
-              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
+            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
         )}
       >
         {editing ? (
@@ -89,7 +87,14 @@ export function QueueItem({ task, isSelected, onSelect, onRename, onDelete, onDu
             className="w-full bg-transparent border-b border-[var(--color-accent)] outline-none text-sm font-mono text-[var(--color-text-primary)]"
           />
         ) : (
-          task.label
+          <>
+            <span className="truncate">{task.label}</span>
+            {isCompleted && (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 ml-2 text-[var(--color-text-muted)] opacity-60 shrink-0">
+                <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+              </svg>
+            )}
+          </>
         )}
       </button>
 
