@@ -90,4 +90,92 @@ describe('projectStore runtime preferences', () => {
 
     expect(useAgentStore.getState().logsByProject['PRJ-0001']).toBeUndefined()
   })
+
+  it('syncs status for existing projects from remote list', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/projects')) {
+        return new Response(
+          JSON.stringify({
+            projects: [{
+              id: 'PRJ-0001',
+              display_name: 'PRJ-0001',
+              status: 'completed',
+              title: 'Demo',
+              has_plan: true,
+              run_mode: 'auto',
+              agent_profile: 'default',
+              contract_version: 1,
+            }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().loadProjects()
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('completed')
+  })
+
+  it('marks task completed when refreshed plan has phase3 result output', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [
+              { id: 'Exp001', title: 'done', status: 'completed' },
+              { id: 'Exp002', title: 'next', status: 'pending' },
+            ],
+            result: {
+              output_path: 'result/exports/presentation.pdf',
+              output_type: 'presentation',
+              summary: 'Export generated',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001')
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('completed')
+  })
+
+  it('keeps task in progress when only experiments are completed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [
+              { id: 'Exp001', title: 'done', status: 'completed', results: { metrics: { Dice: 0.81 } } },
+              { id: 'Exp002', title: 'next', status: 'pending' },
+            ],
+            result: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001')
+    const task = useProjectStore.getState().tasks.find((t) => t.id === 'PRJ-0001')
+    expect(task?.status).toBe('in_progress')
+  })
 })

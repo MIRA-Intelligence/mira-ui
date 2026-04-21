@@ -192,9 +192,20 @@ function parseResult(raw: any): ResultData {
   }
 }
 
-function deriveTaskStatus(rawStatus: unknown, experiments: Experiment[]): ProjectTask['status'] {
-  const hasActiveOrPending = experiments.some((e) => e.status === 'running' || e.status === 'pending')
-  if (hasActiveOrPending) return 'in_progress'
+function hasFinalResultOutput(result: ResultData): boolean {
+  const hasOutputPath = typeof result.outputPath === 'string' && result.outputPath.trim().length > 0
+  const hasOutputType = typeof result.outputType === 'string' && result.outputType.trim().length > 0
+  const hasSummary = typeof result.summary === 'string' && result.summary.trim().length > 0
+  const hasSections = Array.isArray(result.sections)
+    && result.sections.some((section) => (
+      (typeof section.title === 'string' && section.title.trim().length > 0)
+      || (typeof section.content === 'string' && section.content.trim().length > 0)
+    ))
+  return hasOutputPath || hasOutputType || hasSummary || hasSections
+}
+
+function deriveTaskStatus(rawStatus: unknown, result: ResultData): ProjectTask['status'] {
+  if (hasFinalResultOutput(result)) return 'completed'
   if (rawStatus === 'completed') return 'completed'
   return 'in_progress'
 }
@@ -203,10 +214,11 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
   const parsedExperiments = exps.map((e, i) => parseExperiment(e, i))
   const knowledge: string[] = Array.isArray(raw.knowledge) ? raw.knowledge : task.knowledge
+  const parsedResult = parseResult(raw.result)
 
   return {
     ...task,
-    status: deriveTaskStatus(raw.status, parsedExperiments),
+    status: deriveTaskStatus(raw.status, parsedResult),
     title: raw.title ?? task.title,
     coreQuestion: raw.core_question ?? task.coreQuestion,
     currentExperiment: raw.current_experiment ?? task.currentExperiment,
@@ -214,7 +226,7 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
     experiments: parsedExperiments,
     knowledge,
     research: parseResearch(raw.research),
-    result: parseResult(raw.result),
+    result: parsedResult,
   }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -480,18 +492,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const remote = remotes.find((item) => item.id === task.id)
       if (!remote) return task
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
+      const status: ProjectTask['status'] = remote.status === 'completed' ? 'completed' : 'in_progress'
       const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
       const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
       const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
+      const title = remote.title || task.title
+      const coreQuestion = remote.core_question ?? task.coreQuestion
+      const startedAt = remote.started_at || task.startedAt
       if (
         task.label === displayName
+        && task.status === status
+        && task.title === title
+        && task.coreQuestion === coreQuestion
+        && task.startedAt === startedAt
         && task.runMode === runMode
         && task.agentProfile === agentProfile
         && task.contractVersion === contractVersion
       ) {
         return task
       }
-      return { ...task, label: displayName, runMode, agentProfile, contractVersion }
+      return {
+        ...task,
+        label: displayName,
+        status,
+        title,
+        coreQuestion,
+        startedAt,
+        runMode,
+        agentProfile,
+        contractVersion,
+      }
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks

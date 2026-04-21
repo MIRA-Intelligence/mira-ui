@@ -32,9 +32,9 @@ const EXPORT_CONFIG: Record<ExportFormat, {
   presentation: {
     title: 'Presentation',
     skillPath: 'medpilot/skills/export/presentation-beamer/SKILL.md',
-    outputPath: 'result/exports/presentation.tex',
+    outputPath: 'result/exports/presentation.pdf',
     outputType: 'presentation',
-    requirements: 'Generate a LaTeX Beamer deck for presentation, and include compile instructions (or a compiled PDF when available).',
+    requirements: 'Generate a LaTeX Beamer deck and compile it to PDF. The required deliverable is result/exports/presentation.pdf (non-empty), with .tex source retained when possible.',
   },
   metadata: {
     title: 'Meta data',
