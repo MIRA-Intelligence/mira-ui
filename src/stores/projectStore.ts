@@ -12,12 +12,22 @@ import {
   updateProjectRuntimePreferences,
 } from '@/services/api'
 
+async function clearAgentLogs(projectId: string): Promise<void> {
+  try {
+    const { useAgentStore } = await import('@/stores/agentStore')
+    useAgentStore.getState().clearLogs(projectId)
+  } catch {
+    // Ignore optional log cleanup failures.
+  }
+}
+
 interface ProjectState {
   tasks: ProjectTask[]
   selectedTaskId: string | null
   selectedExpId: string | null
   activeStage: PipelineStage
   agentProfile: AgentProfile
+  contractVersion: ContractVersion
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
@@ -182,9 +192,20 @@ function parseResult(raw: any): ResultData {
   }
 }
 
-function deriveTaskStatus(rawStatus: unknown, experiments: Experiment[]): ProjectTask['status'] {
-  const hasActiveOrPending = experiments.some((e) => e.status === 'running' || e.status === 'pending')
-  if (hasActiveOrPending) return 'in_progress'
+function hasFinalResultOutput(result: ResultData): boolean {
+  const hasOutputPath = typeof result.outputPath === 'string' && result.outputPath.trim().length > 0
+  const hasOutputType = typeof result.outputType === 'string' && result.outputType.trim().length > 0
+  const hasSummary = typeof result.summary === 'string' && result.summary.trim().length > 0
+  const hasSections = Array.isArray(result.sections)
+    && result.sections.some((section) => (
+      (typeof section.title === 'string' && section.title.trim().length > 0)
+      || (typeof section.content === 'string' && section.content.trim().length > 0)
+    ))
+  return hasOutputPath || hasOutputType || hasSummary || hasSections
+}
+
+function deriveTaskStatus(rawStatus: unknown, result: ResultData): ProjectTask['status'] {
+  if (hasFinalResultOutput(result)) return 'completed'
   if (rawStatus === 'completed') return 'completed'
   return 'in_progress'
 }
@@ -193,10 +214,11 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
   const parsedExperiments = exps.map((e, i) => parseExperiment(e, i))
   const knowledge: string[] = Array.isArray(raw.knowledge) ? raw.knowledge : task.knowledge
+  const parsedResult = parseResult(raw.result)
 
   return {
     ...task,
-    status: deriveTaskStatus(raw.status, parsedExperiments),
+    status: deriveTaskStatus(raw.status, parsedResult),
     title: raw.title ?? task.title,
     coreQuestion: raw.core_question ?? task.coreQuestion,
     currentExperiment: raw.current_experiment ?? task.currentExperiment,
@@ -204,7 +226,7 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
     experiments: parsedExperiments,
     knowledge,
     research: parseResearch(raw.research),
-    result: parseResult(raw.result),
+    result: parsedResult,
   }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -256,6 +278,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedExpId: null,
   activeStage: 'research',
   agentProfile: 'default',
+  contractVersion: 1,
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
@@ -271,6 +294,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeStage: 'research',
       mode: normalizeRunMode(task?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(task?.contractVersion, get().contractVersion),
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
@@ -308,6 +332,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setContractVersion: (contractVersion) => {
     const selectedId = get().selectedTaskId
     set((state) => ({
+      contractVersion,
       tasks: selectedId
         ? state.tasks.map((task) => (
             task.id === selectedId ? { ...task, contractVersion } : task
@@ -348,6 +373,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (deleteFiles) {
       await deleteProjectFiles(id)
     }
+    await clearAgentLogs(id)
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
     const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
@@ -362,6 +388,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ),
       mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(nextSelectedTask?.contractVersion, get().contractVersion),
     })
   },
 
@@ -389,7 +416,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   createProject: async (input) => {
-    const { mode, agentProfile } = get()
+    const current = get()
+    const mode = normalizeRunMode(current.mode, 'auto')
+    const agentProfile = normalizeAgentProfile(
+      input.agentProfile ?? current.agentProfile,
+      current.agentProfile,
+    )
+    const contractVersion = normalizeContractVersion(
+      input.contractVersion ?? current.contractVersion,
+      current.contractVersion,
+    )
     const remotes = await fetchProjects()
     const used = collectProjectNumbers([
       ...remotes.map((r) => r.id),
@@ -404,17 +440,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       coreQuestion: input.description,
       runMode: mode,
       agentProfile,
-      contractVersion: 1,
+      contractVersion,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
       result: {},
       startedAt: new Date().toISOString(),
     }
+    await clearAgentLogs(id)
     set((state) => ({
       tasks: [task, ...state.tasks],
       selectedTaskId: id,
       selectedExpId: null,
+      mode,
+      agentProfile,
+      contractVersion,
       startedAt: Date.now(),
     }))
     return id
@@ -452,18 +492,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const remote = remotes.find((item) => item.id === task.id)
       if (!remote) return task
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
+      const status: ProjectTask['status'] = remote.status === 'completed' ? 'completed' : 'in_progress'
       const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
       const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
       const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
+      const title = remote.title || task.title
+      const coreQuestion = remote.core_question ?? task.coreQuestion
+      const startedAt = remote.started_at || task.startedAt
       if (
         task.label === displayName
+        && task.status === status
+        && task.title === title
+        && task.coreQuestion === coreQuestion
+        && task.startedAt === startedAt
         && task.runMode === runMode
         && task.agentProfile === agentProfile
         && task.contractVersion === contractVersion
       ) {
         return task
       }
-      return { ...task, label: displayName, runMode, agentProfile, contractVersion }
+      return {
+        ...task,
+        label: displayName,
+        status,
+        title,
+        coreQuestion,
+        startedAt,
+        runMode,
+        agentProfile,
+        contractVersion,
+      }
     })
 
     const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
@@ -483,6 +541,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedExpId: hasSelected ? get().selectedExpId : null,
       mode: normalizeRunMode(selectedTask?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(selectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(selectedTask?.contractVersion, get().contractVersion),
     })
 
     for (const t of newTasks) {

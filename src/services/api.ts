@@ -157,6 +157,19 @@ export interface UploadedProjectFile {
   size: number
 }
 
+export interface ExtractedProjectFile {
+  archive: string
+  path: string
+  size: number
+}
+
+export interface UploadProjectFilesResult {
+  uploaded: UploadedProjectFile[]
+  extracted: ExtractedProjectFile[]
+}
+
+export type ProjectFileTarget = 'data' | 'references'
+
 export interface DataPathValidationResult {
   ok: boolean
   error?: string
@@ -164,15 +177,21 @@ export interface DataPathValidationResult {
   resolved_path?: string
 }
 
-export async function uploadProjectFiles(sessionId: string, files: File[]): Promise<UploadedProjectFile[]> {
-  if (files.length === 0) return []
+export async function uploadProjectFiles(
+  sessionId: string,
+  files: File[],
+  target: ProjectFileTarget = 'data',
+): Promise<UploadProjectFilesResult> {
+  if (files.length === 0) return { uploaded: [], extracted: [] }
 
   const formData = new FormData()
   for (const file of files) {
     formData.append('files', file, file.name)
   }
 
-  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/files`, {
+  const sid = encodeURIComponent(sessionId)
+  const query = `target=${encodeURIComponent(target)}`
+  const resp = await fetch(`${getApiUrl()}/projects/${sid}/files?${query}`, {
     method: 'POST',
     body: formData,
   })
@@ -188,7 +207,10 @@ export async function uploadProjectFiles(sessionId: string, files: File[]): Prom
   }
 
   const data = await resp.json()
-  return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
+  return {
+    uploaded: Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : [],
+    extracted: Array.isArray(data?.extracted) ? data.extracted as ExtractedProjectFile[] : [],
+  }
 }
 
 export async function validateDataPath(path: string): Promise<DataPathValidationResult> {

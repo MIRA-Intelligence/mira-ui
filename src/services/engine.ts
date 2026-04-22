@@ -90,7 +90,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
   } catch {
     return {
       status: 'unreachable',
-      message: 'Unable to reach local engine. Start medpilot-agent service and retry.',
+      message: 'Unable to reach local engine. Start mira-engine service and retry.',
       version: null,
     }
   }

@@ -1,6 +1,6 @@
 ## Related Issue
 
-- Implements Project-MedPilot/MedPilot#<issue-id>
+- Implements MIRA-Intelligence/Mira#<issue-id>
 
 ## CLA Acknowledgement
 
