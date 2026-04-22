@@ -1,8 +1,8 @@
 {
-  "name": "medpilot-ui",
+  "name": "mira-ui",
   "version": "0.1.0",
   "description": "AI Agent UI for radiology workflows",
-  "author": "Project MedPilot",
+  "author": "MIRA Intelligence",
   "license": "GPL-3.0-or-later",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -21,8 +21,8 @@
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
   },
   "build": {
-    "appId": "com.projectmedpilot.medpilotui",
-    "productName": "MedPilotUI",
+    "appId": "com.projectmira.miraui",
+    "productName": "MiraUI",
     "directories": {
       "output": "release"
     },
