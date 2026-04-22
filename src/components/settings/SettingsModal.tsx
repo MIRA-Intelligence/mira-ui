@@ -83,11 +83,11 @@ export function SettingsModal() {
     try {
       if (!window.electronAPI?.upgradeLocalEngine) {
         setUpgradeError(true)
-        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: medpilot-agent upgrade --package medpilot')
+        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: mira-engine upgrade --package mira')
         return
       }
 
-      const result = await window.electronAPI.upgradeLocalEngine('medpilot')
+      const result = await window.electronAPI.upgradeLocalEngine('mira-engine')
       if (!result.ok) {
         setUpgradeError(true)
         setUpgradeMessage(result.stderr || 'Local engine upgrade failed.')
@@ -269,7 +269,7 @@ export function SettingsModal() {
             />
             {showEngineWarning && (
               <p className="text-[11px] text-amber-300 mt-3 leading-relaxed">
-                {store.engineMessage || 'Local engine is unavailable or incompatible. Upgrade and restart medpilot-agent.'}
+                {store.engineMessage || 'Local engine is unavailable or incompatible. Upgrade and restart mira-engine.'}
               </p>
             )}
             <div className="mt-3 flex items-center gap-2">

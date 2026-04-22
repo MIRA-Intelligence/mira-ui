@@ -5,7 +5,7 @@ export type Language = 'en' | 'zh'
 export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable'
 
 const GATEWAY_PORT = 18790
-const DEFAULT_WORKSPACE_PATH = '~/.medpilot/workspace'
+const DEFAULT_WORKSPACE_PATH = '~/.mira/workspace'
 
 function defaultApiUrl(): string {
   const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
@@ -50,7 +50,22 @@ interface SettingsState {
   closeSettings: () => void
 }
 
-const STORAGE_KEY = 'medpilot-ui-settings'
+const STORAGE_KEY = 'mira-ui-settings'
+const LEGACY_STORAGE_KEY = 'medpilot-ui-settings'
+
+// One-time migration: copy legacy MedPilot settings into the new MIRA key.
+function migrateLegacyStorageKey(): void {
+  try {
+    if (typeof localStorage === 'undefined') return
+    if (localStorage.getItem(STORAGE_KEY)) return
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
+    if (!legacy) return
+    localStorage.setItem(STORAGE_KEY, legacy)
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch { /* ignore */ }
+}
+
+migrateLegacyStorageKey()
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

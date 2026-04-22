@@ -1,4 +1,4 @@
-# MedPilotUI
+# MiraUI
 
 AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tailwind CSS, and Electron.
 
@@ -33,7 +33,7 @@ npm install
 
 ## 2) Backend assumptions
 
-This UI is designed to connect to the [MedPilot](https://github.com/Project-MedPilot/MedPilot) gateway through:
+This UI is designed to connect to the [Mira](https://github.com/MIRA-Intelligence/Mira) gateway through:
 
 - WebSocket endpoint: `/ws`
 - REST API endpoint: `/api`

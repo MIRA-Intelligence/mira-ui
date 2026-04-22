@@ -10,7 +10,7 @@ type UpgradeResult = {
 }
 
 function runEngineUpgrade(packageName: string): Promise<UpgradeResult> {
-  const executable = process.platform === 'win32' ? 'medpilot-agent.exe' : 'medpilot-agent'
+  const executable = process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine'
   const args = ['upgrade', '--package', packageName]
 
   return new Promise((resolve) => {
@@ -82,7 +82,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
-    return runEngineUpgrade(packageName || 'medpilot')
+    return runEngineUpgrade(packageName || 'mira-engine')
   })
   createWindow()
 })

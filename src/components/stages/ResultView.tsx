@@ -17,28 +17,28 @@ const EXPORT_CONFIG: Record<ExportFormat, {
 }> = {
   experiment_report: {
     title: 'Experiment Report',
-    skillPath: 'medpilot/skills/export/experiment-report/SKILL.md',
+    skillPath: 'mira_engine/skills/export/experiment-report/SKILL.md',
     outputPath: 'result/exports/experiment_report.md',
     outputType: 'report',
     requirements: 'Produce an objective markdown report summarizing project goal, setup, experiments, metrics, findings, and limitations.',
   },
   paper_article: {
     title: 'Paper Article',
-    skillPath: 'medpilot/skills/export/paper-article/SKILL.md',
+    skillPath: 'mira_engine/skills/export/paper-article/SKILL.md',
     outputPath: 'result/exports/paper_article.md',
     outputType: 'paper',
     requirements: 'Write a journal-style article with Introduction, Method, Results, and Discussion sections using project evidence.',
   },
   presentation: {
     title: 'Presentation',
-    skillPath: 'medpilot/skills/export/presentation-beamer/SKILL.md',
+    skillPath: 'mira_engine/skills/export/presentation-beamer/SKILL.md',
     outputPath: 'result/exports/presentation.pdf',
     outputType: 'presentation',
     requirements: 'Generate a LaTeX Beamer deck and compile it to PDF. The required deliverable is result/exports/presentation.pdf (non-empty), with .tex source retained when possible.',
   },
   metadata: {
     title: 'Meta data',
-    skillPath: 'medpilot/skills/export/project-metadata/SKILL.md',
+    skillPath: 'mira_engine/skills/export/project-metadata/SKILL.md',
     outputPath: 'result/exports/project_metadata.zip',
     outputType: 'metadata',
     requirements: 'Package all files under the current project directory into a single zip archive for delivery.',

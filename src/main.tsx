@@ -17,7 +17,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
   componentDidCatch(error: Error, info: { componentStack: string }): void {
     // Keep a console trace for quick diagnosis in devtools.
-    console.error('MedPilotUI runtime error:', error)
+    console.error('MiraUI runtime error:', error)
     this.setState({ error, componentStack: info.componentStack || '' })
   }
 
@@ -25,7 +25,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
     if (this.state.error) {
       return (
         <div style={{ padding: 16, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-          <h2 style={{ marginBottom: 8 }}>MedPilotUI runtime error</h2>
+          <h2 style={{ marginBottom: 8 }}>MiraUI runtime error</h2>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error.stack || this.state.error.message}</pre>
           {this.state.componentStack && (
             <>

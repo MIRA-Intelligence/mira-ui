@@ -73,7 +73,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $setupExe = Get-ChildItem -Path release -Filter "MedPilotUI-*-win-*-setup.exe" | Select-Object -First 1
+          $setupExe = Get-ChildItem -Path release -Filter "MiraUI-*-win-*-setup.exe" | Select-Object -First 1
           if (-not $setupExe) {
             Write-Error "Setup executable not found in release/"
             exit 1
@@ -81,7 +81,7 @@ jobs:
           $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
           Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
 
-          $portableExe = Get-ChildItem -Path release -Filter "MedPilotUI-*-win-*-portable.exe" | Select-Object -First 1
+          $portableExe = Get-ChildItem -Path release -Filter "MiraUI-*-win-*-portable.exe" | Select-Object -First 1
           if (-not $portableExe) {
             Write-Error "Portable executable not found in release/"
             exit 1
@@ -93,12 +93,12 @@ jobs:
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: medpilotui-macos
+          name: miraui-macos
           path: |
-            release/MedPilotUI-*-mac-*.dmg
-            release/MedPilotUI-*-mac-*.dmg.blockmap
-            release/MedPilotUI-*-mac-*.zip
-            release/MedPilotUI-*-mac-*.zip.blockmap
+            release/MiraUI-*-mac-*.dmg
+            release/MiraUI-*-mac-*.dmg.blockmap
+            release/MiraUI-*-mac-*.zip
+            release/MiraUI-*-mac-*.zip.blockmap
             release/latest-mac.yml
             release/app-update.yml
 
@@ -106,10 +106,10 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: medpilotui-windows
+          name: miraui-windows
           path: |
-            release/MedPilotUI-*-win-*-setup.zip
-            release/MedPilotUI-*-win-*-portable.zip
+            release/MiraUI-*-win-*-setup.zip
+            release/MiraUI-*-win-*-portable.zip
 
   publish-release:
     needs: build-desktop
@@ -119,7 +119,7 @@ jobs:
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: medpilotui-*
+          pattern: miraui-*
           path: release-assets
           merge-multiple: true
 

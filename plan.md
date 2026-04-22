@@ -1,4 +1,4 @@
-# MedPilotUI — 开发计划与架构设计
+# MiraUI — 开发计划与架构设计
 
 > 最后更新：2026-03-22
 > 状态：规划阶段
@@ -7,13 +7,13 @@
 
 ## 1. 项目概述
 
-MedPilotUI 是一个基于 Electron 的 AI Agent UI 界面，对接 medpilot（基于 nanobot 框架开发）后端。
+MiraUI 是一个基于 Electron 的 AI Agent UI 界面，对接 mira（基于 nanobot 框架开发）后端。
 支持两种部署模式：
 
 | 模式 | 说明 |
 |------|------|
-| **Desktop App** | Electron 打包的本地桌面应用，连接本地 medpilot |
-| **Cloud Web App** | 纯 Web 应用（Nginx 托管），用户通过浏览器访问远程 medpilot |
+| **Desktop App** | Electron 打包的本地桌面应用，连接本地 mira |
+| **Cloud Web App** | 纯 Web 应用（Nginx 托管），用户通过浏览器访问远程 mira |
 
 UI 布局参考 [FARS](https://analemma.ai/fars)（Fully Automated Research System）。
 
@@ -21,20 +21,20 @@ UI 布局参考 [FARS](https://analemma.ai/fars)（Fully Automated Research Syst
 
 ## 2. 后端架构分析
 
-### 2.1 medpilot 概况
+### 2.1 mira 概况
 
 | 项 | 值 |
 |---|---|
-| 源码位置 | `/Users/cwang/Code/medpilot/medpilot/` |
-| 包名 | `medpilot 0.1`（pip editable install） |
+| 源码位置 | `/Users/cwang/Code/mira/mira/` |
+| 包名 | `mira 0.1`（pip editable install） |
 | Conda 环境 | `nanobot` |
-| CLI 入口 | `medpilot` |
-| 关键命令 | `medpilot gateway` / `medpilot agent -m "msg"` |
+| CLI 入口 | `mira-engine` |
+| 关键命令 | `mira gateway` / `mira agent -m "msg"` |
 
 ### 2.2 CLI 命令
 
 ```
-medpilot
+mira
 ├── onboard     # 初始化配置和工作区
 ├── gateway     # 启动 gateway 服务（-p PORT, -w WORKSPACE, -c CONFIG）
 ├── agent       # 直接与 agent 交互（-m MESSAGE, -s SESSION_ID）
@@ -46,12 +46,12 @@ medpilot
 测试命令：
 ```bash
 conda activate nanobot
-medpilot agent -m "your message"
+mira agent -m "your message"
 ```
 
 ### 2.3 核心架构：异步消息总线
 
-medpilot gateway **没有 HTTP API**。它是纯异步消息总线架构：
+mira gateway **没有 HTTP API**。它是纯异步消息总线架构：
 
 ```
                         ┌─────────────────┐
@@ -84,7 +84,7 @@ OutboundMessage:  AgentLoop → bus.publish_outbound() → ChannelManager 分发
 
 ### 2.4 消息总线数据结构
 
-源码：`medpilot/bus/events.py`
+源码：`mira/bus/events.py`
 
 ```python
 @dataclass
@@ -114,7 +114,7 @@ class OutboundMessage:
 
 ### 2.5 BaseChannel 接口
 
-源码：`medpilot/channels/base.py`
+源码：`mira/channels/base.py`
 
 ```python
 class BaseChannel(ABC):
@@ -141,7 +141,7 @@ class BaseChannel(ABC):
 
 ### 2.6 会话管理
 
-源码：`medpilot/session/manager.py`
+源码：`mira/session/manager.py`
 
 - 会话按 `channel:chat_id` 分 key（如 `telegram:12345`, `cli:direct`）
 - 存储为 JSONL 文件，位于 `{workspace}/sessions/`
@@ -152,7 +152,7 @@ class BaseChannel(ABC):
 
 ### 2.7 Agent Loop
 
-源码：`medpilot/agent/loop.py`
+源码：`mira/agent/loop.py`
 
 处理流程：
 1. 从 bus 消费 `InboundMessage`
@@ -166,7 +166,7 @@ class BaseChannel(ABC):
 
 ### 2.8 配置系统
 
-源码：`medpilot/config/schema.py`
+源码：`mira/config/schema.py`
 
 ```python
 class Config(BaseSettings):
@@ -181,13 +181,13 @@ class Config(BaseSettings):
 
 ### 2.9 Channel Manager 注册流程
 
-源码：`medpilot/channels/manager.py`
+源码：`mira/channels/manager.py`
 
 每个 channel 在 `_init_channels()` 中按以下模式注册：
 
 ```python
 if self.config.channels.xxx.enabled:
-    from medpilot.channels.xxx import XxxChannel
+    from mira.channels.xxx import XxxChannel
     self.channels["xxx"] = XxxChannel(self.config.channels.xxx, self.bus)
 ```
 
@@ -201,9 +201,9 @@ outbound 分发器 `_dispatch_outbound()` 持续从 bus 消费 `OutboundMessage`
 
 | 方案 | 描述 | 评估 |
 |------|------|------|
-| A. 新增 WebChannel | 在 medpilot 中新增 `channels/web.py`，遵循 BaseChannel 接口 | **最佳** — 架构最干净 |
+| A. 新增 WebChannel | 在 mira 中新增 `channels/web.py`，遵循 BaseChannel 接口 | **最佳** — 架构最干净 |
 | B. 外部 API Bridge | 独立 FastAPI 进程，通过某种 IPC 连接 bus | 复杂度高，需跨进程通信 |
-| C. CLI 子进程 | Electron 通过 spawn 调用 `medpilot agent` | 仅适用 Desktop，无法 Cloud 部署 |
+| C. CLI 子进程 | Electron 通过 spawn 调用 `mira agent` | 仅适用 Desktop，无法 Cloud 部署 |
 
 **选择方案 A**：创建 WebChannel，完美融入现有架构。
 
@@ -211,7 +211,7 @@ outbound 分发器 `_dispatch_outbound()` 持续从 bus 消费 `OutboundMessage`
 
 ```
 ┌─────────────────────────┐         ┌──────────────────────────────┐
-│   MedPilotUI Frontend   │         │   medpilot gateway       │
+│   MiraUI Frontend   │         │   mira gateway       │
 │                         │  WS     │                              │
 │   React + TypeScript    │◀═══════▶│   WebChannel (:18790)        │
 │                         │  REST   │     │                        │
@@ -231,7 +231,7 @@ outbound 分发器 `_dispatch_outbound()` 持续从 bus 消费 `OutboundMessage`
 #### 文件改动清单
 
 ```
-medpilot/medpilot/
+mira/mira/
 ├── channels/web.py          # 新增 — WebChannel 实现
 ├── config/schema.py         # 修改 — 新增 WebChannelConfig
 └── channels/manager.py      # 修改 — 注册 web channel
@@ -372,7 +372,7 @@ class WebChannel(BaseChannel):
 | **UI 组件** | Tailwind CSS v4 + shadcn/ui | 深色主题友好，高度可定制 |
 | **状态管理** | Zustand | 轻量，中等复杂度适用 |
 | **实时通信** | WebSocket | 双向实时，连接 WebChannel |
-| **后端新增** | aiohttp (WebChannel) | 嵌入 medpilot gateway，无额外进程 |
+| **后端新增** | aiohttp (WebChannel) | 嵌入 mira gateway，无额外进程 |
 | **云端部署** | Docker + Nginx | 容器化前后端 |
 
 ---
@@ -441,7 +441,7 @@ class WebChannel(BaseChannel):
 ## 6. 项目目录结构
 
 ```
-MedPilotUI/
+MiraUI/
 ├── plan.md                          # 本文档
 ├── electron/                        # Electron 主进程
 │   ├── main.ts                      # Electron 入口，创建 BrowserWindow
@@ -488,7 +488,7 @@ MedPilotUI/
 │       └── globals.css              # Tailwind + 全局样式
 ├── docker/
 │   ├── Dockerfile.frontend          # Web 前端镜像
-│   └── docker-compose.yml           # 前端 + medpilot 编排
+│   └── docker-compose.yml           # 前端 + mira 编排
 ├── electron-builder.yml             # Electron 打包配置
 ├── vite.config.ts                   # Vite 配置 (Web 模式)
 ├── electron.vite.config.ts          # electron-vite 配置
@@ -518,7 +518,7 @@ MedPilotUI/
                REST      http(s)://host:18790/api/*
                         │
              ┌──────────▼──────────────────┐
-             │  medpilot gateway       │
+             │  mira gateway       │
              │                             │
              │  ┌─ WebChannel (:18790) ──┐ │
              │  │  WS server + REST API  │ │
@@ -555,7 +555,7 @@ const API_URL = import.meta.env.VITE_API_URL  ?? 'http://localhost:18790/api';
 | Desktop 开发 | `ws://localhost:18790/ws` | `http://localhost:18790/api` |
 | Cloud 生产 | `wss://your-server.com/ws` | `https://your-server.com/api` |
 
-Cloud 模式下 Nginx 反向代理到 medpilot gateway :18790。
+Cloud 模式下 Nginx 反向代理到 mira gateway :18790。
 
 ---
 
@@ -563,7 +563,7 @@ Cloud 模式下 Nginx 反向代理到 medpilot gateway :18790。
 
 ### Phase 0：后端 WebChannel（Week 1）
 
-> **目标**：让 medpilot gateway 暴露 WebSocket + REST API
+> **目标**：让 mira gateway 暴露 WebSocket + REST API
 
 | 任务 | 文件 | 说明 |
 |------|------|------|
@@ -578,7 +578,7 @@ Cloud 模式下 Nginx 反向代理到 medpilot gateway :18790。
 **验收标准**：
 ```bash
 # 终端 1：启动 gateway
-medpilot gateway
+mira gateway
 
 # 终端 2：WebSocket 测试
 websocat ws://localhost:18790/ws
@@ -639,7 +639,7 @@ websocat ws://localhost:18790/ws
 | Electron 打包 | macOS: DMG/universal, Windows: NSIS, Linux: AppImage |
 | 自动更新 | electron-updater + GitHub Releases |
 | Docker 镜像 | Dockerfile.frontend (Nginx + 静态) |
-| docker-compose | frontend (:80) + medpilot gateway (:18790) |
+| docker-compose | frontend (:80) + mira gateway (:18790) |
 | Nginx 配置 | 静态资源 + WebSocket 反代 (proxy_pass + Upgrade header) |
 | CI/CD | GitHub Actions: lint → test → build → publish |
 
@@ -660,11 +660,11 @@ websocat ws://localhost:18790/ws
 ```bash
 # ===== 后端 =====
 conda activate nanobot
-medpilot gateway                     # 启动 gateway + WebChannel :18790
-medpilot agent -m "hello"            # CLI 直接测试 agent
+mira gateway                     # 启动 gateway + WebChannel :18790
+mira agent -m "hello"            # CLI 直接测试 agent
 
 # ===== 前端开发 =====
-cd ~/Shared/MedPilotUI
+cd ~/Shared/MiraUI
 npm install
 npm run dev                              # Web 模式 → http://localhost:5173
 npm run electron:dev                     # Desktop 模式
@@ -700,7 +700,7 @@ docker-compose up -d                     # 前端 :80 + 后端 :18790
 
 ### 2026-03-22 — 项目规划
 
-- 完成 medpilot 后端架构分析
+- 完成 mira 后端架构分析
 - 确认 gateway 无 HTTP API，需新增 WebChannel
 - 确定技术栈与 7 阶段开发计划
 - 创建本文档
