@@ -45,11 +45,11 @@ export function useWebSocket() {
           if (!hasDesktopEngineManager()) {
             setLocalEngineBootstrap({
               phase: 'error',
-              message: 'Local bundle mode requires the MiraUI desktop app. Switch to remote mode in browser builds.',
+              message: 'Local bundle mode requires the MIRA desktop app. Switch to remote mode in browser builds.',
             })
             setEngineBootstrap({
               status: 'unreachable',
-              message: 'Local bundle mode requires the MiraUI desktop app. Switch to remote mode in browser builds.',
+              message: 'Local bundle mode requires the MIRA desktop app. Switch to remote mode in browser builds.',
               version: null,
             })
             setConnected(false)
@@ -104,7 +104,6 @@ export function useWebSocket() {
           return
         }
 
-        wsClient.connect()
         unsubMsg = wsClient.onMessage(handleWsMessage)
         unsubStatus = wsClient.onStatus((connected) => {
           if (useAgentStore.getState().connected !== connected) {
@@ -114,6 +113,7 @@ export function useWebSocket() {
             void syncOnConnect()
           }
         })
+        wsClient.connect()
       } catch (error) {
         if (disposed) return
         const message = error instanceof Error ? error.message : String(error)

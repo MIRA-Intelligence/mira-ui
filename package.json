@@ -25,11 +25,16 @@
   },
   "build": {
     "appId": "com.projectmira.miraui",
-    "productName": "MiraUI",
+    "productName": "MIRA",
     "directories": {
       "output": "release"
     },
     "asar": true,
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
     "mac": {
       "identity": null,
       "target": [
@@ -38,6 +43,25 @@
       ],
       "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
       "category": "public.app-category.developer-tools"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 164,
+          "y": 244,
+          "type": "file"
+        },
+        {
+          "x": 456,
+          "y": 244,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 620,
+        "height": 420
+      }
     },
     "win": {
       "target": [

@@ -128,11 +128,14 @@ npm run dist:all
 
 `MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, auto-installs the local service on first launch, and exposes the local runtime config inside the UI.
 
-Before running a bundle build locally, place the platform-specific engine binary at:
+By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. You can override the source with:
 
-```text
-bundled-engine/darwin/mira-engine
-bundled-engine/win32/mira-engine.exe
+```bash
+# Use a specific mira release asset
+export MIRA_ENGINE_RELEASE_TAG=v0.2.0rc8
+
+# Or inject a locally built binary
+export MIRA_ENGINE_LOCAL_BINARY=/absolute/path/to/mira-engine
 ```
 
 Then build with:

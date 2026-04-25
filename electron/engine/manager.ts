@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import { access } from 'fs/promises'
+import { access, mkdir, readFile, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
 import path from 'path'
@@ -31,12 +31,32 @@ type EngineStatusPayload = {
   installed?: boolean
   running?: boolean
   port?: number
+  log_file?: string
 }
 
 const DEFAULT_PORT = 18790
 const DEFAULT_HOST = '127.0.0.1'
 const HEALTH_TIMEOUT_MS = 45_000
 const COMMAND_TIMEOUT_MS = 120_000
+const BUNDLE_SETUP_PROVIDER = 'custom'
+const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
+const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
+
+type JsonRecord = Record<string, unknown>
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function ensureRecord(parent: JsonRecord, key: string): JsonRecord {
+  const current = parent[key]
+  if (isRecord(current)) {
+    return current
+  }
+  const next: JsonRecord = {}
+  parent[key] = next
+  return next
+}
 
 function engineExecutableName(): string {
   return process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine'
@@ -99,6 +119,163 @@ export class LocalEngineManager {
   private setState(patch: Partial<EngineBootstrapState>): EngineBootstrapState {
     this.state = { ...this.state, ...patch }
     return this.getState()
+  }
+
+  private configPath(): string {
+    const fromEnv = process.env.MIRA_CONFIG_PATH?.trim()
+    if (fromEnv) return fromEnv
+    return path.join(app.getPath('home'), '.mira', 'config.json')
+  }
+
+  private defaultWorkspacePath(): string {
+    return path.join(app.getPath('home'), '.mira', 'workspace')
+  }
+
+  private defaultLogPath(): string {
+    return path.join(app.getPath('home'), '.mira', 'logs', 'agent-service.log')
+  }
+
+  private async ensureBundleRuntimeConfig(): Promise<{ ok: true; configPath: string } | { ok: false; message: string; error: string }> {
+    const configPath = this.configPath()
+
+    let root: JsonRecord = {}
+    try {
+      const raw = await readFile(configPath, 'utf8')
+      if (raw.trim()) {
+        const parsed = JSON.parse(raw)
+        if (!isRecord(parsed)) {
+          return {
+            ok: false,
+            message: `Existing Mira config is not a JSON object: ${configPath}`,
+            error: 'config.json must contain a JSON object',
+          }
+        }
+        root = parsed
+      }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException
+      if (nodeError.code !== 'ENOENT') {
+        return {
+          ok: false,
+          message: `Failed to read local engine config at ${configPath}.`,
+          error: nodeError.message,
+        }
+      }
+    }
+
+    const agents = ensureRecord(root, 'agents')
+    const defaults = ensureRecord(agents, 'defaults')
+    const providers = ensureRecord(root, 'providers')
+    const customProvider = ensureRecord(providers, BUNDLE_SETUP_PROVIDER)
+    const channels = ensureRecord(root, 'channels')
+    const webChannel = ensureRecord(channels, 'web')
+
+    let changed = false
+    const setIfMissing = (target: JsonRecord, key: string, value: unknown) => {
+      const current = target[key]
+      const isMissing = current === undefined || current === null || (typeof current === 'string' && current.trim().length === 0)
+      if (!isMissing) return
+      target[key] = value
+      changed = true
+    }
+
+    setIfMissing(defaults, 'workspace', this.defaultWorkspacePath())
+    setIfMissing(defaults, 'provider', BUNDLE_SETUP_PROVIDER)
+    setIfMissing(defaults, 'model', BUNDLE_SETUP_MODEL)
+    setIfMissing(customProvider, 'apiBase', BUNDLE_SETUP_API_BASE)
+
+    if (webChannel.enabled !== true) {
+      webChannel.enabled = true
+      changed = true
+    }
+    if (!Array.isArray(webChannel.allowFrom) || webChannel.allowFrom.length === 0) {
+      webChannel.allowFrom = ['*']
+      changed = true
+    }
+    if (!Array.isArray(webChannel.corsOrigins) || webChannel.corsOrigins.length === 0) {
+      webChannel.corsOrigins = ['*']
+      changed = true
+    }
+
+    if (!changed) {
+      return { ok: true, configPath }
+    }
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true })
+      await writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, 'utf8')
+      return { ok: true, configPath }
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException
+      return {
+        ok: false,
+        message: `Failed to write local engine config at ${configPath}.`,
+        error: nodeError.message,
+      }
+    }
+  }
+
+  private async readLogTail(logPath?: string | null, maxLines = 60): Promise<string> {
+    const target = logPath?.trim() || this.defaultLogPath()
+    try {
+      const raw = await readFile(target, 'utf8')
+      return raw.split(/\r?\n/).filter(Boolean).slice(-maxLines).join('\n')
+    } catch {
+      return ''
+    }
+  }
+
+  private diagnoseBootstrapFailure(logTail: string, port: number): { message: string; error: string } {
+    if (logTail.includes("No such command 'run-gateway'")) {
+      return {
+        message: 'Bundled local engine is too old for bundle mode. Rebuild the bundle with a newer mira-engine asset.',
+        error: logTail,
+      }
+    }
+
+    const missingProvider = logTail.match(/Unable to match provider for model '([^']+)'/)
+    if (missingProvider) {
+      const model = missingProvider[1]
+      return {
+        message: `Local engine needs an LLM provider for model "${model}". Open Settings > Local Runtime Config and choose a provider before retrying.`,
+        error: logTail,
+      }
+    }
+
+    const missingApiKey = logTail.match(/No API key configured for model '([^']+)'/)
+    if (missingApiKey) {
+      const model = missingApiKey[1]
+      return {
+        message: `Local engine is running with model "${model}", but its provider API key is missing. Open Settings > Local Runtime Config and add the credential.`,
+        error: logTail,
+      }
+    }
+
+    if (logTail.includes('No model configured. Set agents.defaults.model in config.json.')) {
+      return {
+        message: 'Local engine config is missing a default model. Open Settings > Local Runtime Config and choose a model.',
+        error: logTail,
+      }
+    }
+
+    if (logTail.includes("Custom provider requires 'providers.custom.apiBase'")) {
+      return {
+        message: 'Local engine is using the custom provider, but API Base is empty. Open Settings > Local Runtime Config and set API Base.',
+        error: logTail,
+      }
+    }
+
+    if (logTail.includes('Failed to load config')) {
+      return {
+        message: 'Local engine config could not be parsed. Fix ~/.mira/config.json or refresh it from bundle settings.',
+        error: logTail,
+      }
+    }
+
+    return {
+      message: `Timed out waiting for local engine health on http://${DEFAULT_HOST}:${port}/health.`,
+      error: logTail || `Timed out waiting for local engine health on http://${DEFAULT_HOST}:${port}/health.`,
+    }
   }
 
   async runCommand(args: string[], options?: { timeoutMs?: number }): Promise<EngineCommandResult> {
@@ -186,7 +363,7 @@ export class LocalEngineManager {
     return this.runCommand(['upgrade', '--package', packageName], { timeoutMs: 180_000 })
   }
 
-  private async waitForHealth(port = DEFAULT_PORT): Promise<{ ok: boolean; version: string | null; message: string }> {
+  private async waitForHealth(port = DEFAULT_PORT, logPath?: string | null): Promise<{ ok: boolean; version: string | null; message: string; error?: string }> {
     const base = `http://${DEFAULT_HOST}:${port}`
     const startedAt = Date.now()
     while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
@@ -210,11 +387,7 @@ export class LocalEngineManager {
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000))
     }
-    return {
-      ok: false,
-      version: null,
-      message: `Timed out waiting for local engine health on ${base}/health.`,
-    }
+    return { ok: false, version: null, ...this.diagnoseBootstrapFailure(await this.readLogTail(logPath), port) }
   }
 
   async bootstrapLocalEngine(): Promise<EngineBootstrapState> {
@@ -228,6 +401,18 @@ export class LocalEngineManager {
         message: 'Checking bundled local engine...',
         error: null,
       })
+
+      const seeded = await this.ensureBundleRuntimeConfig()
+      if (!seeded.ok) {
+        return this.setState({
+          phase: 'error',
+          message: seeded.message,
+          executablePath: this.state.executablePath,
+          serviceInstalled: null,
+          serviceRunning: null,
+          error: seeded.error,
+        })
+      }
 
       const status = await this.status()
       if (!status.result.ok && !status.result.executablePath) {
@@ -244,6 +429,26 @@ export class LocalEngineManager {
       let serviceInstalled = Boolean(status.payload?.installed)
       let serviceRunning = Boolean(status.payload?.running)
       const port = status.payload?.port ?? DEFAULT_PORT
+      const healthUrl = `http://${DEFAULT_HOST}:${port}/health`
+
+      if (port !== DEFAULT_PORT) {
+        return this.setState({
+          phase: 'error',
+          message: `Bundled local engine reports legacy port ${port}, but MIRA expects ${DEFAULT_PORT}. Rebuild or upgrade the bundled engine asset.`,
+          executablePath: status.result.executablePath,
+          serviceInstalled,
+          serviceRunning,
+          healthUrl,
+          error: `legacy bundled engine port ${port}`,
+        })
+      }
+
+      this.setState({
+        executablePath: status.result.executablePath,
+        serviceInstalled,
+        serviceRunning,
+        healthUrl,
+      })
 
       if (!serviceInstalled) {
         this.setState({
@@ -295,17 +500,19 @@ export class LocalEngineManager {
         message: 'Waiting for local engine health check...',
         serviceInstalled,
         serviceRunning,
+        healthUrl,
       })
 
-      const health = await this.waitForHealth(port)
+      const health = await this.waitForHealth(port, status.payload?.log_file)
       if (!health.ok) {
         return this.setState({
           phase: 'error',
           message: health.message,
           serviceInstalled,
           serviceRunning,
+          healthUrl,
           version: null,
-          error: health.message,
+          error: health.error ?? health.message,
         })
       }
 

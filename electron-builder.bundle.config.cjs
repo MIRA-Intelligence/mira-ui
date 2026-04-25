@@ -4,15 +4,20 @@ const platformDir = process.platform === 'win32' ? 'win32' : process.platform ==
 
 module.exports = {
   appId: 'com.projectmira.miraui.bundle',
-  productName: 'MiraUI-bundle',
+  productName: 'MIRA',
   directories: {
     output: 'release-bundle',
   },
   asar: true,
+  files: [
+    'dist/**',
+    'dist-electron/**',
+    'package.json',
+  ],
   extraResources: [
     {
       from: path.join(__dirname, 'bundled-engine', platformDir),
-      to: 'bundled-engine',
+      to: path.join('bundled-engine', platformDir),
       filter: ['**/*'],
     },
   ],
@@ -24,6 +29,16 @@ module.exports = {
     ],
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
     category: 'public.app-category.developer-tools',
+  },
+  dmg: {
+    contents: [
+      { x: 164, y: 244, type: 'file' },
+      { x: 456, y: 244, type: 'link', path: '/Applications' },
+    ],
+    window: {
+      width: 620,
+      height: 420,
+    },
   },
   win: {
     target: [

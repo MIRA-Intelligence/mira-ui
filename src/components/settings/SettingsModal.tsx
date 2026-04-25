@@ -20,6 +20,8 @@ import { cn } from '@/lib/utils'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
+const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
+const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
 
 const PROVIDER_OPTIONS: { value: RuntimeProviderName; label: string }[] = [
   { value: 'openrouter', label: 'OpenRouter' },
@@ -35,6 +37,10 @@ const REASONING_OPTIONS: { value: Exclude<ReasoningEffort, null>; label: string 
   { value: 'high', label: 'High' },
   { value: 'adaptive', label: 'Adaptive' },
 ]
+
+function providerLabel(provider: RuntimeProviderName): string {
+  return PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider
+}
 
 type SettingsDraft = {
   workspacePath: string
@@ -53,6 +59,8 @@ type SettingsDraft = {
   apiBase: string
   apiKey: string
 }
+
+type SettingsTab = 'connection' | 'localEngine'
 
 function remoteApiFallback(): string {
   const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
@@ -92,6 +100,8 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
     ? payload.runtime.provider
     : 'openrouter') as RuntimeProviderName
   const providerSettings = payload.providers[provider]
+  const setupModel = payload.runtime.model === BUNDLE_SETUP_MODEL ? '' : payload.runtime.model
+  const setupApiBase = providerSettings?.api_base === BUNDLE_SETUP_API_BASE ? '' : (providerSettings?.api_base ?? '')
 
   return {
     ...draft,
@@ -99,11 +109,11 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
     apiUrl: LOCAL_API_URL,
     wsUrl: LOCAL_WS_URL,
     provider,
-    model: payload.runtime.model,
+    model: setupModel,
     reasoningEffort: payload.runtime.reasoning_effort,
     maxToolIterations: String(payload.runtime.max_tool_iterations),
     restrictToWorkspace: payload.runtime.restrict_to_workspace,
-    apiBase: providerSettings?.api_base ?? '',
+    apiBase: setupApiBase,
     apiKey: '',
   }
 }
@@ -111,7 +121,7 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings } = store
-  const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.localEnginePhase === 'error'
+  const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.engineStatus === 'setup_required' || store.localEnginePhase === 'error'
 
   const [draft, setDraft] = useState<SettingsDraft>(() => createDraft(store))
   const [runtimeProviders, setRuntimeProviders] = useState<RuntimeConfigPayload['providers']>({})
@@ -119,6 +129,7 @@ export function SettingsModal() {
   const [runtimeLoading, setRuntimeLoading] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [feedbackError, setFeedbackError] = useState(false)
+  const [activeTab, setActiveTab] = useState<SettingsTab>('connection')
 
   const curLang = draft.language
 
@@ -162,6 +173,7 @@ export function SettingsModal() {
     if (!settingsOpen) return
     const nextDraft = createDraft(store)
     setDraft(nextDraft)
+    setActiveTab('connection')
     setBusy(false)
     setRuntimeLoading(false)
     setFeedbackError(false)
@@ -182,6 +194,12 @@ export function SettingsModal() {
     store.showToolCallHistory,
   ])
 
+  useEffect(() => {
+    if (draft.deploymentMode !== 'localBundle' && activeTab === 'localEngine') {
+      setActiveTab('connection')
+    }
+  }, [activeTab, draft.deploymentMode])
+
   if (!settingsOpen) return null
 
   const handleSwitchMode = (mode: DeploymentMode) => {
@@ -195,6 +213,9 @@ export function SettingsModal() {
         ? LOCAL_WS_URL
         : (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
     }))
+    if (mode !== 'localBundle') {
+      setActiveTab('connection')
+    }
     if (mode === 'localBundle') {
       void loadRuntimeConfig(mode)
     }
@@ -225,6 +246,21 @@ export function SettingsModal() {
       store.setDeploymentMode(draft.deploymentMode)
 
       if (draft.deploymentMode === 'localBundle') {
+        const trimmedModel = draft.model.trim()
+        const trimmedApiBase = draft.apiBase.trim()
+        const trimmedApiKey = draft.apiKey.trim()
+        const providerSnapshot = runtimeProviders[draft.provider]
+
+        if (!trimmedModel) {
+          throw new Error('Local bundle mode requires a model before the engine can accept tasks.')
+        }
+        if (draft.provider === 'custom' && !trimmedApiBase) {
+          throw new Error('Custom provider requires API Base. Fill it in before saving local bundle settings.')
+        }
+        if (draft.provider !== 'custom' && draft.provider !== 'ollama' && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
+          throw new Error(`${providerLabel(draft.provider)} requires an API key. Paste it before saving local bundle settings.`)
+        }
+
         store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
         const localState = await bootstrapLocalEngine()
         if (!localState) {
@@ -245,15 +281,15 @@ export function SettingsModal() {
           runtime: {
             workspace: draft.workspacePath.trim(),
             provider: draft.provider,
-            model: draft.model.trim(),
+            model: trimmedModel,
             reasoning_effort: draft.reasoningEffort,
             max_tool_iterations: Number(draft.maxToolIterations),
             restrict_to_workspace: draft.restrictToWorkspace,
           },
           providers: {
             [draft.provider]: {
-              ...(draft.apiKey.trim() ? { api_key: draft.apiKey.trim() } : {}),
-              api_base: draft.apiBase.trim() || null,
+              ...(trimmedApiKey ? { api_key: trimmedApiKey } : {}),
+              api_base: trimmedApiBase || null,
             },
           },
         })
@@ -393,115 +429,139 @@ export function SettingsModal() {
             ✕
           </button>
         </div>
+        <div className="border-b border-[var(--color-border)] px-6">
+          <div className="flex items-end gap-6" role="tablist" aria-label="Settings sections">
+            <SettingsTabButton
+              label={t('general', curLang)}
+              active={activeTab === 'connection'}
+              onClick={() => setActiveTab('connection')}
+            />
+            <SettingsTabButton
+              label="Local Engine"
+              active={activeTab === 'localEngine'}
+              disabled={!localMode}
+              onClick={() => setActiveTab('localEngine')}
+            />
+          </div>
+        </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          <Section title="Deployment">
-            <Label text="Mode" />
-            <div className="flex gap-2">
-              {([
-                { value: 'localBundle' as DeploymentMode, label: 'Local bundle' },
-                { value: 'remoteManual' as DeploymentMode, label: 'Remote manual' },
-              ]).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => handleSwitchMode(option.value)}
-                  className={cn(
-                    'flex-1 py-2 text-sm rounded-lg border transition-colors',
-                    draft.deploymentMode === option.value
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
+          {activeTab === 'connection' ? (
+            <div role="tabpanel" aria-label={t('general', curLang)} className="space-y-6">
+              <Section title="Deployment">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Deployment Mode</p>
+                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                        {localMode
+                          ? 'Bundle mode keeps MIRA and mira-engine on this machine, and starts the local engine automatically.'
+                          : 'Remote mode only connects to an already-deployed mira endpoint. Install mira separately on the remote server.'}
+                      </p>
+                    </div>
+                    <DeploymentModeSwitch mode={draft.deploymentMode} onChange={handleSwitchMode} />
+                  </div>
+                </div>
+              </Section>
+
+              <Section title={t('workspace', curLang)}>
+                <Label text={t('workspacePath', curLang)} />
+                <input
+                  value={draft.workspacePath}
+                  onChange={(e) => setDraft((current) => ({ ...current, workspacePath: e.target.value }))}
+                  className={inputClass}
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {localMode
+                    ? 'This path is saved into the local Mira runtime config and used as the projects root.'
+                    : t('workspacePathHint', curLang)}
+                </p>
+              </Section>
+
+              <Section title={t('general', curLang)}>
+                <Label text={t('theme', curLang)} />
+                <div className="flex gap-2">
+                  {(['dark', 'light'] as const).map((th) => (
+                    <button
+                      key={th}
+                      onClick={() => setDraft((current) => ({ ...current, theme: th as Theme }))}
+                      className={cn(
+                        'flex-1 py-2 text-sm rounded-lg border transition-colors',
+                        draft.theme === th
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
+                      )}
+                    >
+                      {th === 'dark' ? '🌙 ' : '☀️ '}
+                      {t(th, curLang)}
+                    </button>
+                  ))}
+                </div>
+
+                <Label text={t('language', curLang)} className="mt-4" />
+                <div className="flex gap-2">
+                  {([
+                    { value: 'en' as Language, label: 'English' },
+                    { value: 'zh' as Language, label: '中文' },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setDraft((current) => ({ ...current, language: opt.value }))}
+                      className={cn(
+                        'flex-1 py-2 text-sm rounded-lg border transition-colors',
+                        draft.language === opt.value
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <ToggleRow
+                  className="mt-4"
+                  label={t('progressMessages', curLang)}
+                  checked={draft.showProgressMessages}
+                  onToggle={() => setDraft((current) => ({ ...current, showProgressMessages: !current.showProgressMessages }))}
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {t('progressMessagesHint', curLang)}
+                </p>
+
+                <ToggleRow
+                  className="mt-4"
+                  label={t('toolCallHistory', curLang)}
+                  checked={draft.showToolCallHistory}
+                  onToggle={() => setDraft((current) => ({ ...current, showToolCallHistory: !current.showToolCallHistory }))}
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {t('toolCallHistoryHint', curLang)}
+                </p>
+              </Section>
+
+              {!localMode && (
+                <Section title={t('connection', curLang)}>
+                  <Label text={t('apiUrl', curLang)} />
+                  <input
+                    value={draft.apiUrl}
+                    onChange={(e) => setDraft((current) => ({ ...current, apiUrl: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <Label text={t('wsUrl', curLang)} className="mt-3" />
+                  <input
+                    value={draft.wsUrl}
+                    onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
+                    Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
+                  </p>
+                </Section>
+              )}
             </div>
-            <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
-              {localMode
-                ? 'Bundle mode keeps MiraUI and mira-engine on this machine, and starts the local engine automatically.'
-                : 'Remote mode only connects to an already-deployed mira endpoint. Install mira separately on the remote server.'}
-            </p>
-          </Section>
-
-          <Section title={t('workspace', curLang)}>
-            <Label text={t('workspacePath', curLang)} />
-            <input
-              value={draft.workspacePath}
-              onChange={(e) => setDraft((current) => ({ ...current, workspacePath: e.target.value }))}
-              className={inputClass}
-            />
-            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-              {localMode
-                ? 'This path is saved into the local Mira runtime config and used as the projects root.'
-                : t('workspacePathHint', curLang)}
-            </p>
-          </Section>
-
-          <Section title={t('general', curLang)}>
-            <Label text={t('theme', curLang)} />
-            <div className="flex gap-2">
-              {(['dark', 'light'] as const).map((th) => (
-                <button
-                  key={th}
-                  onClick={() => setDraft((current) => ({ ...current, theme: th as Theme }))}
-                  className={cn(
-                    'flex-1 py-2 text-sm rounded-lg border transition-colors',
-                    draft.theme === th
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
-                  )}
-                >
-                  {th === 'dark' ? '🌙 ' : '☀️ '}
-                  {t(th, curLang)}
-                </button>
-              ))}
-            </div>
-
-            <Label text={t('language', curLang)} className="mt-4" />
-            <div className="flex gap-2">
-              {([
-                { value: 'en' as Language, label: 'English' },
-                { value: 'zh' as Language, label: '中文' },
-              ]).map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setDraft((current) => ({ ...current, language: opt.value }))}
-                  className={cn(
-                    'flex-1 py-2 text-sm rounded-lg border transition-colors',
-                    draft.language === opt.value
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
-                  )}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            <ToggleRow
-              className="mt-4"
-              label={t('progressMessages', curLang)}
-              checked={draft.showProgressMessages}
-              onToggle={() => setDraft((current) => ({ ...current, showProgressMessages: !current.showProgressMessages }))}
-            />
-            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-              {t('progressMessagesHint', curLang)}
-            </p>
-
-            <ToggleRow
-              className="mt-4"
-              label={t('toolCallHistory', curLang)}
-              checked={draft.showToolCallHistory}
-              onToggle={() => setDraft((current) => ({ ...current, showToolCallHistory: !current.showToolCallHistory }))}
-            />
-            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-              {t('toolCallHistoryHint', curLang)}
-            </p>
-          </Section>
-
-          {localMode ? (
-            <>
+          ) : (
+            <div role="tabpanel" aria-label="Local Engine" className="space-y-6">
               <Section title="Local Engine">
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3 space-y-1">
                   <p className="text-sm text-[var(--color-text-primary)]">
@@ -517,7 +577,7 @@ export function SettingsModal() {
                   )}
                   {showEngineWarning && (
                     <p className="text-[11px] text-amber-300 leading-relaxed">
-                      {store.engineMessage || 'Local engine is unavailable or incompatible.'}
+                      {store.engineMessage || 'Local engine needs provider setup or an engine update.'}
                     </p>
                   )}
                 </div>
@@ -542,7 +602,7 @@ export function SettingsModal() {
                 <select
                   value={draft.provider}
                   onChange={(e) => handleProviderChange(e.target.value as RuntimeProviderName)}
-                  className={inputClass}
+                  className={selectClass}
                 >
                   {PROVIDER_OPTIONS.map((provider) => (
                     <option key={provider.value} value={provider.value}>
@@ -588,7 +648,7 @@ export function SettingsModal() {
                     ...current,
                     reasoningEffort: e.target.value ? e.target.value as Exclude<ReasoningEffort, null> : null,
                   }))}
-                  className={inputClass}
+                  className={selectClass}
                 >
                   <option value="">Disabled</option>
                   {REASONING_OPTIONS.map((option) => (
@@ -618,25 +678,7 @@ export function SettingsModal() {
                   </p>
                 )}
               </Section>
-            </>
-          ) : (
-            <Section title={t('connection', curLang)}>
-              <Label text={t('apiUrl', curLang)} />
-              <input
-                value={draft.apiUrl}
-                onChange={(e) => setDraft((current) => ({ ...current, apiUrl: e.target.value }))}
-                className={inputClass}
-              />
-              <Label text={t('wsUrl', curLang)} className="mt-3" />
-              <input
-                value={draft.wsUrl}
-                onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
-                className={inputClass}
-              />
-              <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
-                Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
-              </p>
-            </Section>
+            </div>
           )}
 
           {feedback && (
@@ -688,6 +730,66 @@ function Label({ text, className }: { text: string; className?: string }) {
   )
 }
 
+function SettingsTabButton(
+  { label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void },
+) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'relative -mb-px border-b-2 px-1 py-3 text-sm font-medium transition-colors',
+        active
+          ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+          : 'border-transparent text-[var(--color-text-secondary)]',
+        disabled
+          ? 'opacity-50 cursor-not-allowed'
+          : 'hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]',
+      )}
+    >
+      {label}
+    </button>
+  )
+}
+
+function DeploymentModeSwitch(
+  { mode, onChange }: { mode: DeploymentMode; onChange: (mode: DeploymentMode) => void },
+) {
+  const local = mode === 'localBundle'
+
+  return (
+    <div className="flex items-center gap-3 shrink-0">
+      <span className={cn('text-xs font-medium transition-colors', local ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
+        Local
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-label="Deployment mode"
+        aria-checked={!local}
+        onClick={() => onChange(local ? 'remoteManual' : 'localBundle')}
+        className={cn(
+          'inline-flex h-6 w-11 items-center rounded-full p-0.5 transition-colors',
+          local ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-bg-tertiary)]',
+        )}
+      >
+        <span
+          className={cn(
+            'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+            local ? 'translate-x-0' : 'translate-x-5',
+          )}
+        />
+      </button>
+      <span className={cn('text-xs font-medium transition-colors', !local ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
+        Remote
+      </span>
+    </div>
+  )
+}
+
 function ToggleRow(
   { label, checked, onToggle, className }: { label: string; checked: boolean; onToggle: () => void; className?: string },
 ) {
@@ -736,4 +838,6 @@ function ActionButton(
 }
 
 const inputClass =
-  'w-full bg-[var(--color-input-bg,var(--color-bg-primary))] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] transition-colors'
+  'w-full h-10 bg-[var(--color-input-bg,var(--color-bg-primary))] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] transition-colors'
+
+const selectClass = inputClass

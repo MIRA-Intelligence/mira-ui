@@ -4,7 +4,7 @@ import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
-export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable'
+export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 export type DeploymentMode = 'localBundle' | 'remoteManual'
 
 const GATEWAY_PORT = 18790

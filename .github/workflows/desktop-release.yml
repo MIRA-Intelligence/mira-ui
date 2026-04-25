@@ -73,7 +73,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $setupExe = Get-ChildItem -Path release -Filter "MiraUI-*-win-*-setup.exe" | Select-Object -First 1
+          $setupExe = Get-ChildItem -Path release -Filter "MIRA-*-win-*-setup.exe" | Select-Object -First 1
           if (-not $setupExe) {
             Write-Error "Setup executable not found in release/"
             exit 1
@@ -81,7 +81,7 @@ jobs:
           $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
           Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
 
-          $portableExe = Get-ChildItem -Path release -Filter "MiraUI-*-win-*-portable.exe" | Select-Object -First 1
+          $portableExe = Get-ChildItem -Path release -Filter "MIRA-*-win-*-portable.exe" | Select-Object -First 1
           if (-not $portableExe) {
             Write-Error "Portable executable not found in release/"
             exit 1
@@ -95,10 +95,10 @@ jobs:
         with:
           name: miraui-macos
           path: |
-            release/MiraUI-*-mac-*.dmg
-            release/MiraUI-*-mac-*.dmg.blockmap
-            release/MiraUI-*-mac-*.zip
-            release/MiraUI-*-mac-*.zip.blockmap
+            release/MIRA-*-mac-*.dmg
+            release/MIRA-*-mac-*.dmg.blockmap
+            release/MIRA-*-mac-*.zip
+            release/MIRA-*-mac-*.zip.blockmap
             release/latest-mac.yml
             release/app-update.yml
 
@@ -108,8 +108,8 @@ jobs:
         with:
           name: miraui-windows
           path: |
-            release/MiraUI-*-win-*-setup.zip
-            release/MiraUI-*-win-*-portable.zip
+            release/MIRA-*-win-*-setup.zip
+            release/MIRA-*-win-*-portable.zip
 
   publish-release:
     needs: build-desktop
