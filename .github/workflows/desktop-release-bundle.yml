@@ -1,0 +1,155 @@
+name: Desktop Bundle Release Build
+
+on:
+  push:
+    tags:
+      - 'bundle-v*'
+  workflow_dispatch:
+    inputs:
+      bundle_tag:
+        description: 'Bundle release tag (bundle-vX.Y.Z or bundle-vX.Y.ZrcN)'
+        required: true
+      engine_tag:
+        description: 'Source mira engine tag (defaults to matching vX.Y.Z)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+    env:
+      BUNDLE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_tag || github.ref_name }}
+      ENGINE_TAG_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.engine_tag || '' }}
+      ENGINE_REPO: MIRA-Intelligence/mira
+      MIRA_ENGINE_REPO: MIRA-Intelligence/mira
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Resolve bundle and engine versions
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs')
+          const tag = process.env.BUNDLE_TAG || ''
+          const match = /^bundle-v(\d+\.\d+\.\d+)(?:rc(\d+))?$/.exec(tag)
+          if (!match) {
+            console.error(`Unsupported bundle tag format: "${tag}". Expected bundle-vX.Y.Z or bundle-vX.Y.ZrcN.`)
+            process.exit(1)
+          }
+
+          const version = match[2] ? `${match[1]}-rc.${match[2]}` : match[1]
+          const engineTag = (process.env.ENGINE_TAG_INPUT || '').trim() || `v${match[1]}${match[2] ? `rc${match[2]}` : ''}`
+          const pkgPath = 'package.json'
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `DESKTOP_VERSION=${version}\n`)
+            fs.appendFileSync(process.env.GITHUB_ENV, `ENGINE_RELEASE_TAG=${engineTag}\n`)
+            fs.appendFileSync(process.env.GITHUB_ENV, `MIRA_ENGINE_RELEASE_TAG=${engineTag}\n`)
+          }
+          EOF
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Show resolved bundle version
+        run: echo "Bundle version = ${{ env.DESKTOP_VERSION }} using engine ${{ env.ENGINE_RELEASE_TAG }}"
+
+      - name: Build macOS bundle artifacts
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run dist:bundle:mac
+
+      - name: Build Windows bundle artifacts
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run dist:bundle:win
+
+      - name: Package Windows bundle executables as zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem -Path release-bundle -Filter "MIRA-*-win-*-setup.exe" | Select-Object -First 1
+          if (-not $setupExe) {
+            Write-Error "Bundle setup executable not found in release-bundle/"
+            exit 1
+          }
+          $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
+          Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
+
+          $portableExe = Get-ChildItem -Path release-bundle -Filter "MIRA-*-win-*-portable.exe" | Select-Object -First 1
+          if (-not $portableExe) {
+            Write-Error "Bundle portable executable not found in release-bundle/"
+            exit 1
+          }
+          $portableZip = [System.IO.Path]::ChangeExtension($portableExe.FullName, ".zip")
+          Compress-Archive -Path $portableExe.FullName -DestinationPath $portableZip -Force
+
+      - name: Upload macOS bundle release assets
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-bundle-macos
+          path: |
+            release-bundle/MIRA-*-mac-*.dmg
+            release-bundle/MIRA-*-mac-*.dmg.blockmap
+            release-bundle/MIRA-*-mac-*.zip
+            release-bundle/MIRA-*-mac-*.zip.blockmap
+            release-bundle/latest-mac.yml
+            release-bundle/app-update.yml
+
+      - name: Upload Windows bundle release assets
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-bundle-windows
+          path: |
+            release-bundle/MIRA-*-win-*-setup.zip
+            release-bundle/MIRA-*-win-*-portable.zip
+
+  publish-bundle-release:
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_tag || github.ref_name }}
+
+    steps:
+      - name: Download packaged bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: miraui-bundle-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub bundle release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUNDLE_TAG }}
+          name: MIRA ${{ env.BUNDLE_TAG }}
+          generate_release_notes: true
+          files: |
+            release-assets/*.dmg
+            release-assets/*.dmg.blockmap
+            release-assets/*.zip
+            release-assets/*.zip.blockmap
+            release-assets/latest*.yml
+            release-assets/app-update.yml

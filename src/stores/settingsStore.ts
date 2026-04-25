@@ -1,29 +1,46 @@
 import { create } from 'zustand'
+import type { LocalEnginePhase } from '@/services/desktop'
+import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
-export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable'
+export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
+export type DeploymentMode = 'localBundle' | 'remoteManual'
 
 const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.mira/workspace'
+const LOCAL_ENGINE_HOST = '127.0.0.1'
 
-function defaultApiUrl(): string {
+function localApiUrl(): string {
+  return `http://${LOCAL_ENGINE_HOST}:${GATEWAY_PORT}/api`
+}
+
+function localWsUrl(): string {
+  return `ws://${LOCAL_ENGINE_HOST}:${GATEWAY_PORT}/ws`
+}
+
+function defaultRemoteApiUrl(): string {
   const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
   const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   return `http://${host}:${GATEWAY_PORT}/api`
 }
 
-function defaultWsUrl(): string {
+function defaultRemoteWsUrl(): string {
   const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
   const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
   const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${host}:${GATEWAY_PORT}/ws`
 }
 
+function defaultDeploymentMode(): DeploymentMode {
+  return typeof window !== 'undefined' && window.electronAPI ? 'localBundle' : 'remoteManual'
+}
+
 interface SettingsState {
   workspacePath: string
   theme: Theme
   language: Language
+  deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
   showProgressMessages: boolean
@@ -32,10 +49,16 @@ interface SettingsState {
   engineStatus: EngineStatus
   engineMessage: string | null
   engineVersion: string | null
+  localEnginePhase: LocalEnginePhase
+  localEngineExecutablePath: string | null
+  runtimeConfig: RuntimeConfigPayload | null
+  runtimeConfigLoaded: boolean
+  runtimeConfigError: string | null
 
   setWorkspacePath: (p: string) => void
   setTheme: (t: Theme) => void
   setLanguage: (l: Language) => void
+  setDeploymentMode: (mode: DeploymentMode) => void
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
@@ -46,6 +69,15 @@ interface SettingsState {
     message: string | null
     version?: string | null
   }) => void
+  setLocalEngineBootstrap: (payload: {
+    phase: LocalEnginePhase
+    message: string | null
+    executablePath?: string | null
+    version?: string | null
+  }) => void
+  setRuntimeConfig: (payload: RuntimeConfigPayload | null) => void
+  setRuntimeConfigError: (message: string | null) => void
+  setRuntimeConfigLoaded: (loaded: boolean) => void
   openSettings: () => void
   closeSettings: () => void
 }
@@ -56,7 +88,7 @@ const LEGACY_STORAGE_KEY = 'medpilot-ui-settings'
 // One-time migration: copy legacy MedPilot settings into the new MIRA key.
 function migrateLegacyStorageKey(): void {
   try {
-    if (typeof localStorage === 'undefined') return
+    if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function' || typeof localStorage.setItem !== 'function' || typeof localStorage.removeItem !== 'function') return
     if (localStorage.getItem(STORAGE_KEY)) return
     const legacy = localStorage.getItem(LEGACY_STORAGE_KEY)
     if (!legacy) return
@@ -81,6 +113,9 @@ function isStaleLocalhost(url: string | undefined): boolean {
 
 function loadPersisted(): Partial<SettingsState> {
   try {
+    if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
+      return {}
+    }
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return {}
     const parsed = JSON.parse(raw)
@@ -98,6 +133,9 @@ function loadPersisted(): Partial<SettingsState> {
     }
     if (parsed.language === 'en' || parsed.language === 'zh') {
       sanitized.language = parsed.language
+    }
+    if (parsed.deploymentMode === 'localBundle' || parsed.deploymentMode === 'remoteManual') {
+      sanitized.deploymentMode = parsed.deploymentMode
     }
 
     const apiUrl = typeof parsed.apiUrl === 'string' ? parsed.apiUrl : undefined
@@ -123,10 +161,14 @@ function loadPersisted(): Partial<SettingsState> {
 }
 
 function persist(state: SettingsState) {
+  if (typeof localStorage === 'undefined' || typeof localStorage.setItem !== 'function') {
+    return
+  }
   const {
     workspacePath,
     theme,
     language,
+    deploymentMode,
     apiUrl,
     wsUrl,
     showProgressMessages,
@@ -136,6 +178,7 @@ function persist(state: SettingsState) {
     workspacePath,
     theme,
     language,
+    deploymentMode,
     apiUrl,
     wsUrl,
     showProgressMessages,
@@ -144,23 +187,44 @@ function persist(state: SettingsState) {
 }
 
 const saved = loadPersisted()
+const initialDeploymentMode = saved.deploymentMode ?? defaultDeploymentMode()
+const initialApiUrl = initialDeploymentMode === 'localBundle'
+  ? localApiUrl()
+  : saved.apiUrl ?? defaultRemoteApiUrl()
+const initialWsUrl = initialDeploymentMode === 'localBundle'
+  ? localWsUrl()
+  : saved.wsUrl ?? defaultRemoteWsUrl()
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   workspacePath: saved.workspacePath ?? DEFAULT_WORKSPACE_PATH,
   theme: (saved.theme as Theme) ?? 'dark',
   language: (saved.language as Language) ?? 'en',
-  apiUrl: saved.apiUrl ?? defaultApiUrl(),
-  wsUrl: saved.wsUrl ?? defaultWsUrl(),
+  deploymentMode: initialDeploymentMode,
+  apiUrl: initialApiUrl,
+  wsUrl: initialWsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? true,
   settingsOpen: false,
   engineStatus: 'unknown',
   engineMessage: null,
   engineVersion: null,
+  localEnginePhase: 'idle',
+  localEngineExecutablePath: null,
+  runtimeConfig: null,
+  runtimeConfigLoaded: false,
+  runtimeConfigError: null,
 
   setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
   setTheme: (t) => { set({ theme: t }); persist(get()); applyTheme(t) },
   setLanguage: (l) => { set({ language: l }); persist(get()) },
+  setDeploymentMode: (mode) => {
+    set({
+      deploymentMode: mode,
+      apiUrl: mode === 'localBundle' ? localApiUrl() : defaultRemoteApiUrl(),
+      wsUrl: mode === 'localBundle' ? localWsUrl() : defaultRemoteWsUrl(),
+    })
+    persist(get())
+  },
   setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
   setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
   setConnectionEndpoints: (apiUrl, wsUrl) => {
@@ -186,6 +250,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return { engineStatus: status, engineMessage: message, engineVersion: nextVersion }
     })
   },
+  setLocalEngineBootstrap: ({ phase, message, executablePath, version }) => {
+    set((state) => ({
+      localEnginePhase: phase,
+      localEngineExecutablePath: executablePath ?? state.localEngineExecutablePath,
+      engineMessage: message ?? state.engineMessage,
+      engineVersion: version ?? state.engineVersion,
+    }))
+  },
+  setRuntimeConfig: (payload) => set({ runtimeConfig: payload }),
+  setRuntimeConfigError: (message) => set({ runtimeConfigError: message }),
+  setRuntimeConfigLoaded: (loaded) => set({ runtimeConfigLoaded: loaded }),
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
 }))

@@ -53,6 +53,7 @@ class WebSocketClient {
 
   onStatus(handler: StatusHandler): () => void {
     this.statusHandlers.add(handler)
+    handler(this.connected)
     return () => this.statusHandlers.delete(handler)
   }
 

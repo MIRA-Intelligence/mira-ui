@@ -24,6 +24,7 @@ describe('StatusBar', () => {
     })
     useSettingsStore.setState({
       language: 'en',
+      deploymentMode: 'localBundle',
       engineStatus: 'compatible',
       engineMessage: null,
     })
@@ -44,11 +45,23 @@ describe('StatusBar', () => {
 
   it('shows compatibility warning when engine is unreachable', () => {
     useSettingsStore.setState({
+      deploymentMode: 'localBundle',
       engineStatus: 'unreachable',
       engineMessage: 'Engine is unreachable.',
     })
     render(<StatusBar />)
 
     expect(screen.getByText('Engine is unreachable.')).toBeInTheDocument()
+  })
+
+  it('shows setup warning when provider configuration is still required', () => {
+    useSettingsStore.setState({
+      deploymentMode: 'localBundle',
+      engineStatus: 'setup_required',
+      engineMessage: 'Local engine is running, but model access is still unconfigured.',
+    })
+    render(<StatusBar />)
+
+    expect(screen.getByText('Local engine is running, but model access is still unconfigured.')).toBeInTheDocument()
   })
 })
