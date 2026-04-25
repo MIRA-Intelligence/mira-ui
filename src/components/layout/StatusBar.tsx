@@ -5,9 +5,11 @@ import { t } from '@/i18n'
 export function StatusBar() {
   const { stats } = useProjectStore()
   const lang = useSettingsStore((s) => s.language)
+  const deploymentMode = useSettingsStore((s) => s.deploymentMode)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
   const engineMessage = useSettingsStore((s) => s.engineMessage)
-  const showEngineWarning = engineStatus === 'incompatible' || engineStatus === 'unreachable'
+  const localEnginePhase = useSettingsStore((s) => s.localEnginePhase)
+  const showEngineWarning = deploymentMode === 'localBundle' && (engineStatus === 'incompatible' || engineStatus === 'unreachable' || localEnginePhase === 'error')
 
   return (
     <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">

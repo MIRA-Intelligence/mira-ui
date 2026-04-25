@@ -124,6 +124,29 @@ npm run dist:win
 npm run dist:all
 ```
 
+### Bundle packaging
+
+`MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, auto-installs the local service on first launch, and exposes the local runtime config inside the UI.
+
+Before running a bundle build locally, place the platform-specific engine binary at:
+
+```text
+bundled-engine/darwin/mira-engine
+bundled-engine/win32/mira-engine.exe
+```
+
+Then build with:
+
+```bash
+# macOS bundle artifacts
+npm run dist:bundle:mac
+
+# Windows bundle artifacts
+npm run dist:bundle:win
+```
+
+Bundle artifacts are written to `release-bundle/` and use the `MiraUI-bundle-*` naming convention.
+
 ## 6) Script reference
 
 - `npm run dev` → start Vite development server on port 5173 (web mode)
@@ -138,6 +161,8 @@ npm run dist:all
 - `npm run dist:win` → generate Windows setup/portable executables (CI wraps each into zip before release upload)
 - `npm run dist:all` → attempt both macOS and Windows packaging in one run
 - `npm run dist:mac` uses local Electron distribution and unsigned packaging (`mac.identity=null`) for local release preparation
+- `npm run dist:bundle:mac` → generate the `MiraUI-bundle` macOS installers into `release-bundle/`
+- `npm run dist:bundle:win` → generate the `MiraUI-bundle` Windows installers into `release-bundle/`
 
 ## 7) Project structure
 
@@ -196,5 +221,6 @@ npm run dist:all
 
 ### Desktop release artifacts
 - CI workflow: `.github/workflows/desktop-release.yml`
+- Bundle CI workflow: `.github/workflows/desktop-release-bundle.yml`
 - Trigger with GitHub Actions `workflow_dispatch` or push/PR to `release`
 - Generated installers are uploaded as workflow artifacts and also written to local `release/` when run locally

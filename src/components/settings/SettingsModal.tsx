@@ -1,47 +1,181 @@
-import { useState, useEffect } from 'react'
-import { useSettingsStore, type Theme, type Language } from '@/stores/settingsStore'
+import { useEffect, useState } from 'react'
+import { useSettingsStore, type DeploymentMode, type Theme, type Language } from '@/stores/settingsStore'
+import {
+  bootstrapLocalEngine,
+  doctorLocalEngine,
+  startLocalEngine,
+  stopLocalEngine,
+  upgradeLocalEngine,
+} from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
+import {
+  fetchRuntimeConfig,
+  saveRuntimeConfig,
+  type ReasoningEffort,
+  type RuntimeConfigPayload,
+  type RuntimeProviderName,
+} from '@/services/runtimeConfig'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
-export function SettingsModal() {
-  const store = useSettingsStore()
-  const { settingsOpen, closeSettings, language: lang } = store
-  const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable'
+const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
+const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
 
-  const [draft, setDraft] = useState({
+const PROVIDER_OPTIONS: { value: RuntimeProviderName; label: string }[] = [
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openai', label: 'OpenAI' },
+  { value: 'custom', label: 'Custom (OpenAI-compatible)' },
+  { value: 'ollama', label: 'Ollama' },
+]
+
+const REASONING_OPTIONS: { value: Exclude<ReasoningEffort, null>; label: string }[] = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'adaptive', label: 'Adaptive' },
+]
+
+type SettingsDraft = {
+  workspacePath: string
+  theme: Theme
+  language: Language
+  deploymentMode: DeploymentMode
+  apiUrl: string
+  wsUrl: string
+  showProgressMessages: boolean
+  showToolCallHistory: boolean
+  provider: RuntimeProviderName
+  model: string
+  reasoningEffort: ReasoningEffort
+  maxToolIterations: string
+  restrictToWorkspace: boolean
+  apiBase: string
+  apiKey: string
+}
+
+function remoteApiFallback(): string {
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
+  return `http://${host}:18790/api`
+}
+
+function remoteWsFallback(): string {
+  const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  const host = rawHost && rawHost.trim().length > 0 ? rawHost : '127.0.0.1'
+  const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws'
+  return `${proto}://${host}:18790/ws`
+}
+
+function createDraft(store: ReturnType<typeof useSettingsStore.getState>): SettingsDraft {
+  return {
     workspacePath: store.workspacePath,
     theme: store.theme,
     language: store.language,
+    deploymentMode: store.deploymentMode,
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? true,
-  })
-  const [upgrading, setUpgrading] = useState(false)
-  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null)
-  const [upgradeError, setUpgradeError] = useState(false)
+    provider: 'openrouter',
+    model: 'anthropic/claude-sonnet-4-5',
+    reasoningEffort: null,
+    maxToolIterations: '200',
+    restrictToWorkspace: false,
+    apiBase: '',
+    apiKey: '',
+  }
+}
+
+function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload): SettingsDraft {
+  const provider = (payload.runtime.provider in payload.providers
+    ? payload.runtime.provider
+    : 'openrouter') as RuntimeProviderName
+  const providerSettings = payload.providers[provider]
+
+  return {
+    ...draft,
+    workspacePath: payload.projects_root,
+    apiUrl: LOCAL_API_URL,
+    wsUrl: LOCAL_WS_URL,
+    provider,
+    model: payload.runtime.model,
+    reasoningEffort: payload.runtime.reasoning_effort,
+    maxToolIterations: String(payload.runtime.max_tool_iterations),
+    restrictToWorkspace: payload.runtime.restrict_to_workspace,
+    apiBase: providerSettings?.api_base ?? '',
+    apiKey: '',
+  }
+}
+
+export function SettingsModal() {
+  const store = useSettingsStore()
+  const { settingsOpen, closeSettings } = store
+  const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.localEnginePhase === 'error'
+
+  const [draft, setDraft] = useState<SettingsDraft>(() => createDraft(store))
+  const [runtimeProviders, setRuntimeProviders] = useState<RuntimeConfigPayload['providers']>({})
+  const [busy, setBusy] = useState(false)
+  const [runtimeLoading, setRuntimeLoading] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+  const [feedbackError, setFeedbackError] = useState(false)
+
+  const curLang = draft.language
+
+  const loadRuntimeConfig = async (mode: DeploymentMode) => {
+    if (mode !== 'localBundle') return
+    setRuntimeLoading(true)
+    setFeedback(null)
+    setFeedbackError(false)
+    try {
+      const localState = await bootstrapLocalEngine()
+      if (localState) {
+        store.setLocalEngineBootstrap({
+          phase: localState.phase,
+          message: localState.message,
+          executablePath: localState.executablePath,
+          version: localState.version,
+        })
+        if (localState.phase !== 'ready') {
+          throw new Error(localState.message)
+        }
+      }
+
+      const payload = await fetchRuntimeConfig()
+      store.setRuntimeConfig(payload)
+      store.setRuntimeConfigLoaded(true)
+      store.setRuntimeConfigError(null)
+      setRuntimeProviders(payload.providers)
+      setDraft((current) => applyRuntimePayload(current, payload))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      store.setRuntimeConfigError(message)
+      store.setRuntimeConfigLoaded(false)
+      setFeedbackError(true)
+      setFeedback(message)
+    } finally {
+      setRuntimeLoading(false)
+    }
+  }
 
   useEffect(() => {
-    if (settingsOpen) {
-      setDraft({
-        workspacePath: store.workspacePath,
-        theme: store.theme,
-        language: store.language,
-        apiUrl: store.apiUrl,
-        wsUrl: store.wsUrl,
-        showProgressMessages: store.showProgressMessages,
-        showToolCallHistory: store.showToolCallHistory ?? true,
-      })
-      setUpgrading(false)
-      setUpgradeError(false)
-      setUpgradeMessage(null)
+    if (!settingsOpen) return
+    const nextDraft = createDraft(store)
+    setDraft(nextDraft)
+    setBusy(false)
+    setRuntimeLoading(false)
+    setFeedbackError(false)
+    setFeedback(null)
+    setRuntimeProviders(store.runtimeConfig?.providers ?? {})
+    if (store.deploymentMode === 'localBundle') {
+      void loadRuntimeConfig(store.deploymentMode)
     }
   }, [
     settingsOpen,
     store.workspacePath,
     store.theme,
     store.language,
+    store.deploymentMode,
     store.apiUrl,
     store.wsUrl,
     store.showProgressMessages,
@@ -50,83 +184,204 @@ export function SettingsModal() {
 
   if (!settingsOpen) return null
 
-  const handleSave = () => {
-    const nextApiUrl = draft.apiUrl.trim()
-    const nextWsUrl = draft.wsUrl.trim()
-    const connectionChanged = nextApiUrl !== store.apiUrl || nextWsUrl !== store.wsUrl
-
-    store.setWorkspacePath(draft.workspacePath)
-    store.setTheme(draft.theme)
-    store.setLanguage(draft.language)
-    if (connectionChanged) {
-      // Trigger useWebSocket bootstrap only when endpoint changes.
-      store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
-      store.setEngineBootstrap({ status: 'unknown', message: null, version: null })
+  const handleSwitchMode = (mode: DeploymentMode) => {
+    setDraft((current) => ({
+      ...current,
+      deploymentMode: mode,
+      apiUrl: mode === 'localBundle'
+        ? LOCAL_API_URL
+        : (current.apiUrl === LOCAL_API_URL ? remoteApiFallback() : current.apiUrl),
+      wsUrl: mode === 'localBundle'
+        ? LOCAL_WS_URL
+        : (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
+    }))
+    if (mode === 'localBundle') {
+      void loadRuntimeConfig(mode)
     }
-    store.setShowProgressMessages(draft.showProgressMessages)
-    store.setShowToolCallHistory(draft.showToolCallHistory)
-
-    // Notify gateway of workspace path change
-    fetch(`${nextApiUrl}/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projects_root: draft.workspacePath }),
-    }).catch(() => {})
-
-    closeSettings()
   }
 
-  const handleUpgradeEngine = async () => {
-    setUpgradeError(false)
-    setUpgradeMessage('Upgrading local engine...')
-    setUpgrading(true)
+  const handleProviderChange = (provider: RuntimeProviderName) => {
+    const snapshot = runtimeProviders[provider]
+    setDraft((current) => ({
+      ...current,
+      provider,
+      apiBase: snapshot?.api_base ?? '',
+      apiKey: '',
+    }))
+  }
+
+  const handleSave = async () => {
+    const nextApiUrl = draft.apiUrl.trim()
+    const nextWsUrl = draft.wsUrl.trim()
+    setBusy(true)
+    setFeedback(null)
+    setFeedbackError(false)
+
     try {
-      if (!window.electronAPI?.upgradeLocalEngine) {
-        setUpgradeError(true)
-        setUpgradeMessage('Desktop upgrade is unavailable in browser mode. Run: mira-engine upgrade --package mira')
-        return
+      store.setTheme(draft.theme)
+      store.setLanguage(draft.language)
+      store.setShowProgressMessages(draft.showProgressMessages)
+      store.setShowToolCallHistory(draft.showToolCallHistory)
+      store.setDeploymentMode(draft.deploymentMode)
+
+      if (draft.deploymentMode === 'localBundle') {
+        store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
+        const localState = await bootstrapLocalEngine()
+        if (!localState) {
+          throw new Error('Desktop bundle controls are unavailable.')
+        }
+        store.setLocalEngineBootstrap({
+          phase: localState.phase,
+          message: localState.message,
+          executablePath: localState.executablePath,
+          version: localState.version,
+        })
+        if (localState.phase !== 'ready') {
+          throw new Error(localState.message)
+        }
+
+        const payload = await saveRuntimeConfig({
+          projects_root: draft.workspacePath.trim(),
+          runtime: {
+            workspace: draft.workspacePath.trim(),
+            provider: draft.provider,
+            model: draft.model.trim(),
+            reasoning_effort: draft.reasoningEffort,
+            max_tool_iterations: Number(draft.maxToolIterations),
+            restrict_to_workspace: draft.restrictToWorkspace,
+          },
+          providers: {
+            [draft.provider]: {
+              ...(draft.apiKey.trim() ? { api_key: draft.apiKey.trim() } : {}),
+              api_base: draft.apiBase.trim() || null,
+            },
+          },
+        })
+
+        store.setWorkspacePath(payload.projects_root)
+        store.setRuntimeConfig(payload)
+        store.setRuntimeConfigLoaded(true)
+        store.setRuntimeConfigError(null)
+        setRuntimeProviders(payload.providers)
+        setDraft((current) => applyRuntimePayload(current, payload))
+
+        const probe = await probeEngineCompatibility(LOCAL_API_URL)
+        store.setEngineBootstrap({
+          status: probe.status,
+          message: probe.status === 'compatible' ? null : probe.message,
+          version: probe.version,
+        })
+      } else {
+        if (!nextApiUrl || !nextWsUrl) {
+          throw new Error('Remote mode requires both API URL and WebSocket URL.')
+        }
+        store.setWorkspacePath(draft.workspacePath)
+        store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
+        store.setEngineBootstrap({ status: 'unknown', message: null, version: null })
       }
 
-      const result = await window.electronAPI.upgradeLocalEngine('mira-engine')
-      if (!result.ok) {
-        setUpgradeError(true)
-        setUpgradeMessage(result.stderr || 'Local engine upgrade failed.')
-        return
-      }
+      closeSettings()
+    } catch (error) {
+      setFeedbackError(true)
+      setFeedback(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
 
-      const probe = await probeEngineCompatibility(draft.apiUrl)
+  const handleRestartEngine = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback('Restarting local engine...')
+    try {
+      await stopLocalEngine()
+      await startLocalEngine()
+      const localState = await bootstrapLocalEngine()
+      if (localState) {
+        store.setLocalEngineBootstrap({
+          phase: localState.phase,
+          message: localState.message,
+          executablePath: localState.executablePath,
+          version: localState.version,
+        })
+      }
+      const probe = await probeEngineCompatibility(LOCAL_API_URL)
       store.setEngineBootstrap({
         status: probe.status,
         message: probe.status === 'compatible' ? null : probe.message,
         version: probe.version,
       })
-
-      if (probe.status === 'compatible') {
-        setUpgradeMessage('Local engine upgraded and verified. Reconnecting...')
-        setTimeout(() => window.location.reload(), 800)
-      } else {
-        setUpgradeError(true)
-        setUpgradeMessage(`Upgrade finished but verification failed: ${probe.message}`)
-      }
+      setFeedback(probe.status === 'compatible' ? 'Local engine restarted and verified.' : probe.message)
+      setFeedbackError(probe.status !== 'compatible')
+    } catch (error) {
+      setFeedbackError(true)
+      setFeedback(error instanceof Error ? error.message : String(error))
     } finally {
-      setUpgrading(false)
+      setBusy(false)
     }
   }
 
-  const curLang = draft.language
+  const handleDoctorEngine = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback('Collecting local engine diagnostics...')
+    try {
+      const result = await doctorLocalEngine()
+      if (!result?.ok) {
+        throw new Error(result?.stderr || 'Local engine doctor failed.')
+      }
+      setFeedback(result.stdout || 'Local engine diagnostics completed.')
+    } catch (error) {
+      setFeedbackError(true)
+      setFeedback(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleUpgradeEngine = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback('Upgrading local engine...')
+    try {
+      const result = await upgradeLocalEngine('mira-engine')
+      if (!result?.ok) {
+        throw new Error(result?.stderr || 'Local engine upgrade failed.')
+      }
+      const localState = await bootstrapLocalEngine()
+      if (localState) {
+        store.setLocalEngineBootstrap({
+          phase: localState.phase,
+          message: localState.message,
+          executablePath: localState.executablePath,
+          version: localState.version,
+        })
+      }
+      const probe = await probeEngineCompatibility(LOCAL_API_URL)
+      store.setEngineBootstrap({
+        status: probe.status,
+        message: probe.status === 'compatible' ? null : probe.message,
+        version: probe.version,
+      })
+      if (probe.status !== 'compatible') {
+        throw new Error(probe.message)
+      }
+      setFeedback('Local engine upgraded and verified.')
+    } catch (error) {
+      setFeedbackError(true)
+      setFeedback(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const selectedProvider = runtimeProviders[draft.provider]
+  const localMode = draft.deploymentMode === 'localBundle'
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
-    >
-      {/* Backdrop */}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
       <div className="absolute inset-0 bg-[var(--color-overlay)]" />
-
-      {/* Modal */}
-      <div
-        className="relative w-[520px] max-h-[80vh] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl flex flex-col overflow-hidden"
-      >
-        {/* Header */}
+      <div className="relative w-[620px] max-h-[84vh] rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-2xl flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)]">
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
             {t('settings', curLang)}
@@ -139,31 +394,57 @@ export function SettingsModal() {
           </button>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+          <Section title="Deployment">
+            <Label text="Mode" />
+            <div className="flex gap-2">
+              {([
+                { value: 'localBundle' as DeploymentMode, label: 'Local bundle' },
+                { value: 'remoteManual' as DeploymentMode, label: 'Remote manual' },
+              ]).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => handleSwitchMode(option.value)}
+                  className={cn(
+                    'flex-1 py-2 text-sm rounded-lg border transition-colors',
+                    draft.deploymentMode === option.value
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+              {localMode
+                ? 'Bundle mode keeps MiraUI and mira-engine on this machine, and starts the local engine automatically.'
+                : 'Remote mode only connects to an already-deployed mira endpoint. Install mira separately on the remote server.'}
+            </p>
+          </Section>
 
-          {/* ── Workspace ─────────────────────── */}
           <Section title={t('workspace', curLang)}>
             <Label text={t('workspacePath', curLang)} />
             <input
               value={draft.workspacePath}
-              onChange={(e) => setDraft({ ...draft, workspacePath: e.target.value })}
+              onChange={(e) => setDraft((current) => ({ ...current, workspacePath: e.target.value }))}
               className={inputClass}
             />
             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-              {t('workspacePathHint', curLang)}
+              {localMode
+                ? 'This path is saved into the local Mira runtime config and used as the projects root.'
+                : t('workspacePathHint', curLang)}
             </p>
           </Section>
 
-          {/* ── General ───────────────────────── */}
           <Section title={t('general', curLang)}>
-            {/* Theme */}
             <Label text={t('theme', curLang)} />
             <div className="flex gap-2">
               {(['dark', 'light'] as const).map((th) => (
                 <button
                   key={th}
-                  onClick={() => setDraft({ ...draft, theme: th as Theme })}
+                  onClick={() => setDraft((current) => ({ ...current, theme: th as Theme }))}
                   className={cn(
                     'flex-1 py-2 text-sm rounded-lg border transition-colors',
                     draft.theme === th
@@ -171,12 +452,12 @@ export function SettingsModal() {
                       : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
                   )}
                 >
-                  {th === 'dark' ? '🌙 ' : '☀️ '}{t(th, curLang)}
+                  {th === 'dark' ? '🌙 ' : '☀️ '}
+                  {t(th, curLang)}
                 </button>
               ))}
             </div>
 
-            {/* Language */}
             <Label text={t('language', curLang)} className="mt-4" />
             <div className="flex gap-2">
               {([
@@ -185,7 +466,7 @@ export function SettingsModal() {
               ]).map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => setDraft({ ...draft, language: opt.value })}
+                  onClick={() => setDraft((current) => ({ ...current, language: opt.value }))}
                   className={cn(
                     'flex-1 py-2 text-sm rounded-lg border transition-colors',
                     draft.language === opt.value
@@ -198,104 +479,173 @@ export function SettingsModal() {
               ))}
             </div>
 
-            {/* Progress messages */}
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <Label text={t('progressMessages', curLang)} className="mb-0" />
-              <button
-                type="button"
-                role="switch"
-                aria-checked={draft.showProgressMessages}
-                onClick={() => setDraft({ ...draft, showProgressMessages: !draft.showProgressMessages })}
-                className={cn(
-                  'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
-                  draft.showProgressMessages
-                    ? 'bg-[var(--color-accent)]'
-                    : 'bg-[var(--color-bg-tertiary)]',
-                )}
-              >
-                <span
-                  className={cn(
-                    'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
-                    draft.showProgressMessages ? 'translate-x-5' : 'translate-x-0',
-                  )}
-                />
-              </button>
-            </div>
+            <ToggleRow
+              className="mt-4"
+              label={t('progressMessages', curLang)}
+              checked={draft.showProgressMessages}
+              onToggle={() => setDraft((current) => ({ ...current, showProgressMessages: !current.showProgressMessages }))}
+            />
             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
               {t('progressMessagesHint', curLang)}
             </p>
 
-            {/* Tool-call history */}
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <Label text={t('toolCallHistory', curLang)} className="mb-0" />
-              <button
-                type="button"
-                role="switch"
-                aria-checked={draft.showToolCallHistory}
-                onClick={() => setDraft({ ...draft, showToolCallHistory: !draft.showToolCallHistory })}
-                className={cn(
-                  'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
-                  draft.showToolCallHistory
-                    ? 'bg-[var(--color-accent)]'
-                    : 'bg-[var(--color-bg-tertiary)]',
-                )}
-              >
-                <span
-                  className={cn(
-                    'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
-                    draft.showToolCallHistory ? 'translate-x-5' : 'translate-x-0',
-                  )}
-                />
-              </button>
-            </div>
+            <ToggleRow
+              className="mt-4"
+              label={t('toolCallHistory', curLang)}
+              checked={draft.showToolCallHistory}
+              onToggle={() => setDraft((current) => ({ ...current, showToolCallHistory: !current.showToolCallHistory }))}
+            />
             <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
               {t('toolCallHistoryHint', curLang)}
             </p>
           </Section>
 
-          {/* ── Connection ────────────────────── */}
-          <Section title={t('connection', curLang)}>
-            <Label text={t('apiUrl', curLang)} />
-            <input
-              value={draft.apiUrl}
-              onChange={(e) => setDraft({ ...draft, apiUrl: e.target.value })}
-              className={inputClass}
-            />
-            <Label text={t('wsUrl', curLang)} className="mt-3" />
-            <input
-              value={draft.wsUrl}
-              onChange={(e) => setDraft({ ...draft, wsUrl: e.target.value })}
-              className={inputClass}
-            />
-            {showEngineWarning && (
-              <p className="text-[11px] text-amber-300 mt-3 leading-relaxed">
-                {store.engineMessage || 'Local engine is unavailable or incompatible. Upgrade and restart mira-engine.'}
-              </p>
-            )}
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleUpgradeEngine}
-                disabled={upgrading}
-                className={cn(
-                  'px-3 py-1.5 text-xs rounded-lg border transition-colors',
-                  upgrading
-                    ? 'opacity-60 cursor-not-allowed border-[var(--color-border)] text-[var(--color-text-muted)]'
-                    : 'border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10',
+          {localMode ? (
+            <>
+              <Section title="Local Engine">
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3 space-y-1">
+                  <p className="text-sm text-[var(--color-text-primary)]">
+                    Phase: <span className="font-medium">{store.localEnginePhase}</span>
+                  </p>
+                  <p className="text-xs text-[var(--color-text-muted)]">
+                    {store.engineVersion ? `Version ${store.engineVersion}` : 'Version unknown'}
+                  </p>
+                  {store.localEngineExecutablePath && (
+                    <p className="text-[11px] text-[var(--color-text-muted)] break-all">
+                      Executable: {store.localEngineExecutablePath}
+                    </p>
+                  )}
+                  {showEngineWarning && (
+                    <p className="text-[11px] text-amber-300 leading-relaxed">
+                      {store.engineMessage || 'Local engine is unavailable or incompatible.'}
+                    </p>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ActionButton disabled={busy} onClick={handleRestartEngine}>
+                    Restart local engine
+                  </ActionButton>
+                  <ActionButton disabled={busy} onClick={handleDoctorEngine}>
+                    Run doctor
+                  </ActionButton>
+                  <ActionButton disabled={busy} onClick={handleUpgradeEngine}>
+                    Upgrade local engine
+                  </ActionButton>
+                  <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle')}>
+                    {runtimeLoading ? 'Refreshing...' : 'Refresh config'}
+                  </ActionButton>
+                </div>
+              </Section>
+
+              <Section title="Local Runtime Config">
+                <Label text="Provider" />
+                <select
+                  value={draft.provider}
+                  onChange={(e) => handleProviderChange(e.target.value as RuntimeProviderName)}
+                  className={inputClass}
+                >
+                  {PROVIDER_OPTIONS.map((provider) => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+
+                <Label text="Model" className="mt-3" />
+                <input
+                  value={draft.model}
+                  onChange={(e) => setDraft((current) => ({ ...current, model: e.target.value }))}
+                  className={inputClass}
+                  placeholder="anthropic/claude-sonnet-4-5"
+                />
+
+                <Label text="API Base" className="mt-3" />
+                <input
+                  value={draft.apiBase}
+                  onChange={(e) => setDraft((current) => ({ ...current, apiBase: e.target.value }))}
+                  className={inputClass}
+                  placeholder="Leave empty for provider defaults"
+                />
+
+                <Label text="API Key" className="mt-3" />
+                <input
+                  type="password"
+                  value={draft.apiKey}
+                  onChange={(e) => setDraft((current) => ({ ...current, apiKey: e.target.value }))}
+                  className={inputClass}
+                  placeholder={selectedProvider?.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste provider API key'}
+                />
+                {selectedProvider?.api_key_preview && (
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                    Saved key preview: {selectedProvider.api_key_preview}
+                  </p>
                 )}
-              >
-                {upgrading ? 'Upgrading...' : 'Upgrade local engine'}
-              </button>
-              {upgradeMessage && (
-                <span className={cn('text-[11px]', upgradeError ? 'text-red-300' : 'text-[var(--color-text-muted)]')}>
-                  {upgradeMessage}
-                </span>
-              )}
-            </div>
-          </Section>
+
+                <Label text="Reasoning Effort" className="mt-3" />
+                <select
+                  value={draft.reasoningEffort ?? ''}
+                  onChange={(e) => setDraft((current) => ({
+                    ...current,
+                    reasoningEffort: e.target.value ? e.target.value as Exclude<ReasoningEffort, null> : null,
+                  }))}
+                  className={inputClass}
+                >
+                  <option value="">Disabled</option>
+                  {REASONING_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+
+                <Label text="Max Tool Iterations" className="mt-3" />
+                <input
+                  value={draft.maxToolIterations}
+                  onChange={(e) => setDraft((current) => ({ ...current, maxToolIterations: e.target.value }))}
+                  className={inputClass}
+                  inputMode="numeric"
+                />
+
+                <ToggleRow
+                  className="mt-4"
+                  label="Restrict tool access to workspace"
+                  checked={draft.restrictToWorkspace}
+                  onToggle={() => setDraft((current) => ({ ...current, restrictToWorkspace: !current.restrictToWorkspace }))}
+                />
+                {store.runtimeConfig?.config_path && (
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3 break-all">
+                    Runtime config path: {store.runtimeConfig.config_path}
+                  </p>
+                )}
+              </Section>
+            </>
+          ) : (
+            <Section title={t('connection', curLang)}>
+              <Label text={t('apiUrl', curLang)} />
+              <input
+                value={draft.apiUrl}
+                onChange={(e) => setDraft((current) => ({ ...current, apiUrl: e.target.value }))}
+                className={inputClass}
+              />
+              <Label text={t('wsUrl', curLang)} className="mt-3" />
+              <input
+                value={draft.wsUrl}
+                onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
+                className={inputClass}
+              />
+              <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
+                Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
+              </p>
+            </Section>
+          )}
+
+          {feedback && (
+            <p className={cn('text-xs leading-relaxed', feedbackError ? 'text-red-300' : 'text-[var(--color-text-muted)]')}>
+              {feedback}
+            </p>
+          )}
         </div>
 
-        {/* Footer */}
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
           <button
             onClick={closeSettings}
@@ -304,18 +654,20 @@ export function SettingsModal() {
             {t('cancel', curLang)}
           </button>
           <button
-            onClick={handleSave}
-            className="px-4 py-2 text-sm rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent)]/80 transition-colors"
+            onClick={() => void handleSave()}
+            disabled={busy || runtimeLoading}
+            className={cn(
+              'px-4 py-2 text-sm rounded-lg bg-[var(--color-accent)] text-white font-medium transition-colors',
+              busy || runtimeLoading ? 'opacity-60 cursor-not-allowed' : 'hover:bg-[var(--color-accent)]/80',
+            )}
           >
-            {t('save', curLang)}
+            {busy ? 'Saving...' : t('save', curLang)}
           </button>
         </div>
       </div>
     </div>
   )
 }
-
-/* ── Helpers ──────────────────────────────────────── */
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -333,6 +685,53 @@ function Label({ text, className }: { text: string; className?: string }) {
     <label className={cn('block text-sm text-[var(--color-text-secondary)] mb-1.5', className)}>
       {text}
     </label>
+  )
+}
+
+function ToggleRow(
+  { label, checked, onToggle, className }: { label: string; checked: boolean; onToggle: () => void; className?: string },
+) {
+  return (
+    <div className={cn('flex items-center justify-between gap-3', className)}>
+      <Label text={label} className="mb-0" />
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={onToggle}
+        className={cn(
+          'inline-flex h-6 w-11 shrink-0 items-center rounded-full p-0.5 transition-colors',
+          checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-bg-tertiary)]',
+        )}
+      >
+        <span
+          className={cn(
+            'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
+            checked ? 'translate-x-5' : 'translate-x-0',
+          )}
+        />
+      </button>
+    </div>
+  )
+}
+
+function ActionButton(
+  { children, disabled, onClick }: { children: React.ReactNode; disabled?: boolean; onClick: () => void },
+) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'px-3 py-1.5 text-xs rounded-lg border transition-colors',
+        disabled
+          ? 'opacity-60 cursor-not-allowed border-[var(--color-border)] text-[var(--color-text-muted)]'
+          : 'border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10',
+      )}
+    >
+      {children}
+    </button>
   )
 }
 

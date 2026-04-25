@@ -24,6 +24,7 @@ describe('StatusBar', () => {
     })
     useSettingsStore.setState({
       language: 'en',
+      deploymentMode: 'localBundle',
       engineStatus: 'compatible',
       engineMessage: null,
     })
@@ -44,6 +45,7 @@ describe('StatusBar', () => {
 
   it('shows compatibility warning when engine is unreachable', () => {
     useSettingsStore.setState({
+      deploymentMode: 'localBundle',
       engineStatus: 'unreachable',
       engineMessage: 'Engine is unreachable.',
     })

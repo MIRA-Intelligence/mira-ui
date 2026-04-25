@@ -17,6 +17,9 @@
     "dist:mac": "npm run build:desktop && CSC_IDENTITY_AUTO_DISCOVERY=false node ./node_modules/electron-builder/cli.js --mac --publish never -c.electronDist=node_modules/electron/dist",
     "dist:win": "npm run build:desktop && node ./node_modules/electron-builder/cli.js --win --publish never",
     "dist:all": "npm run build:desktop && CSC_IDENTITY_AUTO_DISCOVERY=false node ./node_modules/electron-builder/cli.js --mac --win --publish never",
+    "dist:bundle": "npm run build:desktop && node ./scripts/build-bundle.mjs",
+    "dist:bundle:mac": "npm run build:desktop && node ./scripts/build-bundle.mjs --mac",
+    "dist:bundle:win": "npm run build:desktop && node ./scripts/build-bundle.mjs --win",
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
   },

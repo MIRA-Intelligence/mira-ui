@@ -1,56 +1,8 @@
-import { spawn } from 'child_process'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
+import { LocalEngineManager } from './engine/manager'
 
-type UpgradeResult = {
-  ok: boolean
-  code: number
-  stdout: string
-  stderr: string
-}
-
-function runEngineUpgrade(packageName: string): Promise<UpgradeResult> {
-  const executable = process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine'
-  const args = ['upgrade', '--package', packageName]
-
-  return new Promise((resolve) => {
-    const child = spawn(executable, args, {
-      shell: process.platform === 'win32',
-      env: process.env,
-    })
-
-    let stdout = ''
-    let stderr = ''
-    const timeout = setTimeout(() => {
-      child.kill('SIGTERM')
-    }, 120_000)
-
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString()
-    })
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', (err) => {
-      clearTimeout(timeout)
-      resolve({
-        ok: false,
-        code: 1,
-        stdout,
-        stderr: `${stderr}\n${err.message}`.trim(),
-      })
-    })
-    child.on('close', (code) => {
-      clearTimeout(timeout)
-      resolve({
-        ok: code === 0,
-        code: code ?? 1,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-      })
-    })
-  })
-}
+const engineManager = new LocalEngineManager()
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -81,9 +33,17 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  ipcMain.handle('engine:bootstrap', async () => engineManager.bootstrapLocalEngine())
+  ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
+  ipcMain.handle('engine:status', async () => engineManager.status())
+  ipcMain.handle('engine:start', async () => engineManager.start())
+  ipcMain.handle('engine:stop', async () => engineManager.stop())
+  ipcMain.handle('engine:doctor', async () => engineManager.doctor())
+  ipcMain.handle('engine:install-service', async () => engineManager.installService())
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
-    return runEngineUpgrade(packageName || 'mira-engine')
+    return engineManager.upgrade(packageName || 'mira-engine')
   })
+  void engineManager.bootstrapLocalEngine().catch(() => {})
   createWindow()
 })
 
