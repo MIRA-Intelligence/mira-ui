@@ -148,7 +148,7 @@ npm run dist:bundle:mac
 npm run dist:bundle:win
 ```
 
-Bundle artifacts are written to `release-bundle/` and use the `MiraUI-bundle-*` naming convention.
+Bundle artifacts are written to `release-bundle/` and use the `MIRA-bundle-*` naming convention.
 
 ## 6) Script reference
 
@@ -164,8 +164,8 @@ Bundle artifacts are written to `release-bundle/` and use the `MiraUI-bundle-*` 
 - `npm run dist:win` → generate Windows setup/portable executables (CI wraps each into zip before release upload)
 - `npm run dist:all` → attempt both macOS and Windows packaging in one run
 - `npm run dist:mac` uses local Electron distribution and unsigned packaging (`mac.identity=null`) for local release preparation
-- `npm run dist:bundle:mac` → generate the `MiraUI-bundle` macOS installers into `release-bundle/`
-- `npm run dist:bundle:win` → generate the `MiraUI-bundle` Windows installers into `release-bundle/`
+- `npm run dist:bundle:mac` → generate the `MIRA-bundle` macOS installers into `release-bundle/`
+- `npm run dist:bundle:win` → generate the `MIRA-bundle` Windows installers into `release-bundle/`
 
 ## 7) Project structure
 
@@ -223,7 +223,7 @@ Bundle artifacts are written to `release-bundle/` and use the `MiraUI-bundle-*` 
 - Run from repo root to avoid path resolution issues.
 
 ### Desktop release artifacts
-- CI workflow: `.github/workflows/desktop-release.yml`
-- Bundle CI workflow: `.github/workflows/desktop-release-bundle.yml`
-- Trigger with GitHub Actions `workflow_dispatch` or push/PR to `release`
-- Generated installers are uploaded as workflow artifacts and also written to local `release/` when run locally
+- Primary release workflow: `.github/workflows/desktop-release.yml`
+- A single `v*` tag now publishes both `MIRA-standalone-*` and `MIRA-bundle-*` assets into the same GitHub Release
+- Manual bundle rebuild workflow: `.github/workflows/desktop-release-bundle.yml`
+- Generated installers are uploaded as workflow artifacts and also written to local `release/` or `release-bundle/` when run locally

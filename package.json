@@ -41,7 +41,7 @@
         "dmg",
         "zip"
       ],
-      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+      "artifactName": "${productName}-standalone-${version}-${os}-${arch}.${ext}",
       "category": "public.app-category.developer-tools"
     },
     "dmg": {
@@ -70,10 +70,10 @@
       ]
     },
     "nsis": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-setup.${ext}"
+      "artifactName": "${productName}-standalone-${version}-${os}-${arch}-setup.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-${os}-${arch}-portable.${ext}"
+      "artifactName": "${productName}-standalone-${version}-${os}-${arch}-portable.${ext}"
     }
   },
   "dependencies": {
