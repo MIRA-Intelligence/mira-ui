@@ -27,7 +27,7 @@ module.exports = {
       'dmg',
       'zip',
     ],
-    artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
+    artifactName: '${productName}-bundle-${version}-${os}-${arch}.${ext}',
     category: 'public.app-category.developer-tools',
   },
   dmg: {
@@ -47,9 +47,9 @@ module.exports = {
     ],
   },
   nsis: {
-    artifactName: '${productName}-${version}-${os}-${arch}-setup.${ext}',
+    artifactName: '${productName}-bundle-${version}-${os}-${arch}-setup.${ext}',
   },
   portable: {
-    artifactName: '${productName}-${version}-${os}-${arch}-portable.${ext}',
+    artifactName: '${productName}-bundle-${version}-${os}-${arch}-portable.${ext}',
   },
 }
