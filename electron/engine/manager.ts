@@ -37,6 +37,10 @@ type EngineStatusPayload = {
 const DEFAULT_PORT = 18790
 const DEFAULT_HOST = '127.0.0.1'
 const HEALTH_TIMEOUT_MS = 45_000
+const HEALTH_FAST_PATH_TIMEOUT_MS = 350
+const HEALTH_POLL_FAST_INTERVAL_MS = 250
+const HEALTH_POLL_SLOW_INTERVAL_MS = 1_000
+const HEALTH_POLL_FAST_WINDOW_MS = 5_000
 const COMMAND_TIMEOUT_MS = 120_000
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
@@ -363,29 +367,56 @@ export class LocalEngineManager {
     return this.runCommand(['upgrade', '--package', packageName], { timeoutMs: 180_000 })
   }
 
-  private async waitForHealth(port = DEFAULT_PORT, logPath?: string | null): Promise<{ ok: boolean; version: string | null; message: string; error?: string }> {
+  private async probeHealth(port = DEFAULT_PORT, timeoutMs = HEALTH_FAST_PATH_TIMEOUT_MS): Promise<{ ok: boolean; version: string | null }> {
     const base = `http://${DEFAULT_HOST}:${port}`
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
+    const fetchWithTimeout = async (url: string) => {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const healthResp = await fetch(`${base}/health`)
-        if (healthResp.ok) {
-          let version: string | null = null
-          try {
-            const versionResp = await fetch(`${base}/version`)
-            if (versionResp.ok) {
-              const payload = await versionResp.json() as { agent_version?: string }
-              version = typeof payload.agent_version === 'string' ? payload.agent_version : null
-            }
-          } catch {
-            // Ignore version probe failures when health already passed.
+        return await fetch(url, { signal: controller.signal })
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+
+    try {
+      const healthResp = await fetchWithTimeout(`${base}/health`)
+      if (!healthResp.ok) {
+        return { ok: false, version: null }
+      }
+
+      try {
+        const versionResp = await fetchWithTimeout(`${base}/version`)
+        if (versionResp.ok) {
+          const payload = await versionResp.json() as { agent_version?: string }
+          return {
+            ok: true,
+            version: typeof payload.agent_version === 'string' ? payload.agent_version : null,
           }
-          return { ok: true, version, message: 'Local engine is ready.' }
         }
       } catch {
-        // keep polling until timeout
+        // Ignore version probe failures when health already passed.
       }
-      await new Promise((resolve) => setTimeout(resolve, 1_000))
+
+      return { ok: true, version: null }
+    } catch {
+      return { ok: false, version: null }
+    }
+  }
+
+  private async waitForHealth(port = DEFAULT_PORT, logPath?: string | null): Promise<{ ok: boolean; version: string | null; message: string; error?: string }> {
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < HEALTH_TIMEOUT_MS) {
+      const health = await this.probeHealth(port)
+      if (health.ok) {
+        return { ok: true, version: health.version, message: 'Local engine is ready.' }
+      }
+
+      const elapsed = Date.now() - startedAt
+      const pollInterval = elapsed < HEALTH_POLL_FAST_WINDOW_MS
+        ? HEALTH_POLL_FAST_INTERVAL_MS
+        : HEALTH_POLL_SLOW_INTERVAL_MS
+      await new Promise((resolve) => setTimeout(resolve, pollInterval))
     }
     return { ok: false, version: null, ...this.diagnoseBootstrapFailure(await this.readLogTail(logPath), port) }
   }
@@ -411,6 +442,21 @@ export class LocalEngineManager {
           serviceInstalled: null,
           serviceRunning: null,
           error: seeded.error,
+        })
+      }
+
+      const fastExecutablePath = await resolveExecutable()
+      const fastHealth = await this.probeHealth(DEFAULT_PORT)
+      if (fastHealth.ok) {
+        return this.setState({
+          phase: 'ready',
+          message: 'Local engine is ready.',
+          executablePath: fastExecutablePath,
+          serviceInstalled: true,
+          serviceRunning: true,
+          healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+          version: fastHealth.version,
+          error: null,
         })
       }
 
