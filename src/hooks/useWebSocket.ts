@@ -27,11 +27,10 @@ export function useWebSocket() {
   const deploymentMode = useSettingsStore((s) => s.deploymentMode)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
+  const engineStatus = useSettingsStore((s) => s.engineStatus)
 
   useEffect(() => {
     let disposed = false
-    let unsubMsg = () => {}
-    let unsubStatus = () => {}
 
     const bootstrap = async () => {
       try {
@@ -39,7 +38,6 @@ export function useWebSocket() {
         const safeApiUrl = localBundle
           ? 'http://127.0.0.1:18790/api'
           : (typeof apiUrl === 'string' ? apiUrl : 'http://127.0.0.1:18790/api')
-        const safeWsUrl = localBundle ? 'ws://127.0.0.1:18790/ws' : wsUrl
 
         if (localBundle) {
           if (!hasDesktopEngineManager()) {
@@ -81,15 +79,6 @@ export function useWebSocket() {
           }
         }
 
-        if (!safeWsUrl || !safeWsUrl.trim()) {
-          setEngineBootstrap({
-            status: 'unreachable',
-            message: 'WebSocket URL is empty. Update wsUrl in settings and retry.',
-            version: null,
-          })
-          setConnected(false)
-          return
-        }
         const probe = await probeEngineCompatibility(safeApiUrl)
         if (disposed) return
 
@@ -103,17 +92,6 @@ export function useWebSocket() {
           setConnected(false)
           return
         }
-
-        unsubMsg = wsClient.onMessage(handleWsMessage)
-        unsubStatus = wsClient.onStatus((connected) => {
-          if (useAgentStore.getState().connected !== connected) {
-            setConnected(connected)
-          }
-          if (connected) {
-            void syncOnConnect()
-          }
-        })
-        wsClient.connect()
       } catch (error) {
         if (disposed) return
         const message = error instanceof Error ? error.message : String(error)
@@ -130,9 +108,45 @@ export function useWebSocket() {
 
     return () => {
       disposed = true
+    }
+  }, [apiUrl, deploymentMode, setConnected, setEngineBootstrap, setLocalEngineBootstrap])
+
+  useEffect(() => {
+    const localBundle = deploymentMode === 'localBundle'
+    const safeWsUrl = localBundle ? 'ws://127.0.0.1:18790/ws' : wsUrl
+
+    if (!safeWsUrl || !safeWsUrl.trim()) {
+      setEngineBootstrap({
+        status: 'unreachable',
+        message: 'WebSocket URL is empty. Update wsUrl in settings and retry.',
+        version: null,
+      })
+      setConnected(false)
+      wsClient.disconnect()
+      return
+    }
+
+    if (engineStatus !== 'compatible') {
+      setConnected(false)
+      wsClient.disconnect()
+      return
+    }
+
+    const unsubMsg = wsClient.onMessage(handleWsMessage)
+    const unsubStatus = wsClient.onStatus((connected) => {
+      if (useAgentStore.getState().connected !== connected) {
+        setConnected(connected)
+      }
+      if (connected) {
+        void syncOnConnect()
+      }
+    })
+    wsClient.connect()
+
+    return () => {
       unsubMsg()
       unsubStatus()
       wsClient.disconnect()
     }
-  }, [apiUrl, deploymentMode, wsUrl, handleWsMessage, setConnected, setEngineBootstrap, setLocalEngineBootstrap])
+  }, [deploymentMode, engineStatus, handleWsMessage, setConnected, setEngineBootstrap, wsUrl])
 }
