@@ -63,4 +63,17 @@ describe('wsClient', () => {
 
     unsubscribe()
   })
+
+  it('does not create duplicate sockets while already connecting or connected', () => {
+    wsClient.connect()
+    wsClient.connect()
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    const socket = MockWebSocket.instances[0]
+    socket?.emitOpen()
+    wsClient.connect()
+
+    expect(MockWebSocket.instances).toHaveLength(1)
+  })
 })
