@@ -54,7 +54,12 @@ describe('useWebSocket', () => {
       phase: 'ready',
       message: 'Local engine is ready.',
       executablePath: 'C:\\Program Files\\MIRA\\mira-engine.exe',
+      healthUrl: 'http://127.0.0.1:18790/health',
       version: '0.2.0',
+      serviceInstalled: true,
+      serviceRunning: true,
+      lastCommand: null,
+      error: null,
     })
   })
 
