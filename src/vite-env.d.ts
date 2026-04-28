@@ -89,5 +89,25 @@ interface Window {
       command: string[]
       executablePath: string | null
     }>
+    getAppVersion?: () => Promise<string>
+    checkForUpdates?: (opts?: {
+      includePrereleases?: boolean
+      forceRefresh?: boolean
+    }) => Promise<UpdateInfo | null>
+    openReleasePage?: (url: string) => Promise<boolean>
+    skipUpdateVersion?: (version: string) => Promise<boolean>
+    getSkippedUpdateVersions?: () => Promise<string[]>
+    resetSkippedUpdateVersions?: () => Promise<boolean>
+    onUpdateAvailable?: (listener: (info: UpdateInfo) => void) => () => void
   }
+}
+
+interface UpdateInfo {
+  version: string
+  tagName: string
+  name: string
+  url: string
+  publishedAt: string
+  isPrerelease: boolean
+  notes: string
 }

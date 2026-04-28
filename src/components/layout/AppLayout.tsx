@@ -8,9 +8,11 @@ import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
+import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
@@ -39,10 +41,12 @@ export function AppLayout() {
   const activeStage = useProjectStore((s) => s.activeStage)
   const lang = useSettingsStore((s) => s.language)
   useWebSocket()
+  useUpdateCheck()
 
   return (
     <div className="h-screen flex flex-col">
       <TopBar />
+      <UpdateBanner />
       <PipelineProgress />
 
       <div className="flex-1 flex overflow-hidden">
