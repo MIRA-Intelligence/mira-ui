@@ -24,12 +24,35 @@ export interface RuntimeConfigPayload {
   providers: Record<string, RuntimeProviderSettings>
 }
 
-function getApiUrl(): string {
-  return useSettingsStore.getState().apiUrl
+function resolveApiUrl(apiUrl?: string): string {
+  return apiUrl ?? useSettingsStore.getState().apiUrl
 }
 
-export async function fetchRuntimeConfig(): Promise<RuntimeConfigPayload> {
-  const resp = await fetch(`${getApiUrl()}/config`)
+async function readRuntimeConfigError(resp: Response, fallback: string): Promise<string> {
+  let errorMessage = ''
+  try {
+    const data = await resp.json()
+    errorMessage = typeof data?.error === 'string' ? data.error : JSON.stringify(data)
+  } catch {
+    errorMessage = await resp.text()
+  }
+  return errorMessage || fallback
+}
+
+async function postRuntimeConfig(body: unknown, apiUrl?: string): Promise<RuntimeConfigPayload> {
+  const resp = await fetch(`${resolveApiUrl(apiUrl)}/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    throw new Error(await readRuntimeConfigError(resp, 'Failed to save runtime config'))
+  }
+  return await resp.json() as RuntimeConfigPayload
+}
+
+export async function fetchRuntimeConfig(apiUrl?: string): Promise<RuntimeConfigPayload> {
+  const resp = await fetch(`${resolveApiUrl(apiUrl)}/config`)
   if (!resp.ok) {
     throw new Error(await resp.text() || 'Failed to fetch runtime config')
   }
@@ -47,21 +70,10 @@ export async function saveRuntimeConfig(payload: {
     restrict_to_workspace: boolean
   }
   providers: Partial<Record<RuntimeProviderName, { api_key?: string; api_base?: string | null }>>
-}): Promise<RuntimeConfigPayload> {
-  const resp = await fetch(`${getApiUrl()}/config`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  if (!resp.ok) {
-    let errorMessage = ''
-    try {
-      const data = await resp.json()
-      errorMessage = typeof data?.error === 'string' ? data.error : JSON.stringify(data)
-    } catch {
-      errorMessage = await resp.text()
-    }
-    throw new Error(errorMessage || 'Failed to save runtime config')
-  }
-  return await resp.json() as RuntimeConfigPayload
+}, apiUrl?: string): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig(payload, apiUrl)
+}
+
+export async function updateProjectsRoot(projectsRoot: string, apiUrl?: string): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig({ projects_root: projectsRoot }, apiUrl)
 }

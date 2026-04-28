@@ -45,7 +45,7 @@ interface ProjectState {
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
   duplicateTask: (id: string) => void
   createProject: (input: NewProjectInput) => Promise<string>
-  loadProjects: () => Promise<void>
+  loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
   nextProjectId: () => string
 }
 
@@ -428,7 +428,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     )
     const remotes = await fetchProjects()
     const used = collectProjectNumbers([
-      ...remotes.map((r) => r.id),
+      ...(remotes ?? []).map((r) => r.id),
       ...get().tasks.map((t) => t.id),
     ])
     const id = `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
@@ -460,11 +460,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     return id
   },
 
-  loadProjects: async () => {
+  loadProjects: async (options) => {
     const remotes = await fetchProjects()
+    if (!remotes) return
 
     const { tasks, selectedTaskId } = get()
-    const keptTasks = tasks.filter((t) => isProjectFolderId(t.id))
+    const remoteProjectIds = new Set(
+      remotes
+        .filter((remote) => isProjectFolderId(remote.id))
+        .map((remote) => remote.id),
+    )
+    const keptTasks = tasks.filter((task) => (
+      isProjectFolderId(task.id) && (!options?.replaceMissing || remoteProjectIds.has(task.id))
+    ))
+    const removedTaskIds = options?.replaceMissing
+      ? tasks
+          .filter((task) => isProjectFolderId(task.id) && !remoteProjectIds.has(task.id))
+          .map((task) => task.id)
+      : []
     const existingIds = new Set(keptTasks.map((t) => t.id))
     const newTasks: ProjectTask[] = []
 
@@ -544,9 +557,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       contractVersion: normalizeContractVersion(selectedTask?.contractVersion, get().contractVersion),
     })
 
-    for (const t of newTasks) {
-      get().refreshPlan(t.id)
-    }
+    const tasksToRefresh = options?.refreshAll ? merged : newTasks
+    await Promise.all(tasksToRefresh.map(async (task) => {
+      await get().refreshPlan(task.id)
+    }))
+    await Promise.all(removedTaskIds.map(async (projectId) => {
+      await clearAgentLogs(projectId)
+    }))
   },
 
   refreshPlan: async (projectId: string) => {
