@@ -5,6 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
+import { updateProjectsRoot } from '@/services/runtimeConfig'
 import { cn } from '@/lib/utils'
 import type {
   AgentProfile,
@@ -177,7 +178,7 @@ export function NewProjectModal() {
   } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
   const isStreaming = useAgentStore((s) => s.isStreaming)
-  const { workspacePath, language: lang } = useSettingsStore()
+  const { workspacePath, language: lang, deploymentMode } = useSettingsStore()
   const selectedTask = tasks.find((task) => task.id === selectedTaskId)
   const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
   const canSwitchRuntime = !isStreaming && !hasRunningExperiment
@@ -381,75 +382,91 @@ export function NewProjectModal() {
       automationPolicy,
     }
 
-    const projectId = await createProject(input)
-    let uploadedDataPaths: string[] = []
-    let uploadedReferencePaths: string[] = []
-
     try {
-      const dataUpload = await uploadProjectFiles(projectId, selectedFiles, 'data')
-      uploadedDataPaths = dataUpload.uploaded.map((file) => file.path)
+      let effectiveWorkspacePath = workspacePath.trim()
+      if (deploymentMode === 'remoteManual') {
+        const payload = await updateProjectsRoot(effectiveWorkspacePath)
+        const settingsStore = useSettingsStore.getState()
+        settingsStore.setWorkspacePath(payload.projects_root)
+        settingsStore.setRuntimeConfig(payload)
+        settingsStore.setRuntimeConfigLoaded(true)
+        settingsStore.setRuntimeConfigError(null)
+        effectiveWorkspacePath = payload.projects_root
+      }
 
-      const referencesUpload = await uploadProjectFiles(projectId, selectedReferenceFiles, 'references')
-      uploadedReferencePaths = dedupePaths([
-        ...referencesUpload.uploaded.map((file) => file.path),
-        ...referencesUpload.extracted.map((item) => item.path),
-      ])
-    } catch (err) {
-      await deleteTask(projectId, false)
-      setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
+      const projectId = await createProject(input)
+      let uploadedDataPaths: string[] = []
+      let uploadedReferencePaths: string[] = []
+
+      try {
+        const dataUpload = await uploadProjectFiles(projectId, selectedFiles, 'data')
+        uploadedDataPaths = dataUpload.uploaded.map((file) => file.path)
+
+        const referencesUpload = await uploadProjectFiles(projectId, selectedReferenceFiles, 'references')
+        uploadedReferencePaths = dedupePaths([
+          ...referencesUpload.uploaded.map((file) => file.path),
+          ...referencesUpload.extracted.map((item) => item.path),
+        ])
+      } catch (err) {
+        await deleteTask(projectId, false)
+        setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
+        setCreating(false)
+        return
+      }
+
+      const {
+        mode,
+        agentProfile: runtimeProfile,
+        contractVersion: runtimeContractVersion,
+      } = useProjectStore.getState()
+      const agentMsg = buildAgentMessage(
+        input,
+        effectiveWorkspacePath,
+        projectId,
+        uploadedDataPaths,
+        uploadedReferencePaths,
+        mode,
+      )
+      useAgentStore.getState().addLog(projectId, {
+        id: `user-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        content: agentMsg,
+        type: 'response',
+        metadata: { _user: true },
+      })
+      wsClient.send({
+        type: 'message',
+        content: agentMsg,
+        session_id: projectId,
+        user_id: 'ui_user',
+        mode,
+        agent_profile: runtimeProfile,
+        contract_version: runtimeContractVersion,
+        automation_policy: input.automationPolicy,
+      })
+
+      // Reset form
+      setDescription('')
+      setSelectedFiles([])
+      setSelectedReferenceFiles([])
+      setServerDataPath('')
+      setPathCheck({ status: 'idle', message: '' })
+      setTitle('')
+      setReferences('')
+      setComputeBudget('')
+      setGoalLogic('AND')
+      setGoals([{ ...DEFAULT_GOAL }])
+      setGoalValueInputs([''])
+      setMaxExperiments('')
+      setMaxTokens('')
+      setShowAdvanced(false)
       setCreating(false)
-      return
+      setUploadError('')
+      closeNewProject()
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : t('unknownError', lang))
+      setCreating(false)
     }
-
-    const {
-      mode,
-      agentProfile: runtimeProfile,
-      contractVersion: runtimeContractVersion,
-    } = useProjectStore.getState()
-    const agentMsg = buildAgentMessage(
-      input,
-      workspacePath,
-      projectId,
-      uploadedDataPaths,
-      uploadedReferencePaths,
-      mode,
-    )
-    useAgentStore.getState().addLog(projectId, {
-      id: `user-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      content: agentMsg,
-      type: 'response',
-      metadata: { _user: true },
-    })
-    wsClient.send({
-      type: 'message',
-      content: agentMsg,
-      session_id: projectId,
-      user_id: 'ui_user',
-      mode,
-      agent_profile: runtimeProfile,
-      contract_version: runtimeContractVersion,
-      automation_policy: input.automationPolicy,
-    })
-
-    // Reset form
-    setDescription('')
-    setSelectedFiles([])
-    setSelectedReferenceFiles([])
-    setServerDataPath('')
-    setPathCheck({ status: 'idle', message: '' })
-    setTitle('')
-    setReferences('')
-    setComputeBudget('')
-    setGoalLogic('AND')
-    setGoals([{ ...DEFAULT_GOAL }])
-    setGoalValueInputs([''])
-    setMaxExperiments('')
-    setMaxTokens('')
-    setShowAdvanced(false)
-    setCreating(false)
-    setUploadError('')
-    closeNewProject()
   }
 
   return (

@@ -11,12 +11,14 @@ import { probeEngineCompatibility } from '@/services/engine'
 import {
   fetchRuntimeConfig,
   saveRuntimeConfig,
+  updateProjectsRoot,
   type ReasoningEffort,
   type RuntimeConfigPayload,
   type RuntimeProviderName,
 } from '@/services/runtimeConfig'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { useProjectStore } from '@/stores/projectStore'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -234,6 +236,7 @@ export function SettingsModal() {
   const handleSave = async () => {
     const nextApiUrl = draft.apiUrl.trim()
     const nextWsUrl = draft.wsUrl.trim()
+    const nextWorkspacePath = draft.workspacePath.trim()
     setBusy(true)
     setFeedback(null)
     setFeedbackError(false)
@@ -243,7 +246,6 @@ export function SettingsModal() {
       store.setLanguage(draft.language)
       store.setShowProgressMessages(draft.showProgressMessages)
       store.setShowToolCallHistory(draft.showToolCallHistory)
-      store.setDeploymentMode(draft.deploymentMode)
 
       if (draft.deploymentMode === 'localBundle') {
         const trimmedModel = draft.model.trim()
@@ -261,7 +263,6 @@ export function SettingsModal() {
           throw new Error(`${providerLabel(draft.provider)} requires an API key. Paste it before saving local bundle settings.`)
         }
 
-        store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
         const localState = await bootstrapLocalEngine()
         if (!localState) {
           throw new Error('Desktop bundle controls are unavailable.')
@@ -276,10 +277,12 @@ export function SettingsModal() {
           throw new Error(localState.message)
         }
 
+        store.setDeploymentMode('localBundle')
+        store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
         const payload = await saveRuntimeConfig({
-          projects_root: draft.workspacePath.trim(),
+          projects_root: nextWorkspacePath,
           runtime: {
-            workspace: draft.workspacePath.trim(),
+            workspace: nextWorkspacePath,
             provider: draft.provider,
             model: trimmedModel,
             reasoning_effort: draft.reasoningEffort,
@@ -307,13 +310,28 @@ export function SettingsModal() {
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
         })
+        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
       } else {
         if (!nextApiUrl || !nextWsUrl) {
           throw new Error('Remote mode requires both API URL and WebSocket URL.')
         }
-        store.setWorkspacePath(draft.workspacePath)
+        const payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
         store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
-        store.setEngineBootstrap({ status: 'unknown', message: null, version: null })
+        store.setDeploymentMode('remoteManual')
+        store.setWorkspacePath(payload.projects_root)
+        store.setRuntimeConfig(payload)
+        store.setRuntimeConfigLoaded(true)
+        store.setRuntimeConfigError(null)
+        setRuntimeProviders(payload.providers)
+        setDraft((current) => ({ ...current, workspacePath: payload.projects_root }))
+
+        const probe = await probeEngineCompatibility(nextApiUrl)
+        store.setEngineBootstrap({
+          status: probe.status,
+          message: probe.status === 'compatible' ? null : probe.message,
+          version: probe.version,
+        })
+        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
       }
 
       closeSettings()

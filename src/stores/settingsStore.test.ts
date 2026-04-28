@@ -20,6 +20,16 @@ describe('settingsStore', () => {
     expect(state.wsUrl).toBe('ws://127.0.0.1:18790/ws')
   })
 
+  it('does not reset custom remote endpoints when remote mode is reapplied', () => {
+    useSettingsStore.getState().setConnectionEndpoints('https://gateway.example/api', 'wss://gateway.example/ws')
+    useSettingsStore.getState().setDeploymentMode('remoteManual')
+
+    const state = useSettingsStore.getState()
+    expect(state.deploymentMode).toBe('remoteManual')
+    expect(state.apiUrl).toBe('https://gateway.example/api')
+    expect(state.wsUrl).toBe('wss://gateway.example/ws')
+  })
+
   it('stores local engine bootstrap metadata', () => {
     useSettingsStore.getState().setLocalEngineBootstrap({
       phase: 'ready',

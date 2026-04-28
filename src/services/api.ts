@@ -65,14 +65,14 @@ export interface RemoteProject {
   has_meta?: boolean
 }
 
-export async function fetchProjects(): Promise<RemoteProject[]> {
+export async function fetchProjects(): Promise<RemoteProject[] | null> {
   try {
     const resp = await fetch(`${getApiUrl()}/projects`)
-    if (!resp.ok) return []
+    if (!resp.ok) return null
     const data = await resp.json()
     return (data?.projects as RemoteProject[]) ?? []
   } catch {
-    return []
+    return null
   }
 }
 

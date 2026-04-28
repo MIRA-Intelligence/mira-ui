@@ -218,10 +218,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTheme: (t) => { set({ theme: t }); persist(get()); applyTheme(t) },
   setLanguage: (l) => { set({ language: l }); persist(get()) },
   setDeploymentMode: (mode) => {
-    set({
-      deploymentMode: mode,
-      apiUrl: mode === 'localBundle' ? localApiUrl() : defaultRemoteApiUrl(),
-      wsUrl: mode === 'localBundle' ? localWsUrl() : defaultRemoteWsUrl(),
+    set((state) => {
+      if (state.deploymentMode === mode) {
+        return state
+      }
+      if (mode === 'localBundle') {
+        return {
+          deploymentMode: mode,
+          apiUrl: localApiUrl(),
+          wsUrl: localWsUrl(),
+        }
+      }
+      return {
+        deploymentMode: mode,
+        apiUrl: state.apiUrl,
+        wsUrl: state.wsUrl,
+      }
     })
     persist(get())
   },
