@@ -4,6 +4,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getProjectArtifactUrl } from '@/services/api'
 import { t } from '@/i18n'
+import { ArtifactPreview } from '@/components/artifacts'
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   completed: 'bg-[var(--color-success)]/15 text-[var(--color-success)]',
@@ -82,10 +83,6 @@ function formatMetricValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function isImageArtifact(path: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path)
-}
-
 function MetricsTable({ metrics }: { metrics: Record<string, unknown> }) {
   const entries = Object.entries(metrics)
   if (entries.length === 0) return null
@@ -157,12 +154,10 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
   const selectedTask = useProjectStore((s) => s.tasks.find((task) => task.id === s.selectedTaskId))
   const taskPlanContract = useProjectStore((s) => (s.selectedTaskId ? s.contractsByTask[s.selectedTaskId] : undefined))
   const lang = useSettingsStore((s) => s.language)
-  const [expandedImageArtifacts, setExpandedImageArtifacts] = useState<Record<string, boolean>>({})
   const [useSnapshotView, setUseSnapshotView] = useState(false)
 
   useEffect(() => {
     setUseSnapshotView(false)
-    setExpandedImageArtifacts({})
   }, [experiment.id])
 
   const liveSignature = JSON.stringify({
@@ -441,43 +436,15 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
             )}
             {viewedExperiment.results.artifacts && viewedExperiment.results.artifacts.length > 0 && (
               <div className="mt-2 space-y-2">
-                {viewedExperiment.results.artifacts.map((a) => {
-                  const canOpen = !!selectedTaskId
-                  const isImage = isImageArtifact(a)
-                  const expanded = !!expandedImageArtifacts[a]
-                  const artifactUrl = selectedTaskId ? getProjectArtifactUrl(selectedTaskId, a) : ''
-                  return (
-                    <div key={a} className="space-y-1">
-                      <button
-                        type="button"
-                        disabled={!canOpen}
-                        onClick={() => {
-                          if (!selectedTaskId) return
-                          if (isImage) {
-                            setExpandedImageArtifacts((prev) => ({ ...prev, [a]: !prev[a] }))
-                            return
-                          }
-                          window.open(artifactUrl, '_blank', 'noopener,noreferrer')
-                        }}
-                        className="text-[10px] font-mono bg-[var(--color-bg-tertiary)] px-1.5 py-0.5 rounded hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-50"
-                        title={!canOpen ? t('selectProjectFirst', lang) : isImage ? t('progressMetricHint', lang) : t('openArtifact', lang)}
-                      >
-                        {isImage ? (expanded ? '▼ ' : '▷ ') : '↗ '}
-                        {a}
-                      </button>
-                      {selectedTaskId && isImage && expanded && (
-                        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2">
-                          <img
-                            src={getProjectArtifactUrl(selectedTaskId, a)}
-                            alt={a}
-                            loading="lazy"
-                            className="max-h-[360px] w-auto rounded-md border border-[var(--color-border)]"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
+                {viewedExperiment.results.artifacts.map((a) => (
+                  <ArtifactPreview
+                    key={a}
+                    path={a}
+                    url={selectedTaskId ? getProjectArtifactUrl(selectedTaskId, a) : ''}
+                    enabled={!!selectedTaskId}
+                    disabledReason={t('selectProjectFirst', lang)}
+                  />
+                ))}
               </div>
             )}
           </Section>
