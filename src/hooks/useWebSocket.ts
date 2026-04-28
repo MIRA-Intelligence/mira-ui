@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
 import { bootstrapLocalEngine, hasDesktopEngineManager } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
+import { updateProjectsRoot } from '@/services/runtimeConfig'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -9,14 +10,10 @@ import { useProjectStore } from '@/stores/projectStore'
 async function syncOnConnect() {
   const { workspacePath, apiUrl } = useSettingsStore.getState()
   try {
-    await fetch(`${apiUrl}/config`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projects_root: workspacePath }),
-    })
+    await updateProjectsRoot(workspacePath, apiUrl)
   } catch { /* gateway may be unreachable */ }
 
-  await useProjectStore.getState().loadProjects()
+  await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
 }
 
 export function useWebSocket() {

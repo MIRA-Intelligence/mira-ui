@@ -119,6 +119,92 @@ describe('projectStore runtime preferences', () => {
     expect(task?.status).toBe('completed')
   })
 
+  it('replaces stale project list and refreshes plans after source changes', async () => {
+    useProjectStore.setState({
+      tasks: [
+        {
+          id: 'PRJ-0001',
+          label: 'PRJ-0001',
+          status: 'in_progress',
+          title: 'Old Demo',
+          coreQuestion: 'old demo',
+          runMode: 'auto',
+          agentProfile: 'default',
+          contractVersion: 1,
+          currentExperiment: 'Exp001',
+          experiments: [{ id: 'Exp001', title: 'stale exp', status: 'pending' }],
+          knowledge: [],
+          research: { references: [], notes: [] },
+          result: {},
+          startedAt: new Date().toISOString(),
+        },
+        {
+          id: 'PRJ-0002',
+          label: 'PRJ-0002',
+          status: 'in_progress',
+          title: 'Should disappear',
+          coreQuestion: 'stale project',
+          runMode: 'auto',
+          agentProfile: 'default',
+          contractVersion: 1,
+          experiments: [],
+          knowledge: [],
+          research: { references: [], notes: [] },
+          result: {},
+          startedAt: new Date().toISOString(),
+        },
+      ],
+      selectedTaskId: 'PRJ-0002',
+      selectedExpId: null,
+    })
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/projects')) {
+        return new Response(
+          JSON.stringify({
+            projects: [{
+              id: 'PRJ-0001',
+              display_name: 'PRJ-0001',
+              status: 'completed',
+              title: 'Fresh Demo',
+              has_plan: true,
+              run_mode: 'auto',
+              agent_profile: 'default',
+              contract_version: 1,
+            }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Fresh Demo',
+            status: 'completed',
+            experiments: [{ id: 'Exp009', title: 'fresh exp', status: 'completed' }],
+            result: { summary: 'fresh result' },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+
+    const state = useProjectStore.getState()
+    expect(state.tasks).toHaveLength(1)
+    expect(state.tasks[0]?.id).toBe('PRJ-0001')
+    expect(state.tasks[0]?.status).toBe('completed')
+    expect(state.tasks[0]?.title).toBe('Fresh Demo')
+    expect(state.tasks[0]?.result.summary).toBe('fresh result')
+    expect(state.selectedTaskId).toBe('PRJ-0001')
+  })
+
   it('marks task completed when refreshed plan has phase3 result output', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
