@@ -2,10 +2,19 @@ import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 
+export interface SessionUsage {
+  tokensUsed: number
+  maxTokens: number | null
+  updatedAt: number
+}
+
 interface AgentState {
   logsByProject: Record<string, LogEntry[]>
   isStreaming: boolean
   connected: boolean
+  // Cumulative token usage broadcast by the engine via message metadata.
+  // Indexed by session id (which the renderer treats as the project id).
+  usageBySession: Record<string, SessionUsage>
 
   addLog: (projectId: string, entry: LogEntry) => void
   hydrateLogs: (projectId: string, entries: LogEntry[]) => void
@@ -13,6 +22,23 @@ interface AgentState {
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
   getProjectLogs: (projectId: string | null) => LogEntry[]
+  getSessionUsage: (sessionId: string | null) => SessionUsage | null
+  resetSessionUsage: (sessionId: string) => void
+}
+
+function readUsageFromMetadata(meta: Record<string, unknown> | undefined):
+  | { tokensUsed: number; maxTokens: number | null }
+  | null {
+  if (!meta) return null
+  const raw = meta['tokens_used_session']
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) return null
+  const tokensUsed = Math.floor(raw)
+  const maxRaw = meta['max_tokens']
+  const maxTokens =
+    typeof maxRaw === 'number' && Number.isFinite(maxRaw) && maxRaw > 0
+      ? Math.floor(maxRaw)
+      : null
+  return { tokensUsed, maxTokens }
 }
 
 let logIdCounter = 0
@@ -63,6 +89,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   logsByProject: {},
   isStreaming: false,
   connected: false,
+  usageBySession: {},
 
   addLog: (projectId, entry) =>
     set((state) => ({
@@ -115,13 +142,47 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       metadata: msg.metadata,
     }
 
-    set((state) => ({
-      logsByProject: {
-        ...state.logsByProject,
-        [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
-      },
-      isStreaming: msg.type === 'progress',
-    }))
+    const usageUpdate = readUsageFromMetadata(msg.metadata)
+
+    set((state) => {
+      const next: Partial<AgentState> = {
+        logsByProject: {
+          ...state.logsByProject,
+          [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
+        },
+        isStreaming: msg.type === 'progress',
+      }
+      if (usageUpdate) {
+        const prev = state.usageBySession[sessionId]
+        // Token totals only ever go up within a session; ignore stale or
+        // out-of-order broadcasts that would make the chip flicker backwards.
+        if (!prev || usageUpdate.tokensUsed >= prev.tokensUsed) {
+          next.usageBySession = {
+            ...state.usageBySession,
+            [sessionId]: {
+              tokensUsed: usageUpdate.tokensUsed,
+              maxTokens: usageUpdate.maxTokens,
+              updatedAt: Date.now(),
+            },
+          }
+        } else if (
+          prev.maxTokens !== usageUpdate.maxTokens &&
+          usageUpdate.maxTokens !== null
+        ) {
+          // Budget changed mid-session (e.g. user edited the policy);
+          // reflect the new ceiling without rewinding the cumulative count.
+          next.usageBySession = {
+            ...state.usageBySession,
+            [sessionId]: {
+              ...prev,
+              maxTokens: usageUpdate.maxTokens,
+              updatedAt: Date.now(),
+            },
+          }
+        }
+      }
+      return next as AgentState
+    })
 
     if (msg.type === 'progress') {
       clearResponseRefreshTimers(sessionId)
@@ -142,11 +203,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       clearResponseRefreshTimers(projectId)
       const updated = { ...state.logsByProject }
       delete updated[projectId]
-      return { logsByProject: updated, isStreaming: false }
+      const usage = { ...state.usageBySession }
+      delete usage[projectId]
+      return { logsByProject: updated, isStreaming: false, usageBySession: usage }
     }),
 
   getProjectLogs: (projectId) => {
     if (!projectId) return []
     return get().logsByProject[projectId] ?? []
   },
+
+  getSessionUsage: (sessionId) => {
+    if (!sessionId) return null
+    return get().usageBySession[sessionId] ?? null
+  },
+
+  resetSessionUsage: (sessionId) =>
+    set((state) => {
+      if (!(sessionId in state.usageBySession)) return state
+      const next = { ...state.usageBySession }
+      delete next[sessionId]
+      return { usageBySession: next }
+    }),
 }))

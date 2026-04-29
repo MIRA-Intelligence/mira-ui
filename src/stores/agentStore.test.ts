@@ -87,3 +87,128 @@ describe('agentStore hydrateLogs', () => {
     ])
   })
 })
+
+describe('agentStore session usage tracking', () => {
+  beforeEach(() => {
+    useAgentStore.setState(initialAgentState, true)
+  })
+
+  it('parses tokens_used_session and max_tokens from progress metadata', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-A',
+      content: '...',
+      metadata: { tokens_used_session: 1500, max_tokens: 50_000 },
+    })
+    const usage = useAgentStore.getState().getSessionUsage('PRJ-A')
+    expect(usage).toMatchObject({ tokensUsed: 1500, maxTokens: 50_000 })
+    expect(usage?.updatedAt).toBeGreaterThan(0)
+  })
+
+  it('overrides earlier usage when a higher cumulative number arrives', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-A',
+      content: 'first',
+      metadata: { tokens_used_session: 1500, max_tokens: 50_000 },
+    })
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-A',
+      content: 'final',
+      metadata: { tokens_used_session: 2200, max_tokens: 50_000 },
+    })
+    expect(useAgentStore.getState().getSessionUsage('PRJ-A')).toMatchObject({
+      tokensUsed: 2200,
+      maxTokens: 50_000,
+    })
+  })
+
+  it('ignores stale broadcasts that would rewind the cumulative count', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-B',
+      content: 'fresh',
+      metadata: { tokens_used_session: 5000, max_tokens: 10_000 },
+    })
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-B',
+      content: 'stale',
+      metadata: { tokens_used_session: 1000, max_tokens: 10_000 },
+    })
+    expect(useAgentStore.getState().getSessionUsage('PRJ-B')?.tokensUsed).toBe(5000)
+  })
+
+  it('updates max_tokens without rewinding tokensUsed when the budget changes mid-session', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-C',
+      content: 'first',
+      metadata: { tokens_used_session: 5000, max_tokens: 10_000 },
+    })
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-C',
+      content: 'budget bumped, stale token count',
+      metadata: { tokens_used_session: 4000, max_tokens: 100_000 },
+    })
+    expect(useAgentStore.getState().getSessionUsage('PRJ-C')).toMatchObject({
+      tokensUsed: 5000,
+      maxTokens: 100_000,
+    })
+  })
+
+  it('omits maxTokens when the engine does not advertise a budget', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-D',
+      content: 'no policy',
+      metadata: { tokens_used_session: 800 },
+    })
+    expect(useAgentStore.getState().getSessionUsage('PRJ-D')).toMatchObject({
+      tokensUsed: 800,
+      maxTokens: null,
+    })
+  })
+
+  it('ignores malformed metadata so the chip never displays garbage', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-E',
+      content: 'bad',
+      metadata: { tokens_used_session: 'lots' as unknown as number },
+    })
+    expect(useAgentStore.getState().getSessionUsage('PRJ-E')).toBeNull()
+  })
+
+  it('drops usage when the project is cleared', () => {
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-F',
+      content: 'final',
+      metadata: { tokens_used_session: 7000 },
+    })
+    useAgentStore.getState().clearLogs('PRJ-F')
+    expect(useAgentStore.getState().getSessionUsage('PRJ-F')).toBeNull()
+  })
+
+  it('resetSessionUsage drops a single session without touching others', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-G',
+      content: '',
+      metadata: { tokens_used_session: 100 },
+    })
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-H',
+      content: '',
+      metadata: { tokens_used_session: 200 },
+    })
+    useAgentStore.getState().resetSessionUsage('PRJ-G')
+    expect(useAgentStore.getState().getSessionUsage('PRJ-G')).toBeNull()
+    expect(useAgentStore.getState().getSessionUsage('PRJ-H')?.tokensUsed).toBe(200)
+  })
+})

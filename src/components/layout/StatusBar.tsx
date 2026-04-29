@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore, type SystemMessageSeverity } from '@/stores/uiStore'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -16,6 +17,10 @@ export function StatusBar() {
   const localEnginePhase = useSettingsStore((s) => s.localEnginePhase)
   const runtimeConfig = useSettingsStore((s) => s.runtimeConfig)
   const connected = useAgentStore((s) => s.connected)
+  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const usage = useAgentStore((s) =>
+    selectedTaskId ? s.usageBySession[selectedTaskId] ?? null : null,
+  )
 
   const showEngineWarning =
     deploymentMode === 'localBundle' &&
@@ -58,6 +63,13 @@ export function StatusBar() {
             >
               <span className="truncate">{t('noModelConfigured', lang)}</span>
             </Chip>
+          )}
+          {usage && (
+            <TokenChip
+              tokensUsed={usage.tokensUsed}
+              maxTokens={usage.maxTokens}
+              lang={lang}
+            />
           )}
           <WsChip connected={connected} label={t(connected ? 'wsConnectedShort' : 'wsDisconnectedShort', lang)} />
         </div>
@@ -174,6 +186,62 @@ function ModelChip({ model, provider }: { model: string; provider: string | null
       <span className="truncate">{model}</span>
     </Chip>
   )
+}
+
+function TokenChip({
+  tokensUsed,
+  maxTokens,
+  lang,
+}: {
+  tokensUsed: number
+  maxTokens: number | null
+  lang: ReturnType<typeof useSettingsStore.getState>['language']
+}) {
+  const usedLabel = formatTokenCount(tokensUsed)
+  const maxLabel = maxTokens != null ? formatTokenCount(maxTokens) : null
+  const ratio = maxTokens && maxTokens > 0 ? tokensUsed / maxTokens : 0
+  const tone = tokenChipTone(ratio)
+  const visibleLabel = maxLabel ? `${usedLabel} / ${maxLabel}` : usedLabel
+  const tooltip = maxLabel
+    ? t('tokenChipTooltipBudget', lang, {
+        used: tokensUsed.toLocaleString(),
+        max: maxTokens!.toLocaleString(),
+        pct: Math.min(999, Math.round(ratio * 100)).toString(),
+      })
+    : t('tokenChipTooltip', lang, { used: tokensUsed.toLocaleString() })
+
+  return (
+    <Chip title={tooltip} className={tone.text}>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+        className={cn('shrink-0', tone.icon)}
+      >
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      </svg>
+      <span className="truncate tabular-nums">{visibleLabel}</span>
+    </Chip>
+  )
+}
+
+function tokenChipTone(ratio: number): { text: string; icon: string } {
+  if (ratio >= 1) return { text: 'text-red-300', icon: 'text-red-400' }
+  if (ratio >= 0.8) return { text: 'text-amber-300', icon: 'text-amber-400' }
+  return { text: '', icon: 'opacity-70' }
+}
+
+function formatTokenCount(value: number): string {
+  if (value < 1_000) return value.toString()
+  if (value < 10_000) return `${(value / 1_000).toFixed(1)}K`
+  if (value < 1_000_000) return `${Math.round(value / 1_000)}K`
+  return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 1 : 0)}M`
 }
 
 function WsChip({ connected, label }: { connected: boolean; label: string }) {
