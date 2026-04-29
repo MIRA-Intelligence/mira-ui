@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PipelineProgress } from './PipelineProgress'
 import { useAgentStore } from '@/stores/agentStore'
@@ -41,10 +41,15 @@ function makeTask(running: boolean) {
 
 describe('PipelineProgress agent profile switch', () => {
   beforeEach(() => {
+    vi.restoreAllMocks()
     useAgentStore.setState(initialAgentState, true)
     useProjectStore.setState(initialProjectState, true)
     useSettingsStore.setState(initialSettingsState, true)
     useUiStore.setState(initialUiState, true)
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
 
     useSettingsStore.setState({ language: 'en' })
   })
