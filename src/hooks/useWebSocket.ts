@@ -6,6 +6,8 @@ import { updateProjectsRoot } from '@/services/runtimeConfig'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
+import { t } from '@/i18n'
 
 async function syncOnConnect() {
   const { workspacePath, apiUrl } = useSettingsStore.getState()
@@ -131,8 +133,16 @@ export function useWebSocket() {
 
     const unsubMsg = wsClient.onMessage(handleWsMessage)
     const unsubStatus = wsClient.onStatus((connected) => {
-      if (useAgentStore.getState().connected !== connected) {
+      const prevConnected = useAgentStore.getState().connected
+      if (prevConnected !== connected) {
         setConnected(connected)
+        const lang = useSettingsStore.getState().language
+        const pushSystemMessage = useUiStore.getState().pushSystemMessage
+        if (connected) {
+          pushSystemMessage(t('sysMsgEngineConnected', lang), { severity: 'success', ttlMs: 3000 })
+        } else if (prevConnected) {
+          pushSystemMessage(t('sysMsgEngineDisconnected', lang), { severity: 'warning', ttlMs: 5000 })
+        }
       }
       if (connected) {
         void syncOnConnect()
