@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import type { Language } from '@/stores/settingsStore'
 import { wsClient } from '@/services/websocket'
+import type { Stats } from '@/types'
 import { QueueItem } from './QueueItem'
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
@@ -21,6 +23,7 @@ export function ProjectQueue() {
     deleteTask,
     duplicateTask,
     refreshPlan,
+    stats,
   } = useProjectStore()
   const lang = useSettingsStore((s) => s.language)
   const modePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -96,6 +99,8 @@ export function ProjectQueue() {
         </button>
       </div>
 
+      <QueueStatsBar stats={stats} taskCount={tasks.length} lang={lang} />
+
       {/* Project list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {tasks.map((task) => (
@@ -144,5 +149,47 @@ export function ProjectQueue() {
         </div>
       </div>
     </aside>
+  )
+}
+
+function QueueStatsBar({
+  stats,
+  taskCount,
+  lang,
+}: {
+  stats: Stats
+  taskCount: number
+  lang: Language
+}) {
+  if (taskCount === 0 && stats.experiments === 0) return null
+
+  const totalKey = taskCount === 1 ? 'queueSummaryTotal' : 'queueSummaryTotalPlural'
+
+  return (
+    <div className="px-3 py-1.5 border-b border-[var(--color-border)] bg-[var(--color-bg-tertiary)]/30 flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-muted)] tabular-nums">
+      <span>{t(totalKey, lang, { count: taskCount })}</span>
+      {stats.experiments > 0 && (
+        <>
+          <span aria-hidden className="text-[var(--color-text-muted)]/50">·</span>
+          <span title={t('experiments', lang)}>
+            <span className="text-[var(--color-text-secondary)] font-medium">{stats.completed}</span>
+            <span className="opacity-60">/{stats.experiments}</span>
+            <span className="ml-1 opacity-70">{t('experiment', lang)}</span>
+          </span>
+        </>
+      )}
+      {stats.running > 0 && (
+        <span className="flex items-center gap-1 text-[var(--color-accent)]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" aria-hidden />
+          {t('queueSummaryRunning', lang, { count: stats.running })}
+        </span>
+      )}
+      {stats.failed > 0 && (
+        <span className="flex items-center gap-1 text-red-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-400" aria-hidden />
+          {t('queueSummaryFailed', lang, { count: stats.failed })}
+        </span>
+      )}
+    </div>
   )
 }
