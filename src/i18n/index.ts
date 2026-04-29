@@ -256,6 +256,8 @@ const dict = {
     queueSummaryRunning: '{count} running',
     queueSummaryFailed: '{count} failed',
     queueSummaryCompleted: '{count} done',
+    tokenChipTooltip: '{used} tokens used in this project',
+    tokenChipTooltipBudget: '{used} / {max} tokens used ({pct}% of project budget)',
   },
   zh: {
     settings: '设置',
@@ -512,6 +514,8 @@ const dict = {
     queueSummaryRunning: '{count} 运行中',
     queueSummaryFailed: '{count} 失败',
     queueSummaryCompleted: '{count} 已完成',
+    tokenChipTooltip: '本项目已消耗 {used} tokens',
+    tokenChipTooltipBudget: '已消耗 {used} / {max} tokens（占预算 {pct}%）',
   },
 } as const
 

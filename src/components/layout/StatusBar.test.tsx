@@ -8,6 +8,18 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useUiStore } from '@/stores/uiStore'
 
+function pushUsage(sessionId: string, tokensUsed: number, maxTokens: number | null) {
+  useAgentStore.getState().handleWsMessage({
+    type: 'progress',
+    session_id: sessionId,
+    content: '...',
+    metadata:
+      maxTokens != null
+        ? { tokens_used_session: tokensUsed, max_tokens: maxTokens }
+        : { tokens_used_session: tokensUsed },
+  })
+}
+
 const initialProjectState = useProjectStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 const initialAgentState = useAgentStore.getState()
@@ -100,5 +112,36 @@ describe('StatusBar', () => {
     })
     expect(screen.getByText('Loaded 5 projects')).toBeInTheDocument()
     expect(screen.getByRole('status')).toBeInTheDocument()
+  })
+
+  it('hides the token chip when no project is selected or no usage has arrived', () => {
+    const { container } = render(<StatusBar />)
+    expect(
+      container.querySelector('polygon[points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"]'),
+    ).toBeNull()
+  })
+
+  it('shows tokensUsed/budget for the selected project', () => {
+    useProjectStore.setState({ selectedTaskId: 'PRJ-X' })
+    act(() => pushUsage('PRJ-X', 12_500, 100_000))
+    const { container } = render(<StatusBar />)
+    expect(screen.getByText('13K / 100K')).toBeInTheDocument()
+    expect(
+      container.querySelector('polygon[points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"]'),
+    ).not.toBeNull()
+  })
+
+  it('shows tokensUsed without a budget when no automation policy is set', () => {
+    useProjectStore.setState({ selectedTaskId: 'PRJ-Y' })
+    act(() => pushUsage('PRJ-Y', 850, null))
+    render(<StatusBar />)
+    expect(screen.getByText('850')).toBeInTheDocument()
+  })
+
+  it('formats large token counts with K and M suffixes', () => {
+    useProjectStore.setState({ selectedTaskId: 'PRJ-Z' })
+    act(() => pushUsage('PRJ-Z', 2_500_000, null))
+    render(<StatusBar />)
+    expect(screen.getByText('2.5M')).toBeInTheDocument()
   })
 })
