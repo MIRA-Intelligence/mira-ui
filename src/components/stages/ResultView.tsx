@@ -5,61 +5,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { getProjectArtifactUrl } from '@/services/api'
 import { t } from '@/i18n'
-
-type ExportFormat = 'experiment_report' | 'paper_article' | 'presentation' | 'metadata'
-
-const EXPORT_CONFIG: Record<ExportFormat, {
-  title: string
-  skillPath: string
-  outputPath: string
-  outputType: string
-  requirements: string
-}> = {
-  experiment_report: {
-    title: 'Experiment Report',
-    skillPath: 'mira_engine/skills/export/experiment-report/SKILL.md',
-    outputPath: 'result/exports/experiment_report.md',
-    outputType: 'report',
-    requirements: 'Produce an objective markdown report summarizing project goal, setup, experiments, metrics, findings, and limitations.',
-  },
-  paper_article: {
-    title: 'Paper Article',
-    skillPath: 'mira_engine/skills/export/paper-article/SKILL.md',
-    outputPath: 'result/exports/paper_article.md',
-    outputType: 'paper',
-    requirements: 'Write a journal-style article with Introduction, Method, Results, and Discussion sections using project evidence.',
-  },
-  presentation: {
-    title: 'Presentation',
-    skillPath: 'mira_engine/skills/export/presentation-beamer/SKILL.md',
-    outputPath: 'result/exports/presentation.pdf',
-    outputType: 'presentation',
-    requirements: 'Generate a LaTeX Beamer deck and compile it to PDF. The required deliverable is result/exports/presentation.pdf (non-empty), with .tex source retained when possible.',
-  },
-  metadata: {
-    title: 'Meta data',
-    skillPath: 'mira_engine/skills/export/project-metadata/SKILL.md',
-    outputPath: 'result/exports/project_metadata.zip',
-    outputType: 'metadata',
-    requirements: 'Package all files under the current project directory into a single zip archive for delivery.',
-  },
-}
-
-function buildExportMessage(task: ProjectTask, format: ExportFormat): string {
-  const cfg = EXPORT_CONFIG[format]
-  return [
-    `Manual export request for ${task.id}.`,
-    '',
-    `Target format: ${cfg.title}`,
-    `Required skill: ${cfg.skillPath}`,
-    `Output path: ${cfg.outputPath}`,
-    `Output type: ${cfg.outputType}`,
-    '',
-    `Requirements: ${cfg.requirements}`,
-    'Use task_plan.json and existing experiment artifacts as the source of truth.',
-    'After finishing export, update task_plan.json.result with output_path, output_type, summary, and sections.',
-  ].join('\n')
-}
+import { buildExportMessage, type ExportFormat } from '@/lib/exportRequests'
 
 export function ResultView({ data, task }: { data: ResultData; task: ProjectTask }) {
   const lang = useSettingsStore((s) => s.language)

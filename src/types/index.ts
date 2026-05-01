@@ -261,6 +261,19 @@ export interface AutomationPolicy {
   maxTokens?: number
 }
 
+export type LiteratureSource =
+  | 'pubmed'
+  | 'google_scholar'
+  | 'arxiv'
+  | 'semantic_scholar'
+  | 'crossref'
+  | 'europe_pmc'
+
+export interface LiteratureReviewOptions {
+  enabled: boolean
+  sources: LiteratureSource[]
+}
+
 export interface NewProjectInput {
   description: string
   title?: string
@@ -268,6 +281,7 @@ export interface NewProjectInput {
   dataPath?: string
   references?: string
   computeBudget?: string
+  literatureReview?: LiteratureReviewOptions
   automationPolicy?: AutomationPolicy
   agentProfile?: AgentProfile
   contractVersion?: ContractVersion
