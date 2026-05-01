@@ -45,6 +45,10 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  // Opt-in: when true, the auto-update check considers prereleases (rcN /
+  // betaN) alongside stable releases. Defaults to false so casual users only
+  // see ".0" upgrades.
+  receivePrereleases: boolean
   settingsOpen: boolean
   engineStatus: EngineStatus
   engineMessage: string | null
@@ -64,6 +68,7 @@ interface SettingsState {
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
+  setReceivePrereleases: (v: boolean) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
     message: string | null
@@ -154,6 +159,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.showToolCallHistory === 'boolean') {
       sanitized.showToolCallHistory = parsed.showToolCallHistory
     }
+    if (typeof parsed.receivePrereleases === 'boolean') {
+      sanitized.receivePrereleases = parsed.receivePrereleases
+    }
 
     return sanitized
   } catch { /* ignore */ }
@@ -173,6 +181,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    receivePrereleases,
   } = state
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     workspacePath,
@@ -183,6 +192,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    receivePrereleases,
   }))
 }
 
@@ -204,6 +214,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: initialWsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? true,
+  receivePrereleases: saved.receivePrereleases ?? false,
   settingsOpen: false,
   engineStatus: 'unknown',
   engineMessage: null,
@@ -249,6 +260,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
+  setReceivePrereleases: (v) => { set({ receivePrereleases: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
     const nextVersion = version ?? null
     set((state) => {

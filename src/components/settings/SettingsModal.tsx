@@ -19,6 +19,7 @@ import {
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -558,6 +559,12 @@ export function SettingsModal() {
                 </p>
               </Section>
 
+              <AppUpdatesSection
+                lang={curLang}
+                receivePrereleases={store.receivePrereleases}
+                setReceivePrereleases={store.setReceivePrereleases}
+              />
+
               {!localMode && (
                 <Section title={t('connection', curLang)}>
                   <Label text={t('apiUrl', curLang)} />
@@ -859,3 +866,106 @@ const inputClass =
   'w-full h-10 bg-[var(--color-input-bg,var(--color-bg-primary))] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] transition-colors'
 
 const selectClass = inputClass
+
+function AppUpdatesSection(
+  { lang, receivePrereleases, setReceivePrereleases }: {
+    lang: Language
+    receivePrereleases: boolean
+    setReceivePrereleases: (v: boolean) => void
+  },
+) {
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [status, setStatus] = useState<
+    | { kind: 'idle' }
+    | { kind: 'up-to-date' }
+    | { kind: 'available'; version: string; url: string }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' })
+
+  const isDesktop = typeof window !== 'undefined' && !!window.electronAPI
+  const setAvailableUpdate = useUiStore((s) => s.setAvailableUpdate)
+
+  useEffect(() => {
+    let cancelled = false
+    const api = typeof window !== 'undefined' ? window.electronAPI : undefined
+    if (api?.getAppVersion) {
+      void api.getAppVersion().then((v) => {
+        if (!cancelled) setAppVersion(v)
+      })
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleCheckNow = async () => {
+    const api = typeof window !== 'undefined' ? window.electronAPI : undefined
+    if (!api?.checkForUpdates) return
+    setChecking(true)
+    setStatus({ kind: 'idle' })
+    try {
+      const info = await api.checkForUpdates({
+        includePrereleases: receivePrereleases,
+        forceRefresh: true,
+      })
+      if (info) {
+        setStatus({ kind: 'available', version: info.version, url: info.url })
+        setAvailableUpdate(info)
+      } else {
+        setStatus({ kind: 'up-to-date' })
+        setAvailableUpdate(null)
+      }
+    } catch (err) {
+      setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  if (!isDesktop) {
+    // Web mode: nothing to update; hide the section entirely to avoid
+    // confusing remote-mode users who are already on the deployed gateway's
+    // version.
+    return null
+  }
+
+  return (
+    <Section title={t('appUpdatesTitle', lang)}>
+      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3 space-y-1">
+        <p className="text-sm text-[var(--color-text-primary)]">
+          {t('currentVersionLabel', lang)}:{' '}
+          <span className="font-mono">{appVersion ?? '…'}</span>
+        </p>
+        {status.kind === 'available' && (
+          <p className="text-[11px] text-[var(--color-accent)]">
+            {t('updateAvailableShort', lang, { version: status.version })}
+          </p>
+        )}
+        {status.kind === 'up-to-date' && (
+          <p className="text-[11px] text-[var(--color-text-muted)]">{t('updateUpToDate', lang)}</p>
+        )}
+        {status.kind === 'error' && (
+          <p className="text-[11px] text-[var(--color-error)]">
+            {t('updateCheckFailed', lang)}: {status.message}
+          </p>
+        )}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <ActionButton disabled={checking} onClick={handleCheckNow}>
+          {checking ? t('updateChecking', lang) : t('updateCheckNow', lang)}
+        </ActionButton>
+      </div>
+
+      <ToggleRow
+        className="mt-4"
+        label={t('updateReceivePrereleases', lang)}
+        checked={receivePrereleases}
+        onToggle={() => setReceivePrereleases(!receivePrereleases)}
+      />
+      <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+        {t('updateReceivePrereleasesHint', lang)}
+      </p>
+    </Section>
+  )
+}

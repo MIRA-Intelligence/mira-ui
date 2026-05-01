@@ -13,6 +13,7 @@ import type {
   AutomationGoalLogic,
   AutomationGoalOperator,
   ContractVersion,
+  LiteratureSource,
   NewProjectInput,
 } from '@/types'
 import { t } from '@/i18n'
@@ -28,6 +29,23 @@ const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat'
   { key: 1, labelKey: 'contractCompat' },
   { key: 2, labelKey: 'contractStrict' },
 ]
+const LITERATURE_SOURCE_OPTIONS: Array<{ key: LiteratureSource; label: string }> = [
+  { key: 'pubmed', label: 'PubMed' },
+  { key: 'google_scholar', label: 'Google Scholar' },
+  { key: 'arxiv', label: 'arXiv' },
+  { key: 'semantic_scholar', label: 'Semantic Scholar' },
+  { key: 'crossref', label: 'Crossref' },
+  { key: 'europe_pmc', label: 'Europe PMC' },
+]
+const DEFAULT_LITERATURE_SOURCES: LiteratureSource[] = LITERATURE_SOURCE_OPTIONS.map((item) => item.key)
+const LITERATURE_SOURCE_INSTRUCTIONS: Record<LiteratureSource, string> = {
+  pubmed: 'PubMed: use pubmed-search / NCBI PubMed for biomedical and clinical papers.',
+  google_scholar: 'Google Scholar: use multi-search-engine or agent-browser against scholar.google.com when accessible; fall back to general web search if blocked.',
+  arxiv: 'arXiv: use arxiv.org search/API/MCP if configured, or site:arxiv.org queries for preprints.',
+  semantic_scholar: 'Semantic Scholar: use semanticscholar.org search or available API/web search for citation graph and related papers.',
+  crossref: 'Crossref: use crossref.org metadata search for DOI, venue, and citation metadata.',
+  europe_pmc: 'Europe PMC: use europepmc.org for biomedical full-text and preprint coverage.',
+}
 
 function mergeSelectedFiles(existing: File[], incoming: FileList | File[]): File[] {
   const next = [...existing]
@@ -143,16 +161,53 @@ function buildAgentMessage(
     ? 'After completing the research survey, STOP and report your findings.'
     : 'After completing the research survey, continue automatically into the next pending experiment until stop conditions are met.'
 
-  const referenceInstruction = uploadedReferencePaths.length > 0
-    ? `Before external search, first read and synthesize local materials under ${workspacePath}/${projectId}/references.`
-    : 'Search for relevant literature and synthesize reliable references.'
+  const literatureReview = input.literatureReview ?? {
+    enabled: true,
+    sources: DEFAULT_LITERATURE_SOURCES,
+  }
+  const selectedLiteratureSources = literatureReview.sources.length > 0
+    ? literatureReview.sources
+    : DEFAULT_LITERATURE_SOURCES
+  const selectedSourceLabels = selectedLiteratureSources
+    .map((source) => LITERATURE_SOURCE_OPTIONS.find((item) => item.key === source)?.label ?? source)
+
+  const referenceInstruction = literatureReview.enabled
+    ? uploadedReferencePaths.length > 0
+      ? `Before external search, first read and synthesize local materials under ${workspacePath}/${projectId}/references. Then search only these external literature sources: ${selectedSourceLabels.join(', ')}.`
+      : `Search these external literature sources and synthesize reliable references: ${selectedSourceLabels.join(', ')}.`
+    : uploadedReferencePaths.length > 0 || input.references
+      ? 'Literature research is disabled. Do not search external literature libraries. Only use uploaded/provided references if they are directly needed.'
+      : 'Literature research is disabled. Do not run external literature search or spend a separate literature-review stage.'
   const languageInstruction = preferredLanguage === 'zh'
     ? 'Language policy: The user input is primarily Chinese. Respond in Chinese for progress updates, experiment summaries, and final replies unless the user explicitly asks for another language.'
     : 'Language policy: The user input is primarily English. Respond in English unless the user explicitly asks for another language.'
 
+  lines.push('', '## Literature Research Policy')
+  if (literatureReview.enabled) {
+    lines.push(
+      `Enabled: yes`,
+      `Selected sources: ${selectedSourceLabels.join(', ')}`,
+      'Use only the selected external sources for the literature survey unless the user explicitly asks for more.',
+      'For each accepted paper, write title, authors, year, venue/source, URL/DOI, short summary, and relevance into task_plan.json research.references.',
+      'Record conflicting evidence and gaps in task_plan.json research.notes or research.survey.',
+      'Source-specific guidance:',
+    )
+    for (const source of selectedLiteratureSources) {
+      lines.push(`- ${LITERATURE_SOURCE_INSTRUCTIONS[source]}`)
+    }
+  } else {
+    lines.push(
+      'Enabled: no',
+      'Skip external literature search. Keep task_plan.json research.references empty unless user-provided references or uploaded PDFs/ZIPs are used.',
+      'Move directly to project planning and experiments after creating task_plan.json.',
+    )
+  }
+
   lines.push(
     '',
-    `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`,
+    literatureReview.enabled
+      ? `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`
+      : `Please begin by creating a task_plan.json. ${referenceInstruction} Do not perform a Research & Literature survey unless explicitly requested later. ${runMode === 'manual' ? 'After planning the first actionable experiment, STOP and report the plan.' : 'Continue automatically into the first pending experiment until stop conditions are met.'} ${languageInstruction}`,
   )
 
   return lines.join('\n')
@@ -199,6 +254,8 @@ export function NewProjectModal() {
   const [references, setReferences] = useState('')
   const [computeBudget, setComputeBudget] = useState('')
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [literatureResearchEnabled, setLiteratureResearchEnabled] = useState(true)
+  const [selectedLiteratureSources, setSelectedLiteratureSources] = useState<LiteratureSource[]>(DEFAULT_LITERATURE_SOURCES)
   const [goalLogic, setGoalLogic] = useState<AutomationGoalLogic>('AND')
   const [goals, setGoals] = useState<AutomationGoal[]>([{ ...DEFAULT_GOAL }])
   const [goalValueInputs, setGoalValueInputs] = useState<string[]>([''])
@@ -339,6 +396,15 @@ export function NewProjectModal() {
     ))
   }
 
+  const toggleLiteratureSource = (source: LiteratureSource) => {
+    setSelectedLiteratureSources((prev) => {
+      if (prev.includes(source)) {
+        return prev.length <= 1 ? prev : prev.filter((item) => item !== source)
+      }
+      return [...prev, source]
+    })
+  }
+
   const handleCreate = async () => {
     if (!canCreate) return
     setCreating(true)
@@ -377,6 +443,10 @@ export function NewProjectModal() {
       dataPath: serverDataPath.trim() || undefined,
       references: references.trim() || undefined,
       computeBudget: computeBudget.trim() || undefined,
+      literatureReview: {
+        enabled: literatureResearchEnabled,
+        sources: selectedLiteratureSources,
+      },
       agentProfile,
       contractVersion,
       automationPolicy,
@@ -454,6 +524,8 @@ export function NewProjectModal() {
       setTitle('')
       setReferences('')
       setComputeBudget('')
+      setLiteratureResearchEnabled(true)
+      setSelectedLiteratureSources(DEFAULT_LITERATURE_SOURCES)
       setGoalLogic('AND')
       setGoals([{ ...DEFAULT_GOAL }])
       setGoalValueInputs([''])
@@ -803,6 +875,50 @@ export function NewProjectModal() {
                 placeholder={t('titlePlaceholder', lang)}
                 className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
               />
+            </div>
+
+            {/* Literature Research */}
+            <div className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-3">
+              <label className="flex items-start gap-2 text-xs font-medium text-[var(--color-text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={literatureResearchEnabled}
+                  onChange={(e) => setLiteratureResearchEnabled(e.target.checked)}
+                  className="mt-0.5 accent-[var(--color-accent)]"
+                />
+                <span>
+                  {t('literatureResearchLabel', lang)}
+                  <span className="block mt-0.5 text-[11px] font-normal text-[var(--color-text-muted)]">
+                    {t('literatureResearchHint', lang)}
+                  </span>
+                </span>
+              </label>
+
+              <div className={cn(
+                'grid grid-cols-2 gap-2 transition-opacity',
+                !literatureResearchEnabled && 'opacity-50',
+              )}>
+                {LITERATURE_SOURCE_OPTIONS.map((source) => (
+                  <label
+                    key={source.key}
+                    className="flex items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2.5 py-1.5 text-xs text-[var(--color-text-secondary)]"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedLiteratureSources.includes(source.key)}
+                      disabled={!literatureResearchEnabled}
+                      onChange={() => toggleLiteratureSource(source.key)}
+                      className="accent-[var(--color-accent)]"
+                    />
+                    <span>{source.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                {literatureResearchEnabled
+                  ? t('literatureSourcesDefaultHint', lang)
+                  : t('literatureDisabledHint', lang)}
+              </p>
             </div>
 
             {/* References */}

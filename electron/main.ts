@@ -1,8 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
+import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 
 const engineManager = new LocalEngineManager()
+let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -30,6 +32,11 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../dist/index.html'))
   }
+
+  mainWindow = win
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
 }
 
 app.whenReady().then(() => {
@@ -43,8 +50,13 @@ app.whenReady().then(() => {
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
     return engineManager.upgrade(packageName || 'mira-engine')
   })
+  registerUpdateCheck(() => mainWindow)
   void engineManager.bootstrapLocalEngine().catch(() => {})
   createWindow()
+  // Renderer carries the "include prereleases" preference; on first boot we
+  // default to stable-only and let the renderer re-trigger via IPC after it
+  // has hydrated its persisted setting.
+  scheduleBootCheck({ includePrereleases: false })
 })
 
 app.on('window-all-closed', () => {

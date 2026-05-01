@@ -172,9 +172,24 @@ export class LocalEngineManager {
     const providers = ensureRecord(root, 'providers')
     const customProvider = ensureRecord(providers, BUNDLE_SETUP_PROVIDER)
     const channels = ensureRecord(root, 'channels')
-    const webChannel = ensureRecord(channels, 'web')
 
     let changed = false
+
+    // The engine renamed the "web" channel to "ui" in v0.4. If the user's
+    // existing config still carries the legacy "channels.web" block we promote
+    // it to "channels.ui" (and drop the legacy key) so both halves of the app
+    // converge on the new name without losing any user-supplied settings.
+    if (isRecord(channels.web)) {
+      const legacyWeb = channels.web
+      const existingUi = isRecord(channels.ui) ? channels.ui : {}
+      const merged: JsonRecord = { ...legacyWeb, ...existingUi }
+      channels.ui = merged
+      delete channels.web
+      changed = true
+    }
+
+    const uiChannel = ensureRecord(channels, 'ui')
+
     const setIfMissing = (target: JsonRecord, key: string, value: unknown) => {
       const current = target[key]
       const isMissing = current === undefined || current === null || (typeof current === 'string' && current.trim().length === 0)
@@ -188,16 +203,16 @@ export class LocalEngineManager {
     setIfMissing(defaults, 'model', BUNDLE_SETUP_MODEL)
     setIfMissing(customProvider, 'apiBase', BUNDLE_SETUP_API_BASE)
 
-    if (webChannel.enabled !== true) {
-      webChannel.enabled = true
+    if (uiChannel.enabled !== true) {
+      uiChannel.enabled = true
       changed = true
     }
-    if (!Array.isArray(webChannel.allowFrom) || webChannel.allowFrom.length === 0) {
-      webChannel.allowFrom = ['*']
+    if (!Array.isArray(uiChannel.allowFrom) || uiChannel.allowFrom.length === 0) {
+      uiChannel.allowFrom = ['*']
       changed = true
     }
-    if (!Array.isArray(webChannel.corsOrigins) || webChannel.corsOrigins.length === 0) {
-      webChannel.corsOrigins = ['*']
+    if (!Array.isArray(uiChannel.corsOrigins) || uiChannel.corsOrigins.length === 0) {
+      uiChannel.corsOrigins = ['*']
       changed = true
     }
 
