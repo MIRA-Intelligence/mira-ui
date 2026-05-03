@@ -22,6 +22,7 @@ export function useWebSocket() {
   const handleWsMessage = useAgentStore((s) => s.handleWsMessage)
   const setConnected = useAgentStore((s) => s.setConnected)
   const setEngineBootstrap = useSettingsStore((s) => s.setEngineBootstrap)
+  const setConnectionMessage = useSettingsStore((s) => s.setConnectionMessage)
   const setLocalEngineBootstrap = useSettingsStore((s) => s.setLocalEngineBootstrap)
   const deploymentMode = useSettingsStore((s) => s.deploymentMode)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
@@ -33,6 +34,8 @@ export function useWebSocket() {
 
     const bootstrap = async () => {
       try {
+        setConnectionMessage(null)
+        const lang = useSettingsStore.getState().language
         const localBundle = deploymentMode === 'localBundle'
         const safeApiUrl = localBundle
           ? 'http://127.0.0.1:18790/api'
@@ -42,20 +45,21 @@ export function useWebSocket() {
           if (!hasDesktopEngineManager()) {
             setLocalEngineBootstrap({
               phase: 'error',
-              message: 'Local bundle mode requires the MIRA desktop app. Switch to remote mode in browser builds.',
+              message: t('localBundleDesktopRequired', lang),
             })
             setEngineBootstrap({
               status: 'unreachable',
-              message: 'Local bundle mode requires the MIRA desktop app. Switch to remote mode in browser builds.',
+              message: t('localBundleDesktopRequired', lang),
               version: null,
             })
+            setConnectionMessage(t('localBundleDesktopBridgeUnavailable', lang))
             setConnected(false)
             return
           }
 
           setLocalEngineBootstrap({
             phase: 'checking',
-            message: 'Bootstrapping bundled local engine...',
+            message: t('localBundleBootstrapping', lang),
             executablePath: null,
             version: null,
           })
@@ -73,6 +77,7 @@ export function useWebSocket() {
               message: localState.message,
               version: localState.version,
             })
+            setConnectionMessage(localState.message)
             setConnected(false)
             return
           }
@@ -88,17 +93,20 @@ export function useWebSocket() {
         })
 
         if (probe.status !== 'compatible') {
+          setConnectionMessage(probe.message)
           setConnected(false)
           return
         }
       } catch (error) {
         if (disposed) return
         const message = error instanceof Error ? error.message : String(error)
+        const lang = useSettingsStore.getState().language
         setEngineBootstrap({
           status: 'unreachable',
-          message: `UI bootstrap failed: ${message}`,
+          message: t('uiBootstrapFailed', lang, { message }),
           version: null,
         })
+        setConnectionMessage(t('uiBootstrapFailed', lang, { message }))
         setConnected(false)
       }
     }
@@ -108,31 +116,35 @@ export function useWebSocket() {
     return () => {
       disposed = true
     }
-  }, [apiUrl, deploymentMode, setConnected, setEngineBootstrap, setLocalEngineBootstrap])
+  }, [apiUrl, deploymentMode, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 
   useEffect(() => {
     const localBundle = deploymentMode === 'localBundle'
     const safeWsUrl = localBundle ? 'ws://127.0.0.1:18790/ws' : wsUrl
 
     if (!safeWsUrl || !safeWsUrl.trim()) {
+      const lang = useSettingsStore.getState().language
       setEngineBootstrap({
         status: 'unreachable',
-        message: 'WebSocket URL is empty. Update wsUrl in settings and retry.',
+        message: t('wsUrlEmpty', lang),
         version: null,
       })
+      setConnectionMessage(t('wsUrlEmptyDetail', lang))
       setConnected(false)
       wsClient.disconnect()
       return
     }
 
     if (engineStatus !== 'compatible') {
+      const nextMessage = useSettingsStore.getState().engineMessage
+      if (nextMessage) setConnectionMessage(nextMessage)
       setConnected(false)
       wsClient.disconnect()
       return
     }
 
     const unsubMsg = wsClient.onMessage(handleWsMessage)
-    const unsubStatus = wsClient.onStatus((connected) => {
+    const unsubStatus = wsClient.onStatus((connected, detail) => {
       const prevConnected = useAgentStore.getState().connected
       if (prevConnected !== connected) {
         setConnected(connected)
@@ -145,7 +157,10 @@ export function useWebSocket() {
         }
       }
       if (connected) {
+        setConnectionMessage(null)
         void syncOnConnect()
+      } else if (detail) {
+        setConnectionMessage(detail)
       }
     })
     wsClient.connect()
@@ -155,5 +170,5 @@ export function useWebSocket() {
       unsubStatus()
       wsClient.disconnect()
     }
-  }, [deploymentMode, engineStatus, handleWsMessage, setConnected, setEngineBootstrap, wsUrl])
+  }, [deploymentMode, engineStatus, handleWsMessage, setConnected, setConnectionMessage, setEngineBootstrap, wsUrl])
 }

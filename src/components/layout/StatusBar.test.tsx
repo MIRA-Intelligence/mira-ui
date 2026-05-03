@@ -85,6 +85,18 @@ describe('StatusBar', () => {
     expect(screen.getByText('WS disconnected')).toBeInTheDocument()
   })
 
+  it('shows the websocket error message in the status bar banner', () => {
+    useAgentStore.setState({ connected: false })
+    useSettingsStore.setState({
+      deploymentMode: 'remoteManual',
+      connectionMessage: 'Unable to connect to ws://example/ws. Check proxy upgrade headers.',
+    })
+    render(<StatusBar />)
+    expect(
+      screen.getByText('Unable to connect to ws://example/ws. Check proxy upgrade headers.'),
+    ).toBeInTheDocument()
+  })
+
   it('shows compatibility warning banner when engine is unreachable', () => {
     useSettingsStore.setState({
       engineStatus: 'unreachable',
