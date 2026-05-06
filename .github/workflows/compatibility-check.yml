@@ -1,0 +1,29 @@
+name: Validate compatibility.json
+
+on:
+  push:
+    branches: [main, dev, release]
+    paths:
+      - 'compatibility.json'
+      - 'scripts/validate-compatibility.mjs'
+      - '.github/workflows/compatibility-check.yml'
+  pull_request:
+    paths:
+      - 'compatibility.json'
+      - 'scripts/validate-compatibility.mjs'
+      - '.github/workflows/compatibility-check.yml'
+
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate compatibility.json schema
+        run: node scripts/validate-compatibility.mjs --file compatibility.json
