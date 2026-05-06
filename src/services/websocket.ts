@@ -112,10 +112,10 @@ class WebSocketClient {
   }
 }
 
-function describeCloseEvent(event: CloseEvent, url: string): string {
+function describeCloseEvent(event: CloseEvent | undefined, url: string): string {
   const lang = currentLanguage()
-  const code = typeof event.code === 'number' ? event.code : 0
-  const reason = typeof event.reason === 'string' ? event.reason.trim() : ''
+  const code = typeof event?.code === 'number' ? event.code : 0
+  const reason = typeof event?.reason === 'string' ? event.reason.trim() : ''
   if (reason) {
     return t('wsClosedReason', lang, { code: code || 'unknown', reason })
   }

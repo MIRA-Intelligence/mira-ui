@@ -21,6 +21,7 @@ interface AgentState {
   handleWsMessage: (msg: WsResponse) => void
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
+  resetWorkspaceState: () => void
   getProjectLogs: (projectId: string | null) => LogEntry[]
   getSessionUsage: (sessionId: string | null) => SessionUsage | null
   resetSessionUsage: (sessionId: string) => void
@@ -207,6 +208,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete usage[projectId]
       return { logsByProject: updated, isStreaming: false, usageBySession: usage }
     }),
+
+  resetWorkspaceState: () => {
+    for (const sessionId of Object.keys(_pollTimers)) {
+      stopPlanPolling(sessionId)
+    }
+    for (const sessionId of Object.keys(_responseRefreshTimers)) {
+      clearResponseRefreshTimers(sessionId)
+    }
+    set({
+      logsByProject: {},
+      isStreaming: false,
+      usageBySession: {},
+    })
+  },
 
   getProjectLogs: (projectId) => {
     if (!projectId) return []
