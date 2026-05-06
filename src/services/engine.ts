@@ -1,4 +1,6 @@
 import type { RuntimeConfigPayload } from './runtimeConfig'
+import { t } from '@/i18n'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 export type EngineProbeStatus = 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 
@@ -18,8 +20,9 @@ interface VersionPayload {
   api_contract?: string
 }
 
-const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
-const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
+function currentLanguage() {
+  return useSettingsStore.getState().language
+}
 
 function normalizeGatewayBase(apiUrl: string): string {
   return apiUrl.replace(/\/api\/?$/, '')
@@ -42,29 +45,39 @@ function isVersionLower(lhs: string, rhs: string): boolean {
   return false
 }
 
-function isApiKeyRequired(provider: string): boolean {
-  return provider !== 'custom' && provider !== 'ollama'
-}
-
 function explainRuntimeSetup(payload: Partial<RuntimeConfigPayload>): string | null {
   const provider = typeof payload.runtime?.provider === 'string' ? payload.runtime.provider.trim() : ''
   const model = typeof payload.runtime?.model === 'string' ? payload.runtime.model.trim() : ''
-  const providerSettings = provider ? payload.providers?.[provider] : undefined
+  const lang = currentLanguage()
+
+  if (payload.runtime?.setup_required) {
+    const setupCode = payload.runtime.setup_code
+    const setupSubject = typeof payload.runtime.setup_subject === 'string'
+      ? payload.runtime.setup_subject.trim()
+      : ''
+    const subject = setupSubject || provider || 'runtime'
+
+    switch (setupCode) {
+      case 'missing_runtime':
+        return t('runtimeSetupIncomplete', lang)
+      case 'unknown_provider':
+        return t('runtimeSetupUnknownProvider', lang, { provider: subject })
+      case 'missing_api_base':
+        return t('runtimeSetupMissingApiBase', lang, { provider: subject })
+      case 'missing_api_key':
+        return t('runtimeSetupMissingApiKey', lang, { provider: subject })
+      default:
+        break
+    }
+
+    const setupMessage = typeof payload.runtime.setup_message === 'string'
+      ? payload.runtime.setup_message.trim()
+      : ''
+    return setupMessage || t('runtimeSetupIncomplete', lang)
+  }
 
   if (!provider || !model) {
-    return 'Local engine is running, but no provider/model is configured yet. Open Settings > Local Runtime Config and fill them in.'
-  }
-
-  if (model === BUNDLE_SETUP_MODEL || (provider === 'custom' && providerSettings?.api_base === BUNDLE_SETUP_API_BASE)) {
-    return 'Local engine is running, but model access is still unconfigured. Open Settings > Local Runtime Config and set provider, model, and API endpoint details.'
-  }
-
-  if (provider === 'custom' && !providerSettings?.api_base) {
-    return 'Local engine is running, but Custom provider API Base is empty. Open Settings > Local Runtime Config and set API Base.'
-  }
-
-  if (isApiKeyRequired(provider) && !providerSettings?.api_key_configured) {
-    return `Local engine is running, but ${provider} is missing its API key. Open Settings > Local Runtime Config and add the credential.`
+    return t('runtimeSetupIncomplete', currentLanguage())
   }
 
   return null
@@ -72,12 +85,13 @@ function explainRuntimeSetup(payload: Partial<RuntimeConfigPayload>): string | n
 
 export async function probeEngineCompatibility(apiUrl: string): Promise<EngineProbeResult> {
   const base = normalizeGatewayBase(apiUrl)
+  const lang = currentLanguage()
   try {
     const healthResp = await fetch(`${base}/health`)
     if (!healthResp.ok) {
       return {
         status: 'unreachable',
-        message: `Local engine health check failed (${healthResp.status}).`,
+        message: t('engineHealthCheckFailed', lang, { status: healthResp.status }),
         version: null,
       }
     }
@@ -86,7 +100,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
     if (!versionResp.ok) {
       return {
         status: 'unreachable',
-        message: `Local engine version check failed (${versionResp.status}).`,
+        message: t('engineVersionCheckFailed', lang, { status: versionResp.status }),
         version: null,
       }
     }
@@ -98,7 +112,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
     if (!version) {
       return {
         status: 'incompatible',
-        message: 'Local engine did not report agent version.',
+        message: t('engineMissingVersion', lang),
         version: null,
       }
     }
@@ -106,7 +120,10 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
     if (contract !== COMPATIBILITY.apiContract) {
       return {
         status: 'incompatible',
-        message: `API contract mismatch: expected ${COMPATIBILITY.apiContract}, got ${contract || 'unknown'}.`,
+        message: t('engineApiContractMismatch', lang, {
+          expected: COMPATIBILITY.apiContract,
+          actual: contract || 'unknown',
+        }),
         version,
       }
     }
@@ -114,7 +131,10 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
     if (isVersionLower(version, COMPATIBILITY.minAgentForUi)) {
       return {
         status: 'incompatible',
-        message: `Local engine ${version} is too old. Upgrade to ${COMPATIBILITY.minAgentForUi} or newer.`,
+        message: t('engineVersionTooOld', lang, {
+          version,
+          minimum: COMPATIBILITY.minAgentForUi,
+        }),
         version,
       }
     }
@@ -124,8 +144,8 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       return {
         status: 'incompatible',
         message: configResp.status === 404 || configResp.status === 405
-          ? 'Local engine is reachable, but its runtime config API is unavailable. Upgrade the bundled mira-engine and retry.'
-          : `Local engine config check failed (${configResp.status}).`,
+          ? t('engineRuntimeConfigUnavailable', lang)
+          : t('engineConfigCheckFailed', lang, { status: configResp.status }),
         version,
       }
     }
@@ -140,11 +160,11 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       }
     }
 
-    return { status: 'compatible', message: 'Local engine is compatible.', version }
+    return { status: 'compatible', message: t('engineCompatible', lang), version }
   } catch {
     return {
       status: 'unreachable',
-      message: 'Unable to reach local engine. MIRA could not contact the local gateway health endpoint.',
+      message: t('engineUnreachable', lang),
       version: null,
     }
   }

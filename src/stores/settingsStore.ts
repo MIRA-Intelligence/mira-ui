@@ -53,6 +53,7 @@ interface SettingsState {
   engineStatus: EngineStatus
   engineMessage: string | null
   engineVersion: string | null
+  connectionMessage: string | null
   localEnginePhase: LocalEnginePhase
   localEngineExecutablePath: string | null
   runtimeConfig: RuntimeConfigPayload | null
@@ -74,6 +75,7 @@ interface SettingsState {
     message: string | null
     version?: string | null
   }) => void
+  setConnectionMessage: (message: string | null) => void
   setLocalEngineBootstrap: (payload: {
     phase: LocalEnginePhase
     message: string | null
@@ -219,6 +221,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   engineStatus: 'unknown',
   engineMessage: null,
   engineVersion: null,
+  connectionMessage: null,
   localEnginePhase: 'idle',
   localEngineExecutablePath: null,
   runtimeConfig: null,
@@ -274,6 +277,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return { engineStatus: status, engineMessage: message, engineVersion: nextVersion }
     })
   },
+  setConnectionMessage: (message) => set((state) => (
+    state.connectionMessage === message ? state : { connectionMessage: message }
+  )),
   setLocalEngineBootstrap: ({ phase, message, executablePath, version }) => {
     set((state) => ({
       localEnginePhase: phase,

@@ -1,12 +1,19 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 
-export type RuntimeProviderName = 'anthropic' | 'openai' | 'openrouter' | 'custom' | 'ollama'
+export type RuntimeProviderName = string
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'adaptive' | null
+export type RuntimeSetupCode = 'missing_runtime' | 'unknown_provider' | 'missing_api_base' | 'missing_api_key'
 
 export interface RuntimeProviderSettings {
   api_key_configured: boolean
   api_key_preview: string | null
   api_base: string | null
+  display_name: string
+  api_key_required: boolean
+  api_base_required: boolean
+  default_api_base: string | null
+  is_oauth: boolean
+  is_local: boolean
 }
 
 export interface RuntimeConfigPayload {
@@ -20,6 +27,10 @@ export interface RuntimeConfigPayload {
     reasoning_effort: ReasoningEffort
     max_tool_iterations: number
     restrict_to_workspace: boolean
+    setup_required?: boolean
+    setup_message?: string | null
+    setup_code?: RuntimeSetupCode | null
+    setup_subject?: string | null
   }
   providers: Record<string, RuntimeProviderSettings>
 }
@@ -69,7 +80,7 @@ export async function saveRuntimeConfig(payload: {
     max_tool_iterations: number
     restrict_to_workspace: boolean
   }
-  providers: Partial<Record<RuntimeProviderName, { api_key?: string; api_base?: string | null }>>
+  providers: Partial<Record<string, { api_key?: string; api_base?: string | null }>>
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
 }
