@@ -14,7 +14,6 @@ import {
   updateProjectsRoot,
   type ReasoningEffort,
   type RuntimeConfigPayload,
-  type RuntimeProviderName,
 } from '@/services/runtimeConfig'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -23,16 +22,6 @@ import { useUiStore } from '@/stores/uiStore'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
-const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
-const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
-
-const PROVIDER_OPTIONS: { value: RuntimeProviderName; label: string }[] = [
-  { value: 'openrouter', label: 'OpenRouter' },
-  { value: 'anthropic', label: 'Anthropic' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'custom', label: 'Custom (OpenAI-compatible)' },
-  { value: 'ollama', label: 'Ollama' },
-]
 
 const REASONING_OPTIONS: { value: Exclude<ReasoningEffort, null>; label: string }[] = [
   { value: 'low', label: 'Low' },
@@ -41,8 +30,25 @@ const REASONING_OPTIONS: { value: Exclude<ReasoningEffort, null>; label: string 
   { value: 'adaptive', label: 'Adaptive' },
 ]
 
-function providerLabel(provider: RuntimeProviderName): string {
-  return PROVIDER_OPTIONS.find((option) => option.value === provider)?.label ?? provider
+function providerLabel(
+  provider: string,
+  providers: RuntimeConfigPayload['providers'],
+): string {
+  return providers[provider]?.display_name ?? provider
+}
+
+function buildProviderOptions(
+  providers: RuntimeConfigPayload['providers'],
+  selectedProvider: string,
+): Array<{ value: string; label: string }> {
+  const entries = Object.entries(providers).map(([value, settings]) => ({
+    value,
+    label: settings.display_name || value,
+  }))
+  if (selectedProvider && !providers[selectedProvider]) {
+    return [{ value: selectedProvider, label: selectedProvider }, ...entries]
+  }
+  return entries
 }
 
 type SettingsDraft = {
@@ -54,7 +60,7 @@ type SettingsDraft = {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
-  provider: RuntimeProviderName
+  provider: string
   model: string
   reasoningEffort: ReasoningEffort
   maxToolIterations: string
@@ -88,7 +94,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? true,
-    provider: 'openrouter',
+    provider: store.runtimeConfig?.runtime?.provider || 'auto',
     model: 'anthropic/claude-sonnet-4-5',
     reasoningEffort: null,
     maxToolIterations: '200',
@@ -99,12 +105,10 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
 }
 
 function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload): SettingsDraft {
-  const provider = (payload.runtime.provider in payload.providers
+  const provider = typeof payload.runtime.provider === 'string' && payload.runtime.provider.trim().length > 0
     ? payload.runtime.provider
-    : 'openrouter') as RuntimeProviderName
+    : 'auto'
   const providerSettings = payload.providers[provider]
-  const setupModel = payload.runtime.model === BUNDLE_SETUP_MODEL ? '' : payload.runtime.model
-  const setupApiBase = providerSettings?.api_base === BUNDLE_SETUP_API_BASE ? '' : (providerSettings?.api_base ?? '')
 
   return {
     ...draft,
@@ -112,11 +116,11 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
     apiUrl: LOCAL_API_URL,
     wsUrl: LOCAL_WS_URL,
     provider,
-    model: setupModel,
+    model: payload.runtime.model,
     reasoningEffort: payload.runtime.reasoning_effort,
     maxToolIterations: String(payload.runtime.max_tool_iterations),
     restrictToWorkspace: payload.runtime.restrict_to_workspace,
-    apiBase: setupApiBase,
+    apiBase: providerSettings?.api_base ?? providerSettings?.default_api_base ?? '',
     apiKey: '',
   }
 }
@@ -224,12 +228,12 @@ export function SettingsModal() {
     }
   }
 
-  const handleProviderChange = (provider: RuntimeProviderName) => {
+  const handleProviderChange = (provider: string) => {
     const snapshot = runtimeProviders[provider]
     setDraft((current) => ({
       ...current,
       provider,
-      apiBase: snapshot?.api_base ?? '',
+      apiBase: snapshot?.api_base ?? snapshot?.default_api_base ?? '',
       apiKey: '',
     }))
   }
@@ -253,20 +257,21 @@ export function SettingsModal() {
         const trimmedApiBase = draft.apiBase.trim()
         const trimmedApiKey = draft.apiKey.trim()
         const providerSnapshot = runtimeProviders[draft.provider]
+        const providerName = providerLabel(draft.provider, runtimeProviders)
 
         if (!trimmedModel) {
-          throw new Error('Local bundle mode requires a model before the engine can accept tasks.')
+          throw new Error(t('settingsRequiresModel', curLang))
         }
-        if (draft.provider === 'custom' && !trimmedApiBase) {
-          throw new Error('Custom provider requires API Base. Fill it in before saving local bundle settings.')
+        if (providerSnapshot?.api_base_required && !trimmedApiBase) {
+          throw new Error(t('settingsProviderRequiresApiBase', curLang, { provider: providerName }))
         }
-        if (draft.provider !== 'custom' && draft.provider !== 'ollama' && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
-          throw new Error(`${providerLabel(draft.provider)} requires an API key. Paste it before saving local bundle settings.`)
+        if (providerSnapshot?.api_key_required && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
+          throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
 
         const localState = await bootstrapLocalEngine()
         if (!localState) {
-          throw new Error('Desktop bundle controls are unavailable.')
+          throw new Error(t('settingsDesktopBundleUnavailable', curLang))
         }
         store.setLocalEngineBootstrap({
           phase: localState.phase,
@@ -280,6 +285,14 @@ export function SettingsModal() {
 
         store.setDeploymentMode('localBundle')
         store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
+        const providerUpdates = draft.provider === 'auto'
+          ? {}
+          : {
+              [draft.provider]: {
+                ...(trimmedApiKey ? { api_key: trimmedApiKey } : {}),
+                api_base: trimmedApiBase || null,
+              },
+            }
         const payload = await saveRuntimeConfig({
           projects_root: nextWorkspacePath,
           runtime: {
@@ -290,12 +303,7 @@ export function SettingsModal() {
             max_tool_iterations: Number(draft.maxToolIterations),
             restrict_to_workspace: draft.restrictToWorkspace,
           },
-          providers: {
-            [draft.provider]: {
-              ...(trimmedApiKey ? { api_key: trimmedApiKey } : {}),
-              api_base: trimmedApiBase || null,
-            },
-          },
+          providers: providerUpdates,
         })
 
         store.setWorkspacePath(payload.projects_root)
@@ -314,7 +322,7 @@ export function SettingsModal() {
         await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
       } else {
         if (!nextApiUrl || !nextWsUrl) {
-          throw new Error('Remote mode requires both API URL and WebSocket URL.')
+          throw new Error(t('settingsRemoteRequiresUrls', curLang))
         }
         const payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
         store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
@@ -431,6 +439,7 @@ export function SettingsModal() {
   }
 
   const selectedProvider = runtimeProviders[draft.provider]
+  const providerOptions = buildProviderOptions(runtimeProviders, draft.provider)
   const localMode = draft.deploymentMode === 'localBundle'
 
   return (
@@ -626,10 +635,10 @@ export function SettingsModal() {
                 <Label text="Provider" />
                 <select
                   value={draft.provider}
-                  onChange={(e) => handleProviderChange(e.target.value as RuntimeProviderName)}
+                  onChange={(e) => handleProviderChange(e.target.value)}
                   className={selectClass}
                 >
-                  {PROVIDER_OPTIONS.map((provider) => (
+                  {providerOptions.map((provider) => (
                     <option key={provider.value} value={provider.value}>
                       {provider.label}
                     </option>
@@ -649,20 +658,48 @@ export function SettingsModal() {
                   value={draft.apiBase}
                   onChange={(e) => setDraft((current) => ({ ...current, apiBase: e.target.value }))}
                   className={inputClass}
-                  placeholder="Leave empty for provider defaults"
+                  placeholder={
+                    selectedProvider?.default_api_base
+                      ? t('settingsLeaveEmptyUseDefault', curLang, { apiBase: selectedProvider.default_api_base })
+                      : t('settingsLeaveEmptyProviderDefaults', curLang)
+                  }
                 />
+                {selectedProvider?.api_base_required && (
+                  <p className="text-[11px] text-amber-300 mt-1">
+                    {t('settingsProviderNeedsApiBaseHint', curLang, { provider: selectedProvider.display_name })}
+                  </p>
+                )}
 
-                <Label text="API Key" className="mt-3" />
-                <input
-                  type="password"
-                  value={draft.apiKey}
-                  onChange={(e) => setDraft((current) => ({ ...current, apiKey: e.target.value }))}
-                  className={inputClass}
-                  placeholder={selectedProvider?.api_key_configured ? 'Leave blank to keep the saved key' : 'Paste provider API key'}
-                />
-                {selectedProvider?.api_key_preview && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                    Saved key preview: {selectedProvider.api_key_preview}
+                {draft.provider !== 'auto' && !selectedProvider?.is_oauth && (
+                  <>
+                    <Label text="API Key" className="mt-3" />
+                    <input
+                      type="password"
+                      value={draft.apiKey}
+                      onChange={(e) => setDraft((current) => ({ ...current, apiKey: e.target.value }))}
+                      className={inputClass}
+                      placeholder={selectedProvider?.api_key_configured ? t('settingsLeaveBlankKeepKey', curLang) : t('settingsPasteProviderKey', curLang)}
+                    />
+                    {selectedProvider?.api_key_required && (
+                      <p className="text-[11px] text-amber-300 mt-1">
+                        {t('settingsProviderNeedsApiKeyHint', curLang, { provider: selectedProvider.display_name })}
+                      </p>
+                    )}
+                    {selectedProvider?.api_key_preview && (
+                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                        Saved key preview: {selectedProvider.api_key_preview}
+                      </p>
+                    )}
+                  </>
+                )}
+                {draft.provider === 'auto' && (
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
+                    {t('settingsAutoDetectHint', curLang)}
+                  </p>
+                )}
+                {selectedProvider?.is_oauth && (
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
+                    {t('settingsOauthHint', curLang, { provider: selectedProvider.display_name })}
                   </p>
                 )}
 

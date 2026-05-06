@@ -14,6 +14,7 @@ export function StatusBar() {
   const engineStatus = useSettingsStore((s) => s.engineStatus)
   const engineMessage = useSettingsStore((s) => s.engineMessage)
   const engineVersion = useSettingsStore((s) => s.engineVersion)
+  const connectionMessage = useSettingsStore((s) => s.connectionMessage)
   const localEnginePhase = useSettingsStore((s) => s.localEnginePhase)
   const runtimeConfig = useSettingsStore((s) => s.runtimeConfig)
   const connected = useAgentStore((s) => s.connected)
@@ -22,12 +23,15 @@ export function StatusBar() {
     selectedTaskId ? s.usageBySession[selectedTaskId] ?? null : null,
   )
 
-  const showEngineWarning =
-    deploymentMode === 'localBundle' &&
-    (engineStatus === 'incompatible' ||
-      engineStatus === 'unreachable' ||
-      engineStatus === 'setup_required' ||
-      localEnginePhase === 'error')
+  const bannerMessage = connectionMessage || engineMessage
+  const showEngineWarning = Boolean(bannerMessage) && (
+    engineStatus === 'incompatible'
+      || engineStatus === 'unreachable'
+      || engineStatus === 'setup_required'
+      || localEnginePhase === 'error'
+      || !connected
+      || deploymentMode === 'remoteManual'
+  )
 
   const engineLabel = useMemo(() => {
     const versionLabel = engineVersion ? `mira-engine ${engineVersion}` : 'mira-engine'
@@ -40,7 +44,7 @@ export function StatusBar() {
     <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {showEngineWarning && (
         <div className="px-6 py-2 text-xs text-amber-300 bg-amber-950/40 border-b border-amber-500/30">
-          {engineMessage || t('engineWarningFallback', lang)}
+          {bannerMessage || t('engineWarningFallback', lang)}
         </div>
       )}
       <div className="flex items-stretch h-[22px] px-3 gap-2 text-[11px] text-[var(--color-text-muted)]">
@@ -71,7 +75,11 @@ export function StatusBar() {
               lang={lang}
             />
           )}
-          <WsChip connected={connected} label={t(connected ? 'wsConnectedShort' : 'wsDisconnectedShort', lang)} />
+          <WsChip
+            connected={connected}
+            label={t(connected ? 'wsConnectedShort' : 'wsDisconnectedShort', lang)}
+            detail={connectionMessage || (!connected ? engineMessage : null)}
+          />
         </div>
       </div>
     </footer>
@@ -244,9 +252,9 @@ function formatTokenCount(value: number): string {
   return `${(value / 1_000_000).toFixed(value < 10_000_000 ? 1 : 0)}M`
 }
 
-function WsChip({ connected, label }: { connected: boolean; label: string }) {
+function WsChip({ connected, label, detail }: { connected: boolean; label: string; detail: string | null }) {
   return (
-    <Chip title={label}>
+    <Chip title={detail ? `${label} — ${detail}` : label}>
       <span
         className={cn(
           'w-1.5 h-1.5 rounded-full shrink-0',
