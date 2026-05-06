@@ -17,6 +17,7 @@ import {
 } from '@/services/runtimeConfig'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 
@@ -123,6 +124,15 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
     apiBase: providerSettings?.api_base ?? providerSettings?.default_api_base ?? '',
     apiKey: '',
   }
+}
+
+function resetWorkspaceScopedState() {
+  useAgentStore.getState().resetWorkspaceState()
+  useProjectStore.getState().resetWorkspaceState()
+}
+
+function workspacePathChanged(previous: string, next: string): boolean {
+  return previous.trim() !== next.trim()
 }
 
 export function SettingsModal() {
@@ -242,6 +252,7 @@ export function SettingsModal() {
     const nextApiUrl = draft.apiUrl.trim()
     const nextWsUrl = draft.wsUrl.trim()
     const nextWorkspacePath = draft.workspacePath.trim()
+    const previousWorkspacePath = store.workspacePath
     setBusy(true)
     setFeedback(null)
     setFeedbackError(false)
@@ -306,6 +317,9 @@ export function SettingsModal() {
           providers: providerUpdates,
         })
 
+        if (workspacePathChanged(previousWorkspacePath, payload.projects_root)) {
+          resetWorkspaceScopedState()
+        }
         store.setWorkspacePath(payload.projects_root)
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
@@ -325,6 +339,9 @@ export function SettingsModal() {
           throw new Error(t('settingsRemoteRequiresUrls', curLang))
         }
         const payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
+        if (workspacePathChanged(previousWorkspacePath, payload.projects_root)) {
+          resetWorkspaceScopedState()
+        }
         store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
         store.setDeploymentMode('remoteManual')
         store.setWorkspacePath(payload.projects_root)
