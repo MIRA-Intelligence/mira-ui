@@ -38,7 +38,7 @@ function providerLabel(
   return providers[provider]?.display_name ?? provider
 }
 
-function buildProviderOptions(
+export function buildProviderOptions(
   providers: RuntimeConfigPayload['providers'],
   selectedProvider: string,
 ): Array<{ value: string; label: string }> {
@@ -46,6 +46,12 @@ function buildProviderOptions(
     value,
     label: settings.display_name || value,
   }))
+  // Always offer "Auto-detect" first when present.
+  entries.sort((a, b) => {
+    if (a.value === 'auto') return -1
+    if (b.value === 'auto') return 1
+    return a.label.localeCompare(b.label)
+  })
   if (selectedProvider && !providers[selectedProvider]) {
     return [{ value: selectedProvider, label: selectedProvider }, ...entries]
   }
@@ -141,7 +147,9 @@ export function SettingsModal() {
   const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.engineStatus === 'setup_required' || store.localEnginePhase === 'error'
 
   const [draft, setDraft] = useState<SettingsDraft>(() => createDraft(store))
-  const [runtimeProviders, setRuntimeProviders] = useState<RuntimeConfigPayload['providers']>({})
+  const [runtimeProviders, setRuntimeProviders] = useState<RuntimeConfigPayload['providers']>(
+    () => store.runtimeConfig?.providers ?? {},
+  )
   const [busy, setBusy] = useState(false)
   const [runtimeLoading, setRuntimeLoading] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
@@ -155,6 +163,10 @@ export function SettingsModal() {
     setRuntimeLoading(true)
     setFeedback(null)
     setFeedbackError(false)
+
+    let bootstrapMessage: string | null = null
+    let bootstrapPhaseReady = false
+
     try {
       const localState = await bootstrapLocalEngine()
       if (localState) {
@@ -164,19 +176,34 @@ export function SettingsModal() {
           executablePath: localState.executablePath,
           version: localState.version,
         })
-        if (localState.phase !== 'ready') {
-          throw new Error(localState.message)
+        bootstrapPhaseReady = localState.phase === 'ready'
+        if (!bootstrapPhaseReady) {
+          bootstrapMessage = localState.message
         }
       }
+    } catch (error) {
+      bootstrapMessage = error instanceof Error ? error.message : String(error)
+    }
 
+    // Even when bootstrap reports a non-ready phase, the engine's HTTP API may
+    // still be reachable (e.g. setup_required). Always try to fetch the live
+    // config so the UI can render the proper provider list and saved settings.
+    try {
       const payload = await fetchRuntimeConfig()
       store.setRuntimeConfig(payload)
       store.setRuntimeConfigLoaded(true)
       store.setRuntimeConfigError(null)
       setRuntimeProviders(payload.providers)
       setDraft((current) => applyRuntimePayload(current, payload))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
+      if (!bootstrapPhaseReady && bootstrapMessage) {
+        setFeedbackError(false)
+        setFeedback(bootstrapMessage)
+      }
+    } catch (fetchError) {
+      const fetchMessage = fetchError instanceof Error ? fetchError.message : String(fetchError)
+      const message = bootstrapMessage
+        ? `${bootstrapMessage} (${fetchMessage})`
+        : fetchMessage
       store.setRuntimeConfigError(message)
       store.setRuntimeConfigLoaded(false)
       setFeedbackError(true)

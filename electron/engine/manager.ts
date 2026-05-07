@@ -3,6 +3,8 @@ import { access, mkdir, readFile, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
 import path from 'path'
+import compatibility from '../../compatibility.json'
+import { isRunningEngineStale } from './version'
 
 export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
 
@@ -45,6 +47,13 @@ const COMMAND_TIMEOUT_MS = 120_000
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
 const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
+
+// `compatibility.agent` is the exact mira-engine version pinned by this UI
+// release at build time (validated by scripts/validate-compatibility.mjs).
+// It doubles as the expected version of the bundled binary we ship next to
+// the Electron app, so it's the right anchor for "which engine should be
+// answering on the gateway port?"
+const BUNDLED_AGENT_VERSION = (compatibility as { agent?: string }).agent ?? null
 
 type JsonRecord = Record<string, unknown>
 
@@ -382,6 +391,44 @@ export class LocalEngineManager {
     return this.runCommand(['upgrade', '--package', packageName], { timeoutMs: 180_000 })
   }
 
+  async uninstallService(): Promise<EngineCommandResult> {
+    return this.runCommand(['uninstall-service'])
+  }
+
+  /**
+   * Decide whether the running engine on the gateway port is a stale install
+   * that must be torn down before the bundled binary can take over.
+   *
+   * We never replace when:
+   *   - MIRA_ENGINE_PATH is set (developer is pointing at a hand-rolled engine
+   *     intentionally — never clobber that).
+   *   - We don't have a bundled binary on disk (no replacement available).
+   *   - The compatibility pin is missing (we'd have nothing to compare against).
+   */
+  private shouldReplaceRunningEngine(
+    runningVersion: string | null | undefined,
+    bundledExecutablePath: string | null,
+  ): boolean {
+    if (process.env.MIRA_ENGINE_PATH?.trim()) return false
+    if (!bundledExecutablePath) return false
+    return isRunningEngineStale(runningVersion, BUNDLED_AGENT_VERSION)
+  }
+
+  private async replaceStaleService(): Promise<void> {
+    // Best-effort teardown. We swallow individual failures because the next
+    // step (install-service in the slow path) will surface anything fatal.
+    try {
+      await this.stop()
+    } catch {
+      /* noop */
+    }
+    try {
+      await this.uninstallService()
+    } catch {
+      /* noop */
+    }
+  }
+
   private async probeHealth(port = DEFAULT_PORT, timeoutMs = HEALTH_FAST_PATH_TIMEOUT_MS): Promise<{ ok: boolean; version: string | null }> {
     const base = `http://${DEFAULT_HOST}:${port}`
     const fetchWithTimeout = async (url: string) => {
@@ -463,16 +510,39 @@ export class LocalEngineManager {
       const fastExecutablePath = await resolveExecutable()
       const fastHealth = await this.probeHealth(DEFAULT_PORT)
       if (fastHealth.ok) {
-        return this.setState({
-          phase: 'ready',
-          message: 'Local engine is ready.',
-          executablePath: fastExecutablePath,
-          serviceInstalled: true,
-          serviceRunning: true,
-          healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
-          version: fastHealth.version,
-          error: null,
-        })
+        // Before we trust whatever's already listening on the gateway port,
+        // check it actually corresponds to the bundled mira-engine. After a
+        // bundle upgrade, the previous launchd / systemd / windows service
+        // can keep its old in-memory engine alive; that engine reports a
+        // smaller provider catalogue and a stale agent_version, which is
+        // exactly the "only auto provider, no API key field" bug users hit.
+        // If we detect that, force a replace flow before declaring ready.
+        if (this.shouldReplaceRunningEngine(fastHealth.version, fastExecutablePath)) {
+          this.setState({
+            phase: 'starting',
+            message: BUNDLED_AGENT_VERSION
+              ? `Replacing stale local engine (running ${fastHealth.version ?? 'unknown'}, bundle ships ${BUNDLED_AGENT_VERSION}).`
+              : 'Replacing stale local engine to match bundled binary.',
+            executablePath: fastExecutablePath,
+            healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+            error: null,
+          })
+          await this.replaceStaleService()
+          // Fall through to the slow path below: status() will now report
+          // `installed=false`, triggering install-service + start with the
+          // bundled binary, after which waitForHealth verifies the new engine.
+        } else {
+          return this.setState({
+            phase: 'ready',
+            message: 'Local engine is ready.',
+            executablePath: fastExecutablePath,
+            serviceInstalled: true,
+            serviceRunning: true,
+            healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+            version: fastHealth.version,
+            error: null,
+          })
+        }
       }
 
       const status = await this.status()
