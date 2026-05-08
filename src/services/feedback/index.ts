@@ -144,4 +144,14 @@ export function pendingQueueLength(): number {
   return queueLength()
 }
 
+// Promo / "join our group" link shown at the bottom of the feedback form.
+// Falls back to a placeholder so the promo block always renders even when
+// VITE_FEISHU_GROUP_INVITE_URL is empty in the build.
+const DEFAULT_INVITE_PLACEHOLDER =
+  'https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=PLACEHOLDER'
+
+export function getInviteUrl(override?: FeedbackChannelConfig | null): string {
+  return getAdapter(override).inviteUrl() ?? DEFAULT_INVITE_PLACEHOLDER
+}
+
 export type { FeedbackChannelConfig, FeedbackPayload, FeedbackSubmitOutcome }

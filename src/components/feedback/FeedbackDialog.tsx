@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getDisplayHandle } from '@/lib/clientId'
+import { getInviteUrl } from '@/services/feedback'
 import { t, type I18nKey } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { FeedbackSuccessPanel } from './FeedbackSuccessPanel'
@@ -52,6 +53,7 @@ export function FeedbackDialog() {
   const [contactValue, setContactValue] = useState('')
 
   const handle = useMemo(() => getDisplayHandle(), [])
+  const promoUrl = useMemo(() => getInviteUrl(), [])
 
   useEffect(() => {
     if (!dialogOpen) {
@@ -121,7 +123,6 @@ export function FeedbackDialog() {
 
         {showSuccess ? (
           <FeedbackSuccessPanel
-            inviteUrl={success.inviteUrl}
             onDone={() => {
               resetForm()
               closeDialog()
@@ -224,6 +225,38 @@ export function FeedbackDialog() {
                 <span>
                   {t('feedbackHandleLabel', lang)}: <span className="font-mono">{handle}</span>
                 </span>
+              </div>
+
+              <div className="rounded-md border border-dashed border-[var(--color-accent)]/40 bg-[var(--color-accent)]/5 px-3 py-2.5 flex items-start gap-2">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="shrink-0 mt-0.5 text-[var(--color-accent)]"
+                  aria-hidden
+                >
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-secondary)] flex-1">
+                  {t('feedbackPromoText', lang)}{' '}
+                  <a
+                    href={promoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      window.open(promoUrl, '_blank', 'noopener,noreferrer')
+                    }}
+                    className="text-[var(--color-accent)] underline underline-offset-2 hover:opacity-80 break-all"
+                  >
+                    {t('feedbackPromoCta', lang)}
+                  </a>
+                </p>
               </div>
 
               {errorText && (

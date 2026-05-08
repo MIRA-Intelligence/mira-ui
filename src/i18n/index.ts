@@ -350,6 +350,8 @@ const dict = {
     feedbackOverrideInviteUrl: 'Group invite URL',
     feedbackOverrideClear: 'Clear override',
     feedbackPendingNotice: '{count} feedback report(s) pending retry',
+    feedbackPromoText: 'Join our Feishu group to get the latest updates and chat with the team:',
+    feedbackPromoCta: 'Open invite link',
   },
   zh: {
     settings: '设置',
@@ -698,6 +700,8 @@ const dict = {
     feedbackOverrideInviteUrl: '群邀请链接',
     feedbackOverrideClear: '清除覆盖',
     feedbackPendingNotice: '{count} 条反馈待重试',
+    feedbackPromoText: '加入飞书反馈群，获取产品最新动态、第一时间与团队交流：',
+    feedbackPromoCta: '打开邀请链接',
   },
 } as const
 
