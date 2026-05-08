@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { PipelineProgress } from '@/components/pipeline/PipelineProgress'
@@ -9,8 +10,10 @@ import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
+import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { cn } from '@/lib/utils'
@@ -40,8 +43,13 @@ export function AppLayout() {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
   const lang = useSettingsStore((s) => s.language)
+  const flushPendingFeedback = useFeedbackStore((s) => s.flushPending)
   useWebSocket()
   useUpdateCheck()
+
+  useEffect(() => {
+    void flushPendingFeedback()
+  }, [flushPendingFeedback])
 
   return (
     <div className="h-screen flex flex-col">
@@ -109,6 +117,7 @@ export function AppLayout() {
       <SettingsModal />
       <SkillsPluginsModal />
       <NewProjectModal />
+      <FeedbackDialog />
     </div>
   )
 }

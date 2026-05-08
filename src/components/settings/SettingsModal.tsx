@@ -15,6 +15,8 @@ import {
   type ReasoningEffort,
   type RuntimeConfigPayload,
 } from '@/services/runtimeConfig'
+import { useFeedbackStore } from '@/stores/feedbackStore'
+import { getActiveChannelId } from '@/services/feedback'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useAgentStore } from '@/stores/agentStore'
@@ -481,7 +483,7 @@ export function SettingsModal() {
               active={activeTab === 'connection'}
               onClick={() => setActiveTab('connection')}
             />
-            <SettingsTabButton
+              <SettingsTabButton
               label="Local Engine"
               active={activeTab === 'localEngine'}
               disabled={!localMode}
@@ -590,6 +592,8 @@ export function SettingsModal() {
                 receivePrereleases={store.receivePrereleases}
                 setReceivePrereleases={store.setReceivePrereleases}
               />
+
+              <FeedbackSection lang={curLang} onClose={closeSettings} />
 
               {!localMode && (
                 <Section title={t('connection', curLang)}>
@@ -1020,6 +1024,117 @@ function AppUpdatesSection(
       <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
         {t('updateReceivePrereleasesHint', lang)}
       </p>
+    </Section>
+  )
+}
+
+function FeedbackSection({ lang, onClose }: { lang: Language; onClose: () => void }) {
+  const openDialog = useFeedbackStore((s) => s.openDialog)
+  const pendingCount = useFeedbackStore((s) => s.pendingCount)
+  const channelOverrides = useFeedbackStore((s) => s.channelOverrides)
+  const setOverride = useFeedbackStore((s) => s.setOverride)
+  const channelId = getActiveChannelId()
+  const override = channelOverrides[channelId]
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [draftOverride, setDraftOverride] = useState({
+    webhookUrl: override?.webhookUrl ?? '',
+    secret: override?.secret ?? '',
+    inviteUrl: override?.inviteUrl ?? '',
+  })
+
+  useEffect(() => {
+    setDraftOverride({
+      webhookUrl: override?.webhookUrl ?? '',
+      secret: override?.secret ?? '',
+      inviteUrl: override?.inviteUrl ?? '',
+    })
+  }, [override?.webhookUrl, override?.secret, override?.inviteUrl])
+
+  const handleSaveOverride = () => {
+    const cleaned = {
+      webhookUrl: draftOverride.webhookUrl.trim(),
+      secret: draftOverride.secret.trim(),
+      inviteUrl: draftOverride.inviteUrl.trim(),
+    }
+    const hasAny = Object.values(cleaned).some((v) => v.length > 0)
+    setOverride(channelId, hasAny ? cleaned : null)
+  }
+
+  const handleClearOverride = () => {
+    setDraftOverride({ webhookUrl: '', secret: '', inviteUrl: '' })
+    setOverride(channelId, null)
+  }
+
+  return (
+    <Section title={t('feedbackHelpSection', lang)}>
+      <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed mb-3">
+        {t('feedbackHelpHint', lang)}
+      </p>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div className="text-xs text-[var(--color-text-secondary)]">
+          {t('feedbackChannelLabel', lang)}: <span className="font-mono">{channelId}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            onClose()
+            // Open after settings closes so the dialog stacks correctly.
+            window.setTimeout(() => openDialog(), 0)
+          }}
+          className="px-3 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+        >
+          {t('feedbackOpenForm', lang)}
+        </button>
+      </div>
+      {pendingCount > 0 && (
+        <p className="text-[11px] text-amber-300 mb-3">
+          {t('feedbackPendingNotice', lang, { count: pendingCount })}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() => setShowAdvanced((v) => !v)}
+        className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+      >
+        {showAdvanced ? '▾' : '▸'} {t('feedbackOverrideAdvanced', lang)}
+      </button>
+      {showAdvanced && (
+        <div className="mt-3 space-y-2">
+          <Label text={t('feedbackOverrideWebhookUrl', lang)} className="mb-1" />
+          <input
+            value={draftOverride.webhookUrl}
+            onChange={(e) => setDraftOverride((d) => ({ ...d, webhookUrl: e.target.value }))}
+            onBlur={handleSaveOverride}
+            placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..."
+            className={inputClass}
+          />
+          <Label text={t('feedbackOverrideSecret', lang)} className="mb-1 mt-2" />
+          <input
+            type="password"
+            value={draftOverride.secret}
+            onChange={(e) => setDraftOverride((d) => ({ ...d, secret: e.target.value }))}
+            onBlur={handleSaveOverride}
+            className={inputClass}
+          />
+          <Label text={t('feedbackOverrideInviteUrl', lang)} className="mb-1 mt-2" />
+          <input
+            value={draftOverride.inviteUrl}
+            onChange={(e) => setDraftOverride((d) => ({ ...d, inviteUrl: e.target.value }))}
+            onBlur={handleSaveOverride}
+            placeholder="https://applink.feishu.cn/client/chat/chatter/add_by_link?..."
+            className={inputClass}
+          />
+          {override && (
+            <button
+              type="button"
+              onClick={handleClearOverride}
+              className="text-[11px] text-red-400 hover:text-red-300 transition-colors mt-2"
+            >
+              {t('feedbackOverrideClear', lang)}
+            </button>
+          )}
+        </div>
+      )}
     </Section>
   )
 }
