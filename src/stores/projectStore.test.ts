@@ -57,6 +57,28 @@ describe('projectStore runtime preferences', () => {
   })
 
   it('clears stale logs when creating a reused project id', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/projects') && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            id: 'PRJ-0002',
+            display_name: 'PRJ-0002',
+            project_dir: '/tmp/projects/PRJ-0002',
+            has_plan: false,
+            run_mode: 'auto',
+            agent_profile: 'default',
+            contract_version: 1,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response(
+        JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }))
+
     useAgentStore.getState().addLog('PRJ-0002', {
       id: 'stale-log',
       timestamp: new Date().toISOString(),
@@ -67,12 +89,15 @@ describe('projectStore runtime preferences', () => {
     expect(useAgentStore.getState().logsByProject['PRJ-0002']).toHaveLength(1)
 
     await useProjectStore.getState().createProject({
+      projectId: 'PRJ-0002',
+      displayName: 'PRJ-0002',
       description: 'new project',
       dataPath: '/tmp/data',
       references: '',
     })
 
     expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-0002')
+    expect(useProjectStore.getState().tasks[0]?.projectDir).toBe('/tmp/projects/PRJ-0002')
     expect(useAgentStore.getState().logsByProject['PRJ-0002']).toBeUndefined()
   })
 

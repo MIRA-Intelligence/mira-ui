@@ -4,6 +4,7 @@ import type {
   NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AppMode, AgentProfile, ContractVersion,
 } from '@/types'
 import {
+  createRemoteProject,
   deleteProjectFiles,
   fetchPlan,
   fetchPlanContract,
@@ -47,14 +48,11 @@ interface ProjectState {
   duplicateTask: (id: string) => void
   createProject: (input: NewProjectInput) => Promise<string>
   loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
-  nextProjectId: () => string
   resetWorkspaceState: () => void
 }
 
 let dupCounter = 0
 
-const PRJ_RE = /^PRJ-(\d+)$/
-const PROJECT_FOLDER_PREFIX = 'PRJ'
 const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'pending',
   'running',
@@ -100,24 +98,8 @@ function normalizeExperimentStatus(value: unknown): ExperimentStatus {
   return 'pending'
 }
 
-function collectProjectNumbers(ids: Iterable<string>): Set<number> {
-  const numbers = new Set<number>()
-  for (const id of ids) {
-    const match = PRJ_RE.exec(id)
-    if (!match) continue
-    numbers.add(parseInt(match[1], 10))
-  }
-  return numbers
-}
-
-function findFirstMissingProjectNumber(used: Set<number>): number {
-  let n = 1
-  while (used.has(n)) n += 1
-  return n
-}
-
 function isProjectFolderId(id: string): boolean {
-  return id.startsWith(PROJECT_FOLDER_PREFIX)
+  return id.trim().length > 0
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -424,11 +406,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ tasks: updated, selectedTaskId: newId })
   },
 
-  nextProjectId: () => {
-    const used = collectProjectNumbers(get().tasks.map((t) => t.id))
-    return `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
-  },
-
   resetWorkspaceState: () => {
     set({
       tasks: [],
@@ -452,15 +429,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       input.contractVersion ?? current.contractVersion,
       current.contractVersion,
     )
-    const remotes = await fetchProjects()
-    const used = collectProjectNumbers([
-      ...(remotes ?? []).map((r) => r.id),
-      ...get().tasks.map((t) => t.id),
-    ])
-    const id = `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
+    const remote = await createRemoteProject({
+      projectId: input.projectId,
+      displayName: input.displayName ?? input.title,
+      projectParentDir: input.projectParentDir,
+      projectDir: input.projectDir,
+      runMode: mode,
+      agentProfile,
+      contractVersion,
+      automationPolicy: input.automationPolicy,
+    })
+    const id = remote.id
+    if (!id) {
+      throw new Error('Project creation response did not include an id')
+    }
+    const label = (remote.display_name && remote.display_name.trim())
+      || input.displayName
+      || input.title
+      || id
     const task: ProjectTask = {
       id,
-      label: id,
+      label,
+      projectDir: remote.project_dir,
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
@@ -513,6 +503,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       newTasks.push({
         id: r.id,
         label: (r.display_name && r.display_name.trim()) || r.id,
+        projectDir: r.project_dir,
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
@@ -538,12 +529,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const title = remote.title || task.title
       const coreQuestion = remote.core_question ?? task.coreQuestion
       const startedAt = remote.started_at || task.startedAt
+      const projectDir = remote.project_dir ?? task.projectDir
       if (
         task.label === displayName
         && task.status === status
         && task.title === title
         && task.coreQuestion === coreQuestion
         && task.startedAt === startedAt
+        && task.projectDir === projectDir
         && task.runMode === runMode
         && task.agentProfile === agentProfile
         && task.contractVersion === contractVersion
@@ -553,6 +546,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return {
         ...task,
         label: displayName,
+        projectDir,
         status,
         title,
         coreQuestion,

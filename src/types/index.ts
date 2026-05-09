@@ -126,6 +126,7 @@ export interface ResultSection {
 export interface ProjectTask {
   id: string
   label: string
+  projectDir?: string
   status: 'in_progress' | 'completed' | 'pending'
   title: string
   coreQuestion?: string
@@ -276,6 +277,10 @@ export interface LiteratureReviewOptions {
 }
 
 export interface NewProjectInput {
+  projectId?: string
+  displayName?: string
+  projectParentDir?: string
+  projectDir?: string
   description: string
   title?: string
   domain?: string

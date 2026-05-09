@@ -100,6 +100,7 @@ interface Window {
       executablePath: string | null
     }>
     selectDataPath?: (kind: 'file' | 'directory') => Promise<string | null>
+    selectDirectory?: () => Promise<string | null>
     upgradeLocalEngine?: (packageName?: string) => Promise<{
       ok: boolean
       code: number

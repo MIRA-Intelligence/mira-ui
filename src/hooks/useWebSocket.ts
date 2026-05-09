@@ -12,7 +12,14 @@ import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 
 async function syncOnConnect() {
-  const { workspacePath, apiUrl, setRuntimeConfig, setRuntimeConfigLoaded, setRuntimeConfigError } = useSettingsStore.getState()
+  const {
+    workspacePath,
+    apiUrl,
+    setRuntimeConfig,
+    setRuntimeConfigLoaded,
+    setRuntimeConfigError,
+    setWorkspacePath,
+  } = useSettingsStore.getState()
   try {
     const payload = await fetchRuntimeConfig(apiUrl)
     const nextWorkspacePath = payload.runtime.workspace || payload.projects_root
@@ -26,6 +33,7 @@ async function syncOnConnect() {
     setRuntimeConfig(payload)
     setRuntimeConfigLoaded(true)
     setRuntimeConfigError(null)
+    setWorkspacePath(nextWorkspacePath)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     setRuntimeConfigError(message)

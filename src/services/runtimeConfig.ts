@@ -20,6 +20,12 @@ export interface RuntimeConfigPayload {
   projects_root: string
   config_path: string
   persisted: boolean
+  project_location?: {
+    mode: 'user_selectable' | 'managed'
+    custom_dir_allowed: boolean
+    default_parent_dir: string
+    workspace_file: string
+  }
   runtime: {
     workspace: string
     workspace_resolved?: string
@@ -72,9 +78,9 @@ export async function fetchRuntimeConfig(apiUrl?: string): Promise<RuntimeConfig
 }
 
 export async function saveRuntimeConfig(payload: {
-  projects_root: string
+  projects_root?: string
   runtime: {
-    workspace: string
+    workspace?: string
     provider: string
     model: string
     reasoning_effort: ReasoningEffort
