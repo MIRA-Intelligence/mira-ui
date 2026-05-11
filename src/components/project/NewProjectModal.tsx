@@ -82,7 +82,7 @@ function dedupePaths(paths: string[]): string[] {
 
 function slugifyProjectId(value: string): string {
   let text = value.trim().toLowerCase()
-  text = text.replace(/[\\/]/g, '-')
+  text = text.replace(/[\\/:]/g, '-')
   text = text.split(/\s+/).filter(Boolean).join('-')
   while (text.includes('--')) text = text.replace(/--/g, '-')
   text = text.replace(/^[._-]+|[._-]+$/g, '')
@@ -573,7 +573,7 @@ export function NewProjectModal() {
           ...referencesUpload.extracted.map((item) => item.path),
         ])
       } catch (err) {
-        await deleteTask(projectId, false)
+        await deleteTask(projectId, true)
         setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
         setCreating(false)
         return
