@@ -47,6 +47,7 @@ interface ProjectState {
   createProject: (input: NewProjectInput) => Promise<string>
   loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
   nextProjectId: () => string
+  resetWorkspaceState: () => void
 }
 
 let dupCounter = 0
@@ -413,6 +414,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   nextProjectId: () => {
     const used = collectProjectNumbers(get().tasks.map((t) => t.id))
     return `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
+  },
+
+  resetWorkspaceState: () => {
+    set({
+      tasks: [],
+      selectedTaskId: null,
+      selectedExpId: null,
+      activeStage: 'research',
+      stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
+      startedAt: Date.now(),
+      projectsLoaded: false,
+      contractsByTask: {},
+    })
   },
 
   createProject: async (input) => {

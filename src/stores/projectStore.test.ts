@@ -205,6 +205,56 @@ describe('projectStore runtime preferences', () => {
     expect(state.selectedTaskId).toBe('PRJ-0001')
   })
 
+  it('resetWorkspaceState clears project data that is keyed only by project id', () => {
+    useProjectStore.setState({
+      tasks: [{
+        id: 'PRJ-0001',
+        label: 'PRJ-0001',
+        status: 'in_progress',
+        title: 'Old Workspace Project',
+        coreQuestion: 'old',
+        runMode: 'manual',
+        agentProfile: 'research',
+        contractVersion: 2,
+        currentExperiment: 'Exp001',
+        experiments: [{ id: 'Exp001', title: 'stale exp', status: 'running' }],
+        knowledge: ['old knowledge'],
+        research: { references: [], notes: [] },
+        result: {},
+        startedAt: '2026-05-06T00:00:00.000Z',
+      }],
+      selectedTaskId: 'PRJ-0001',
+      selectedExpId: 'Exp001',
+      activeStage: 'experiment',
+      stats: { experiments: 1, completed: 0, failed: 0, running: 1 },
+      projectsLoaded: true,
+      contractsByTask: {
+        'PRJ-0001': {
+          profile: 'research',
+          contract_version: 2,
+          required_completed_fields: [],
+          required_falsify_fields: [],
+          falsify_keywords: [],
+        },
+      },
+    })
+
+    useProjectStore.getState().resetWorkspaceState()
+
+    expect(useProjectStore.getState().tasks).toEqual([])
+    expect(useProjectStore.getState().selectedTaskId).toBeNull()
+    expect(useProjectStore.getState().selectedExpId).toBeNull()
+    expect(useProjectStore.getState().activeStage).toBe('research')
+    expect(useProjectStore.getState().stats).toEqual({
+      experiments: 0,
+      completed: 0,
+      failed: 0,
+      running: 0,
+    })
+    expect(useProjectStore.getState().projectsLoaded).toBe(false)
+    expect(useProjectStore.getState().contractsByTask).toEqual({})
+  })
+
   it('marks task completed when refreshed plan has phase3 result output', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)

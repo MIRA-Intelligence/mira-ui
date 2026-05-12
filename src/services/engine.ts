@@ -1,3 +1,4 @@
+import compatibility from '../../compatibility.json'
 import type { RuntimeConfigPayload } from './runtimeConfig'
 import { t } from '@/i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -10,9 +11,11 @@ export interface EngineProbeResult {
   version: string | null
 }
 
+// Sourced from the repo-root compatibility.json (single source of truth shared
+// with CI's validate-compatibility.mjs). Update that file, not these consts.
 const COMPATIBILITY = {
-  minAgentForUi: '0.1.4',
-  apiContract: 'v1',
+  minAgentForUi: compatibility.min_agent_for_ui,
+  apiContract: compatibility.api_contract,
 }
 
 interface VersionPayload {

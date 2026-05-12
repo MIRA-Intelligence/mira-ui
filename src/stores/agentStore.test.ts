@@ -211,4 +211,29 @@ describe('agentStore session usage tracking', () => {
     expect(useAgentStore.getState().getSessionUsage('PRJ-G')).toBeNull()
     expect(useAgentStore.getState().getSessionUsage('PRJ-H')?.tokensUsed).toBe(200)
   })
+
+  it('resetWorkspaceState clears workspace-scoped logs and usage without disconnecting', () => {
+    const store = useAgentStore.getState()
+    store.setConnected(true)
+    store.addLog('PRJ-0001', {
+      id: 'log-1',
+      timestamp: '2026-05-06T00:00:00.000Z',
+      content: 'old workspace message',
+      type: 'response',
+      metadata: {},
+    })
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-0001',
+      content: 'old progress',
+      metadata: { tokens_used_session: 100 },
+    })
+
+    store.resetWorkspaceState()
+
+    expect(useAgentStore.getState().logsByProject).toEqual({})
+    expect(useAgentStore.getState().usageBySession).toEqual({})
+    expect(useAgentStore.getState().isStreaming).toBe(false)
+    expect(useAgentStore.getState().connected).toBe(true)
+  })
 })
