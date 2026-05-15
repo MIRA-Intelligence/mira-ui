@@ -1,4 +1,4 @@
-export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
+export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
 
 export interface LocalEngineCommandResult {
   ok: boolean
@@ -52,6 +52,10 @@ export async function getLocalEngineStatus(): Promise<LocalEngineStatusResult | 
 
 export async function installLocalEngineService(): Promise<LocalEngineCommandResult | null> {
   return getElectronApi()?.installLocalEngineService?.() ?? null
+}
+
+export async function repairLocalEngineService(): Promise<LocalEngineBootstrapState | null> {
+  return getElectronApi()?.repairLocalEngineService?.() ?? null
 }
 
 export async function startLocalEngine(): Promise<LocalEngineCommandResult | null> {

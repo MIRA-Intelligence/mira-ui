@@ -3,6 +3,7 @@ import { useSettingsStore, type DeploymentMode, type Theme, type Language } from
 import {
   bootstrapLocalEngine,
   doctorLocalEngine,
+  repairLocalEngineService,
   startLocalEngine,
   stopLocalEngine,
   upgradeLocalEngine,
@@ -401,6 +402,37 @@ export function SettingsModal() {
     }
   }
 
+  const handleRepairEngine = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback('Repairing local engine service...')
+    try {
+      const localState = await repairLocalEngineService()
+      if (!localState) {
+        throw new Error('Desktop engine manager is unavailable.')
+      }
+      store.setLocalEngineBootstrap({
+        phase: localState.phase,
+        message: localState.message,
+        executablePath: localState.executablePath,
+        version: localState.version,
+      })
+      const probe = await probeEngineCompatibility(LOCAL_API_URL)
+      store.setEngineBootstrap({
+        status: probe.status,
+        message: probe.status === 'compatible' ? null : probe.message,
+        version: probe.version,
+      })
+      setFeedback(probe.status === 'compatible' ? 'Local engine service repaired and verified.' : probe.message)
+      setFeedbackError(probe.status !== 'compatible')
+    } catch (error) {
+      setFeedbackError(true)
+      setFeedback(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleDoctorEngine = async () => {
     setBusy(true)
     setFeedbackError(false)
@@ -633,6 +665,9 @@ export function SettingsModal() {
                   )}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <ActionButton disabled={busy} onClick={handleRepairEngine}>
+                    Repair service
+                  </ActionButton>
                   <ActionButton disabled={busy} onClick={handleRestartEngine}>
                     Restart local engine
                   </ActionButton>

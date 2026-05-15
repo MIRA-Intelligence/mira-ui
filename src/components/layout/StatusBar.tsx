@@ -271,7 +271,7 @@ function engineDotClass(
   status: ReturnType<typeof useSettingsStore.getState>['engineStatus'],
   phase: ReturnType<typeof useSettingsStore.getState>['localEnginePhase'],
 ): string {
-  if (phase === 'checking' || phase === 'installing' || phase === 'starting') {
+  if (phase === 'checking' || phase === 'installing' || phase === 'repairing' || phase === 'starting') {
     return 'bg-sky-400 animate-pulse'
   }
   if (status === 'compatible') return 'bg-emerald-400'
@@ -296,7 +296,7 @@ function engineStatusKey(
   | 'engineStatusSetupRequired'
   | 'engineStatusUnreachable'
   | 'engineStatusUnknown' {
-  if (phase === 'checking' || phase === 'installing' || phase === 'starting') {
+  if (phase === 'checking' || phase === 'installing' || phase === 'repairing' || phase === 'starting') {
     return 'engineStatusBooting'
   }
   if (phase === 'error') return 'engineStatusError'

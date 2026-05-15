@@ -13,7 +13,7 @@ interface Window {
   electronAPI?: {
     platform: string
     bootstrapLocalEngine?: () => Promise<{
-      phase: 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
+      phase: 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
       executablePath: string | null
       healthUrl: string
@@ -24,7 +24,7 @@ interface Window {
       error: string | null
     }>
     getBootstrapState?: () => Promise<{
-      phase: 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
+      phase: 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
       executablePath: string | null
       healthUrl: string
@@ -56,6 +56,17 @@ interface Window {
       stderr: string
       command: string[]
       executablePath: string | null
+    }>
+    repairLocalEngineService?: () => Promise<{
+      phase: 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
+      message: string
+      executablePath: string | null
+      healthUrl: string
+      version: string | null
+      serviceInstalled: boolean | null
+      serviceRunning: boolean | null
+      lastCommand: string[] | null
+      error: string | null
     }>
     startLocalEngine?: () => Promise<{
       ok: boolean

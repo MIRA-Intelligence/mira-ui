@@ -4,7 +4,7 @@ import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
 import path from 'path'
 
-export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
+export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
 
 export interface EngineCommandResult {
   ok: boolean
@@ -32,6 +32,9 @@ type EngineStatusPayload = {
   running?: boolean
   port?: number
   log_file?: string
+  service_mode?: string
+  windows_service?: string
+  windows_service_status?: string
 }
 
 const DEFAULT_PORT = 18790
@@ -42,6 +45,7 @@ const HEALTH_POLL_FAST_INTERVAL_MS = 250
 const HEALTH_POLL_SLOW_INTERVAL_MS = 1_000
 const HEALTH_POLL_FAST_WINDOW_MS = 5_000
 const COMMAND_TIMEOUT_MS = 120_000
+const REPAIR_TIMEOUT_MS = 180_000
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
 const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
@@ -96,6 +100,10 @@ async function resolveExecutable(): Promise<string | null> {
   }
 
   return null
+}
+
+function psLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
 }
 
 function defaultState(): EngineBootstrapState {
@@ -311,6 +319,7 @@ export class LocalEngineManager {
       const child = spawn(executablePath, args, {
         shell: process.platform === 'win32' && executablePath === engineExecutableName(),
         env: process.env,
+        windowsHide: true,
       })
 
       let stdout = ''
@@ -318,6 +327,77 @@ export class LocalEngineManager {
       const timeout = setTimeout(() => {
         child.kill('SIGTERM')
       }, options?.timeoutMs ?? COMMAND_TIMEOUT_MS)
+
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString()
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString()
+      })
+      child.on('error', (err) => {
+        clearTimeout(timeout)
+        resolve({
+          ok: false,
+          code: 1,
+          stdout: stdout.trim(),
+          stderr: `${stderr}\n${err.message}`.trim(),
+          command,
+          executablePath: resolvedExecutable,
+        })
+      })
+      child.on('close', (code) => {
+        clearTimeout(timeout)
+        resolve({
+          ok: code === 0,
+          code: code ?? 1,
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          command,
+          executablePath: resolvedExecutable,
+        })
+      })
+    })
+  }
+
+  async runCommandElevated(args: string[], options?: { timeoutMs?: number }): Promise<EngineCommandResult> {
+    if (process.platform !== 'win32') {
+      return this.runCommand(args, options)
+    }
+
+    const resolvedExecutable = await resolveExecutable()
+    const executablePath = resolvedExecutable ?? engineExecutableName()
+    const command = [executablePath, ...args]
+
+    this.setState({
+      executablePath: resolvedExecutable,
+      lastCommand: command,
+    })
+
+    const argumentList = args.map(psLiteral).join(', ')
+    const script = [
+      `$process = Start-Process -FilePath ${psLiteral(executablePath)}`,
+      `-ArgumentList @(${argumentList})`,
+      '-Verb RunAs -Wait -PassThru;',
+      'exit $process.ExitCode',
+    ].join(' ')
+
+    return new Promise((resolve) => {
+      const child = spawn('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        script,
+      ], {
+        env: process.env,
+        windowsHide: true,
+      })
+
+      let stdout = ''
+      let stderr = ''
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM')
+      }, options?.timeoutMs ?? REPAIR_TIMEOUT_MS)
 
       child.stdout.on('data', (chunk) => {
         stdout += chunk.toString()
@@ -374,8 +454,26 @@ export class LocalEngineManager {
     return this.runCommand(['stop'])
   }
 
+  private installServiceArgs(port = DEFAULT_PORT): string[] {
+    return [
+      'install-service',
+      '--host',
+      DEFAULT_HOST,
+      '--port',
+      String(port),
+      '--home',
+      app.getPath('home'),
+      '--config',
+      this.configPath(),
+    ]
+  }
+
+  private commandWithHome(command: string): string[] {
+    return [command, '--home', app.getPath('home')]
+  }
+
   async installService(port = DEFAULT_PORT): Promise<EngineCommandResult> {
-    return this.runCommand(['install-service', '--host', DEFAULT_HOST, '--port', String(port)])
+    return this.runCommand(this.installServiceArgs(port))
   }
 
   async upgrade(packageName = 'mira-engine'): Promise<EngineCommandResult> {
@@ -434,6 +532,80 @@ export class LocalEngineManager {
       await new Promise((resolve) => setTimeout(resolve, pollInterval))
     }
     return { ok: false, version: null, ...this.diagnoseBootstrapFailure(await this.readLogTail(logPath), port) }
+  }
+
+  async repairLocalEngineService(): Promise<EngineBootstrapState> {
+    this.setState({
+      phase: 'repairing',
+      message: 'Repairing local engine service...',
+      error: null,
+    })
+
+    const status = await this.status()
+    const port = status.payload?.port ?? DEFAULT_PORT
+    const healthUrl = `http://${DEFAULT_HOST}:${port}/health`
+
+    const install = process.platform === 'win32'
+      ? await this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
+      : await this.installService(port)
+    if (!install.ok) {
+      return this.setState({
+        phase: 'error',
+        message: install.stderr || install.stdout || 'Local engine service repair failed.',
+        executablePath: install.executablePath,
+        serviceInstalled: false,
+        serviceRunning: false,
+        healthUrl,
+        error: install.stderr || install.stdout || 'install-service failed',
+      })
+    }
+
+    const start = process.platform === 'win32'
+      ? await this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
+      : await this.start()
+    if (!start.ok) {
+      return this.setState({
+        phase: 'error',
+        message: start.stderr || start.stdout || 'Local engine service repaired but failed to start.',
+        executablePath: start.executablePath,
+        serviceInstalled: true,
+        serviceRunning: false,
+        healthUrl,
+        error: start.stderr || start.stdout || 'start failed',
+      })
+    }
+
+    this.setState({
+      phase: 'starting',
+      message: 'Waiting for repaired local engine health check...',
+      executablePath: install.executablePath,
+      serviceInstalled: true,
+      serviceRunning: true,
+      healthUrl,
+    })
+
+    const health = await this.waitForHealth(port, status.payload?.log_file)
+    if (!health.ok) {
+      return this.setState({
+        phase: 'error',
+        message: health.message,
+        serviceInstalled: true,
+        serviceRunning: true,
+        healthUrl,
+        version: null,
+        error: health.error ?? health.message,
+      })
+    }
+
+    return this.setState({
+      phase: 'ready',
+      message: health.message,
+      serviceInstalled: true,
+      serviceRunning: true,
+      version: health.version,
+      healthUrl,
+      error: null,
+    })
   }
 
   async bootstrapLocalEngine(): Promise<EngineBootstrapState> {

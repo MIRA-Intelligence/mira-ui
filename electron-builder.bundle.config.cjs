@@ -43,13 +43,14 @@ module.exports = {
   win: {
     target: [
       'nsis',
-      'portable',
     ],
   },
   nsis: {
     artifactName: '${productName}-bundle-${version}-${os}-${arch}-setup.${ext}',
-  },
-  portable: {
-    artifactName: '${productName}-bundle-${version}-${os}-${arch}-portable.${ext}',
+    oneClick: false,
+    perMachine: true,
+    allowElevation: true,
+    allowToChangeInstallationDirectory: false,
+    include: 'build/nsis/bundle-service.nsh',
   },
 }

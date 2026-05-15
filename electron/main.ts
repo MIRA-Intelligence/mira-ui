@@ -47,6 +47,7 @@ app.whenReady().then(() => {
   ipcMain.handle('engine:stop', async () => engineManager.stop())
   ipcMain.handle('engine:doctor', async () => engineManager.doctor())
   ipcMain.handle('engine:install-service', async () => engineManager.installService())
+  ipcMain.handle('engine:repair-service', async () => engineManager.repairLocalEngineService())
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
     return engineManager.upgrade(packageName || 'mira-engine')
   })

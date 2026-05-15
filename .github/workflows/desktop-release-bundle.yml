@@ -116,14 +116,6 @@ jobs:
           $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
           Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
 
-          $portableExe = Get-ChildItem -Path release-bundle -Filter "MIRA-bundle-*-win-*-portable.exe" | Select-Object -First 1
-          if (-not $portableExe) {
-            Write-Error "Bundle portable executable not found in release-bundle/"
-            exit 1
-          }
-          $portableZip = [System.IO.Path]::ChangeExtension($portableExe.FullName, ".zip")
-          Compress-Archive -Path $portableExe.FullName -DestinationPath $portableZip -Force
-
       - name: Upload macOS bundle release assets
         if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
@@ -144,7 +136,6 @@ jobs:
           name: miraui-release-bundle-windows
           path: |
             release-bundle/MIRA-bundle-*-win-*-setup.zip
-            release-bundle/MIRA-bundle-*-win-*-portable.zip
 
   publish-bundle-release:
     needs: build-bundle
