@@ -1,6 +1,7 @@
 param(
   [string]$MiraRepo = "",
   [string]$MiraUiRepo = "",
+  [string]$PythonExe = "",
   [string]$WinSwVersion = "v3.0.0-alpha.11",
   [switch]$RecreateVenv,
   [switch]$SkipEngineBuild,
@@ -64,6 +65,76 @@ function Get-CommandPath {
     throw "Required command not found on PATH: $Name"
   }
   return $command.Source
+}
+
+function Get-PythonInfo {
+  param(
+    [string]$FilePath,
+    [string[]]$Arguments = @()
+  )
+
+  $probeArgs = @($Arguments) + @("-c", "import platform, sys; print(f'{sys.version_info.major}.{sys.version_info.minor};{platform.machine().lower()}')")
+  $output = & $FilePath @probeArgs 2>$null
+  if ($LASTEXITCODE -ne 0 -or -not $output) {
+    return $null
+  }
+  return ($output | Select-Object -First 1).Trim()
+}
+
+function Assert-Arm64Python311Info {
+  param(
+    [string]$Info,
+    [string]$Context
+  )
+
+  $pythonParts = $Info.Split(";")
+  if ($pythonParts.Length -lt 2 -or $pythonParts[0] -ne "3.11" -or $pythonParts[1] -notin @("arm64", "aarch64")) {
+    throw "$Context must be ARM64 Python 3.11, got '$Info'. Install ARM64 Python 3.11 or pass -PythonExe C:\Path\To\ARM64\python.exe, then rerun with -RecreateVenv."
+  }
+}
+
+function New-Arm64PythonVenv {
+  param(
+    [string]$MiraRepo,
+    [string]$PythonExe
+  )
+
+  if ($PythonExe) {
+    if (-not (Test-Path $PythonExe)) {
+      throw "PythonExe does not exist: $PythonExe"
+    }
+    $info = Get-PythonInfo -FilePath $PythonExe
+    if (-not $info) {
+      throw "Could not run PythonExe: $PythonExe"
+    }
+    Assert-Arm64Python311Info -Info $info -Context $PythonExe
+    Invoke-Checked -FilePath $PythonExe -Arguments @("-m", "venv", ".venv") -WorkingDirectory $MiraRepo
+    return
+  }
+
+  $pyPath = Get-Command "py.exe" -ErrorAction SilentlyContinue
+  if ($pyPath) {
+    $info = Get-PythonInfo -FilePath $pyPath.Source -Arguments @("-3.11-arm64")
+    if ($info) {
+      Assert-Arm64Python311Info -Info $info -Context "py -3.11-arm64"
+      Invoke-Checked -FilePath $pyPath.Source -Arguments @("-3.11-arm64", "-m", "venv", ".venv") -WorkingDirectory $MiraRepo
+      return
+    }
+  }
+
+  $pythonPath = Get-Command "python.exe" -ErrorAction SilentlyContinue
+  if ($pythonPath) {
+    $info = Get-PythonInfo -FilePath $pythonPath.Source
+    if ($info) {
+      $pythonParts = $info.Split(";")
+      if ($pythonParts.Length -ge 2 -and $pythonParts[0] -eq "3.11" -and $pythonParts[1] -in @("arm64", "aarch64")) {
+        Invoke-Checked -FilePath $pythonPath.Source -Arguments @("-m", "venv", ".venv") -WorkingDirectory $MiraRepo
+        return
+      }
+    }
+  }
+
+  throw "Could not find ARM64 Python 3.11. Install it, or rerun with -PythonExe C:\Path\To\ARM64\python.exe."
 }
 
 function Install-Arm64Uv {
@@ -137,14 +208,11 @@ if (-not $SkipEngineBuild) {
   }
 
   if (-not (Test-Path $venvPython)) {
-    Invoke-Checked -FilePath "py.exe" -Arguments @("-3.11", "-m", "venv", ".venv") -WorkingDirectory $MiraRepo
+    New-Arm64PythonVenv -MiraRepo $MiraRepo -PythonExe $PythonExe
   }
 
-  $pythonInfo = (& $venvPython -c "import platform, sys; print(f'{sys.version_info.major}.{sys.version_info.minor};{platform.machine().lower()}')").Trim()
-  $pythonParts = $pythonInfo.Split(";")
-  if ($pythonParts[0] -ne "3.11" -or $pythonParts[1] -notin @("arm64", "aarch64")) {
-    throw "Expected ARM64 Python 3.11 venv, got '$pythonInfo'. Install ARM64 Python 3.11 and rerun with -RecreateVenv."
-  }
+  $pythonInfo = Get-PythonInfo -FilePath $venvPython
+  Assert-Arm64Python311Info -Info $pythonInfo -Context "Existing venv"
 
   Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -WorkingDirectory $MiraRepo
   Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "-e", ".") -WorkingDirectory $MiraRepo

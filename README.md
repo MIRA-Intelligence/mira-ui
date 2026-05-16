@@ -161,6 +161,12 @@ For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Par
 
 The script builds an ARM64 `mira-engine.exe`, downloads `WinSW-arm64.exe`, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users.
 
+If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -PythonExe C:\Path\To\ARM64\python.exe -RecreateVenv
+```
+
 ## 6) Script reference
 
 - `npm run dev` → start Vite development server on port 5173 (web mode)
