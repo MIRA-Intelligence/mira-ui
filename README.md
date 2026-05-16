@@ -153,6 +153,14 @@ npm run dist:bundle:win
 
 Bundle artifacts are written to `release-bundle/` and use the `MIRA-bundle-*` naming convention. Windows bundle builds publish the NSIS setup artifact only; the portable bundle is intentionally not produced because the engine is registered as a Windows Service.
 
+For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Parallels, use the helper script from an ARM64 PowerShell session:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1
+```
+
+The script builds an ARM64 `mira-engine.exe`, downloads `WinSW-arm64.exe`, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users.
+
 ## 6) Script reference
 
 - `npm run dev` → start Vite development server on port 5173 (web mode)
