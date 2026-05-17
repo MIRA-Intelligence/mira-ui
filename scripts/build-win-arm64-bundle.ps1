@@ -3,6 +3,9 @@ param(
   [string]$MiraUiRepo = "",
   [string]$PythonExe = "",
   [string]$OpenSslDir = "",
+  [string]$UvLocalBinary = "",
+  [string]$UvArchive = "",
+  [string]$WinSwLocalBinary = "",
   [string]$WinSwVersion = "v3.0.0-alpha.11",
   [switch]$RecreateVenv,
   [switch]$SkipEngineBuild,
@@ -66,6 +69,81 @@ function Get-CommandPath {
     throw "Required command not found on PATH: $Name"
   }
   return $command.Source
+}
+
+function Invoke-DownloadFile {
+  param(
+    [string]$Url,
+    [string]$Output,
+    [string]$WorkingDirectory
+  )
+
+  $outputDir = Split-Path -Parent $Output
+  New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+
+  for ($attempt = 1; $attempt -le 5; $attempt += 1) {
+    Push-Location $WorkingDirectory
+    try {
+      Write-Host "> curl.exe -f -L --retry 5 --retry-all-errors -o $Output $Url" -ForegroundColor Cyan
+      & curl.exe -f -L --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 30 -o $Output $Url
+      if ($LASTEXITCODE -eq 0 -and (Test-Path $Output)) {
+        return
+      }
+      Write-Host "curl failed with exit code $LASTEXITCODE on attempt $attempt." -ForegroundColor Yellow
+    } finally {
+      Pop-Location
+    }
+
+    if ($attempt -lt 5) {
+      Start-Sleep -Seconds ([Math]::Min(20, $attempt * 3))
+    }
+  }
+
+  for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+    try {
+      Write-Host "> Invoke-WebRequest -Uri $Url -OutFile $Output" -ForegroundColor Cyan
+      Invoke-WebRequest -Uri $Url -OutFile $Output -MaximumRedirection 10
+      if (Test-Path $Output) {
+        return
+      }
+    } catch {
+      Write-Host "Invoke-WebRequest failed on attempt ${attempt}: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+
+    if ($attempt -lt 3) {
+      Start-Sleep -Seconds ([Math]::Min(20, $attempt * 5))
+    }
+  }
+
+  throw "Failed to download $Url. If GitHub downloads are unstable, pass a local file with -UvArchive, -UvLocalBinary, or -WinSwLocalBinary."
+}
+
+function Invoke-GhReleaseDownload {
+  param(
+    [string]$Repo,
+    [string[]]$Patterns,
+    [string]$Dir,
+    [string]$Tag = ""
+  )
+
+  $gh = Get-Command "gh.exe" -ErrorAction SilentlyContinue
+  if (-not $gh) {
+    return $false
+  }
+
+  $args = @("release", "download")
+  if ($Tag) {
+    $args += $Tag
+  }
+  $args += @("--repo", $Repo)
+  foreach ($pattern in $Patterns) {
+    $args += @("--pattern", $pattern)
+  }
+  $args += @("--dir", $Dir, "--clobber")
+
+  Write-Host "> gh $($args -join ' ')" -ForegroundColor Cyan
+  & $gh.Source @args
+  return $LASTEXITCODE -eq 0
 }
 
 function Assert-Arm64NativeBuildTools {
@@ -233,7 +311,11 @@ function New-Arm64PythonVenv {
 }
 
 function Install-Arm64Uv {
-  param([string]$MiraRepo)
+  param(
+    [string]$MiraRepo,
+    [string]$UvLocalBinary,
+    [string]$UvArchive
+  )
 
   $assetName = "uv-aarch64-pc-windows-msvc.zip"
   $baseUrl = "https://github.com/astral-sh/uv/releases/latest/download"
@@ -246,13 +328,37 @@ function Install-Arm64Uv {
 
   New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
   try {
-    Invoke-Checked -FilePath "curl.exe" -Arguments @("-f", "-L", "-o", $zipPath, "$baseUrl/$assetName") -WorkingDirectory $MiraRepo
-    Invoke-Checked -FilePath "curl.exe" -Arguments @("-f", "-L", "-o", $shaPath, "$baseUrl/$assetName.sha256") -WorkingDirectory $MiraRepo
+    if ($UvLocalBinary) {
+      if (-not (Test-Path $UvLocalBinary)) {
+        throw "UvLocalBinary does not exist: $UvLocalBinary"
+      }
+      New-Item -ItemType Directory -Force -Path $bundledDir | Out-Null
+      Copy-Item -Force $UvLocalBinary $destPath
+      Write-Host "Bundled ARM64 uv from local binary: $destPath" -ForegroundColor Green
+      return
+    }
 
-    $expected = ((Get-Content $shaPath -TotalCount 1).Trim() -split "\s+")[0].ToLowerInvariant()
-    $actual = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) {
-      throw "uv sha256 mismatch. Expected $expected, got $actual."
+    if ($UvArchive) {
+      if (-not (Test-Path $UvArchive)) {
+        throw "UvArchive does not exist: $UvArchive"
+      }
+      Copy-Item -Force $UvArchive $zipPath
+    } else {
+      $downloadedWithGh = Invoke-GhReleaseDownload -Repo "astral-sh/uv" -Patterns @($assetName, "$assetName.sha256") -Dir $tempDir
+      if (-not $downloadedWithGh) {
+        Invoke-DownloadFile -Url "$baseUrl/$assetName" -Output $zipPath -WorkingDirectory $MiraRepo
+        Invoke-DownloadFile -Url "$baseUrl/$assetName.sha256" -Output $shaPath -WorkingDirectory $MiraRepo
+      }
+    }
+
+    if (Test-Path $shaPath) {
+      $expected = ((Get-Content $shaPath -TotalCount 1).Trim() -split "\s+")[0].ToLowerInvariant()
+      $actual = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLowerInvariant()
+      if ($actual -ne $expected) {
+        throw "uv sha256 mismatch. Expected $expected, got $actual."
+      }
+    } else {
+      Write-Host "No uv sha256 file was provided; skipping checksum for local archive." -ForegroundColor Yellow
     }
 
     Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
@@ -316,7 +422,7 @@ if (-not $SkipEngineBuild) {
   Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "--upgrade", "pip") -WorkingDirectory $MiraRepo
   Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "-e", ".") -WorkingDirectory $MiraRepo
   Invoke-Checked -FilePath $venvPython -Arguments @("-m", "pip", "install", "pytest", "pytest-asyncio", "pytest-cov", "aiohttp", "ruff", "build", "pyinstaller") -WorkingDirectory $MiraRepo
-  Install-Arm64Uv -MiraRepo $MiraRepo
+  Install-Arm64Uv -MiraRepo $MiraRepo -UvLocalBinary $UvLocalBinary -UvArchive $UvArchive
 
   $pyInstaller = Join-Path $MiraRepo ".venv\Scripts\pyinstaller.exe"
   Invoke-Checked -FilePath $pyInstaller -Arguments @("--clean", "mira-engine.spec") -WorkingDirectory $MiraRepo
@@ -328,11 +434,17 @@ if (-not (Test-Path $engineExe)) {
 }
 
 $downloadsDir = Join-Path $env:USERPROFILE "Downloads"
-$winSwExe = Join-Path $downloadsDir "WinSW-arm64.exe"
-if (-not (Test-Path $winSwExe)) {
+$resolvedWinSwExe = if ($WinSwLocalBinary) { $WinSwLocalBinary } else { Join-Path $downloadsDir "WinSW-arm64.exe" }
+if ($WinSwLocalBinary -and -not (Test-Path $resolvedWinSwExe)) {
+  throw "WinSwLocalBinary does not exist: $resolvedWinSwExe"
+}
+if (-not (Test-Path $resolvedWinSwExe)) {
   New-Item -ItemType Directory -Force -Path $downloadsDir | Out-Null
   $winSwUrl = "https://github.com/winsw/winsw/releases/download/$WinSwVersion/WinSW-arm64.exe"
-  Invoke-Checked -FilePath "curl.exe" -Arguments @("-f", "-L", "-o", $winSwExe, $winSwUrl) -WorkingDirectory $MiraUiRepo
+  $downloadedWithGh = Invoke-GhReleaseDownload -Repo "winsw/winsw" -Patterns @("WinSW-arm64.exe") -Dir $downloadsDir -Tag $WinSwVersion
+  if (-not $downloadedWithGh) {
+    Invoke-DownloadFile -Url $winSwUrl -Output $resolvedWinSwExe -WorkingDirectory $MiraUiRepo
+  }
 }
 
 if (-not $SkipNpmCi) {
@@ -343,7 +455,7 @@ $oldEngineBinary = [System.Environment]::GetEnvironmentVariable("MIRA_ENGINE_LOC
 $oldWinSwBinary = [System.Environment]::GetEnvironmentVariable("MIRA_WINSW_LOCAL_BINARY", "Process")
 try {
   $env:MIRA_ENGINE_LOCAL_BINARY = $engineExe
-  $env:MIRA_WINSW_LOCAL_BINARY = $winSwExe
+  $env:MIRA_WINSW_LOCAL_BINARY = $resolvedWinSwExe
   Invoke-Checked -FilePath $npmPath -Arguments @("run", "dist:bundle:win", "--", "--arm64") -WorkingDirectory $MiraUiRepo
 } finally {
   if ($null -eq $oldEngineBinary) {

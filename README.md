@@ -184,6 +184,15 @@ After installing these prerequisites, close and reopen ARM64 PowerShell before r
 .\scripts\build-win-arm64-bundle.ps1 -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows
 ```
 
+If GitHub release downloads are unstable in the VM, download the ARM64 assets in a browser and pass them to the script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows `
+  -UvArchive C:\Users\$env:USERNAME\Downloads\uv-aarch64-pc-windows-msvc.zip `
+  -WinSwLocalBinary C:\Users\$env:USERNAME\Downloads\WinSW-arm64.exe
+```
+
 If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
 
 ```powershell
