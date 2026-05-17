@@ -159,7 +159,16 @@ For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Par
 .\scripts\build-win-arm64-bundle.ps1
 ```
 
-The script builds an ARM64 `mira-engine.exe`, downloads `WinSW-arm64.exe`, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users.
+The script builds an ARM64 `mira-engine.exe`, downloads `WinSW-arm64.exe`, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users. Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended"
+
+curl.exe -L -o "$env:TEMP\rustup-init-aarch64.exe" "https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe"
+& "$env:TEMP\rustup-init-aarch64.exe" -y --default-toolchain stable
+```
+
+After installing these prerequisites, close and reopen ARM64 PowerShell before running the bundle script.
 
 If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
 

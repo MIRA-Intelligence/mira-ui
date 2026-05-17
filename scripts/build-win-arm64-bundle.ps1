@@ -67,6 +67,33 @@ function Get-CommandPath {
   return $command.Source
 }
 
+function Assert-Arm64NativeBuildTools {
+  $cargo = Get-Command "cargo.exe" -ErrorAction SilentlyContinue
+  $rustc = Get-Command "rustc.exe" -ErrorAction SilentlyContinue
+  if (-not $cargo -or -not $rustc) {
+    throw "Rust/Cargo was not found on PATH. Install ARM64 Rust with rustup, then reopen PowerShell. See README Windows ARM64 bundle prerequisites."
+  }
+
+  $rustInfo = & $rustc.Source -Vv
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not run rustc -Vv."
+  }
+  $hostLine = $rustInfo | Where-Object { $_ -like "host:*" } | Select-Object -First 1
+  if (-not $hostLine -or $hostLine -notmatch "aarch64-pc-windows-msvc") {
+    throw "Rust host must be aarch64-pc-windows-msvc for pure ARM64 builds, got '$hostLine'. Install the ARM64 rustup toolchain and reopen PowerShell."
+  }
+
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+  if (-not (Test-Path $vswhere)) {
+    throw "Visual Studio Build Tools were not found. Install VS 2022 C++ Build Tools with ARM64 tools."
+  }
+
+  $vcInstall = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.ARM64 -property installationPath
+  if ($LASTEXITCODE -ne 0 -or -not $vcInstall) {
+    throw "VS 2022 C++ ARM64 build tools were not found. Install Microsoft.VisualStudio.Workload.VCTools and Microsoft.VisualStudio.Component.VC.Tools.ARM64."
+  }
+}
+
 function Get-PythonInfo {
   param(
     [string]$FilePath,
@@ -200,6 +227,8 @@ if ($nodeArch -ne "arm64") {
 }
 
 if (-not $SkipEngineBuild) {
+  Assert-Arm64NativeBuildTools
+
   $venvPython = Join-Path $MiraRepo ".venv\Scripts\python.exe"
   $venvDir = Join-Path $MiraRepo ".venv"
 
