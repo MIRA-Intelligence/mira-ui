@@ -168,7 +168,21 @@ curl.exe -L -o "$env:TEMP\rustup-init-aarch64.exe" "https://static.rust-lang.org
 & "$env:TEMP\rustup-init-aarch64.exe" -y --default-toolchain stable
 ```
 
-After installing these prerequisites, close and reopen ARM64 PowerShell before running the bundle script.
+`cryptography` also needs ARM64 OpenSSL development libraries when pip builds it from source:
+
+```powershell
+cd C:\Users\$env:USERNAME\Code
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat -disableMetrics
+.\vcpkg.exe install openssl:arm64-windows
+```
+
+After installing these prerequisites, close and reopen ARM64 PowerShell before running the bundle script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows
+```
 
 If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
 

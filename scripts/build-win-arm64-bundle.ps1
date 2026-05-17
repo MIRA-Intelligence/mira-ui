@@ -2,6 +2,7 @@ param(
   [string]$MiraRepo = "",
   [string]$MiraUiRepo = "",
   [string]$PythonExe = "",
+  [string]$OpenSslDir = "",
   [string]$WinSwVersion = "v3.0.0-alpha.11",
   [switch]$RecreateVenv,
   [switch]$SkipEngineBuild,
@@ -92,6 +93,73 @@ function Assert-Arm64NativeBuildTools {
   if ($LASTEXITCODE -ne 0 -or -not $vcInstall) {
     throw "VS 2022 C++ ARM64 build tools were not found. Install Microsoft.VisualStudio.Workload.VCTools and Microsoft.VisualStudio.Component.VC.Tools.ARM64."
   }
+}
+
+function Test-OpenSslDir {
+  param([string]$Path)
+
+  if (-not $Path -or -not (Test-Path $Path)) {
+    return $false
+  }
+
+  $includePath = Join-Path $Path "include\openssl\ssl.h"
+  $libSslPath = Join-Path $Path "lib\libssl.lib"
+  $libCryptoPath = Join-Path $Path "lib\libcrypto.lib"
+  return (Test-Path $includePath) -and (Test-Path $libSslPath) -and (Test-Path $libCryptoPath)
+}
+
+function Resolve-Arm64OpenSslDir {
+  param(
+    [string]$ConfiguredOpenSslDir,
+    [string]$MiraRepo,
+    [string]$MiraUiRepo
+  )
+
+  $candidates = @()
+  if ($ConfiguredOpenSslDir) {
+    $candidates += $ConfiguredOpenSslDir
+  }
+  if ($env:OPENSSL_DIR) {
+    $candidates += $env:OPENSSL_DIR
+  }
+  $candidates += (Join-Path (Split-Path -Parent $MiraRepo) "vcpkg\installed\arm64-windows")
+  $candidates += (Join-Path (Split-Path -Parent $MiraUiRepo) "vcpkg\installed\arm64-windows")
+  $candidates += "C:\vcpkg\installed\arm64-windows"
+
+  foreach ($candidate in $candidates) {
+    if (Test-OpenSslDir -Path $candidate) {
+      return (Resolve-Path $candidate).Path
+    }
+  }
+
+  throw @"
+ARM64 OpenSSL development libraries were not found. cryptography needs OpenSSL when building from source on Windows ARM64.
+
+Install OpenSSL with vcpkg, then rerun this script:
+
+  cd C:\Users\$env:USERNAME\Code
+  git clone https://github.com/microsoft/vcpkg.git
+  cd vcpkg
+  .\bootstrap-vcpkg.bat -disableMetrics
+  .\vcpkg.exe install openssl:arm64-windows
+
+Then rerun:
+
+  powershell.exe -ExecutionPolicy Bypass -File .\scripts\build-win-arm64-bundle.ps1 -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows
+"@
+}
+
+function Use-OpenSslDir {
+  param([string]$Path)
+
+  $env:OPENSSL_DIR = $Path
+  $env:OPENSSL_INCLUDE_DIR = Join-Path $Path "include"
+  $env:OPENSSL_LIB_DIR = Join-Path $Path "lib"
+  $binPath = Join-Path $Path "bin"
+  if (Test-Path $binPath) {
+    $env:Path = "$binPath;$env:Path"
+  }
+  Write-Host "Using ARM64 OpenSSL: $Path" -ForegroundColor Green
 }
 
 function Get-PythonInfo {
@@ -228,6 +296,8 @@ if ($nodeArch -ne "arm64") {
 
 if (-not $SkipEngineBuild) {
   Assert-Arm64NativeBuildTools
+  $resolvedOpenSslDir = Resolve-Arm64OpenSslDir -ConfiguredOpenSslDir $OpenSslDir -MiraRepo $MiraRepo -MiraUiRepo $MiraUiRepo
+  Use-OpenSslDir -Path $resolvedOpenSslDir
 
   $venvPython = Join-Path $MiraRepo ".venv\Scripts\python.exe"
   $venvDir = Join-Path $MiraRepo ".venv"
