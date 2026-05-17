@@ -167,6 +167,8 @@ The script builds an ARM64 `mira-engine.exe`, downloads the .NET Framework `WinS
   -BundleArtifactVersion v0.4.0rc3.dev2
 ```
 
+The helper forwards those values to `electron-builder` through `MIRA_UI_BUNDLE_VERSION` and `MIRA_UI_BUNDLE_ARTIFACT_VERSION`, so direct bundle builds can use the same environment variables.
+
 Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
 
 ```powershell

@@ -470,16 +470,18 @@ if (-not $SkipNpmCi) {
 
 $oldEngineBinary = [System.Environment]::GetEnvironmentVariable("MIRA_ENGINE_LOCAL_BINARY", "Process")
 $oldWinSwBinary = [System.Environment]::GetEnvironmentVariable("MIRA_WINSW_LOCAL_BINARY", "Process")
+$oldBundleVersion = [System.Environment]::GetEnvironmentVariable("MIRA_UI_BUNDLE_VERSION", "Process")
+$oldBundleArtifactVersion = [System.Environment]::GetEnvironmentVariable("MIRA_UI_BUNDLE_ARTIFACT_VERSION", "Process")
 try {
   $env:MIRA_ENGINE_LOCAL_BINARY = $engineExe
   $env:MIRA_WINSW_LOCAL_BINARY = $resolvedWinSwExe
-  $bundleArgs = @("run", "dist:bundle:win", "--", "--arm64")
   if ($BundleVersion) {
-    $bundleArgs += "-c.extraMetadata.version=$BundleVersion"
+    $env:MIRA_UI_BUNDLE_VERSION = $BundleVersion
   }
   if ($BundleArtifactVersion) {
-    $bundleArgs += "-c.nsis.artifactName=MIRA-bundle-$BundleArtifactVersion-" + '${os}-${arch}-setup.${ext}'
+    $env:MIRA_UI_BUNDLE_ARTIFACT_VERSION = $BundleArtifactVersion
   }
+  $bundleArgs = @("run", "dist:bundle:win", "--", "--arm64")
   Invoke-Checked -FilePath $npmPath -Arguments $bundleArgs -WorkingDirectory $MiraUiRepo
 } finally {
   if ($null -eq $oldEngineBinary) {
@@ -491,6 +493,16 @@ try {
     Remove-Item Env:\MIRA_WINSW_LOCAL_BINARY -ErrorAction SilentlyContinue
   } else {
     $env:MIRA_WINSW_LOCAL_BINARY = $oldWinSwBinary
+  }
+  if ($null -eq $oldBundleVersion) {
+    Remove-Item Env:\MIRA_UI_BUNDLE_VERSION -ErrorAction SilentlyContinue
+  } else {
+    $env:MIRA_UI_BUNDLE_VERSION = $oldBundleVersion
+  }
+  if ($null -eq $oldBundleArtifactVersion) {
+    Remove-Item Env:\MIRA_UI_BUNDLE_ARTIFACT_VERSION -ErrorAction SilentlyContinue
+  } else {
+    $env:MIRA_UI_BUNDLE_ARTIFACT_VERSION = $oldBundleArtifactVersion
   }
 }
 

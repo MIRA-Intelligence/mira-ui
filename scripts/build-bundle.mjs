@@ -14,6 +14,21 @@ const enginePath = path.resolve(
 )
 const winswPath = path.join(engineDir, 'MiraEngineService.exe')
 
+function bundleVersionOverrideArgs() {
+  const version = process.env.MIRA_UI_BUNDLE_VERSION?.trim()
+  const artifactVersion = process.env.MIRA_UI_BUNDLE_ARTIFACT_VERSION?.trim()
+  const overrides = []
+
+  if (version) {
+    overrides.push(`-c.extraMetadata.version=${version}`)
+  }
+  if (artifactVersion) {
+    overrides.push(`-c.nsis.artifactName=MIRA-bundle-${artifactVersion}-\${os}-\${arch}-setup.\${ext}`)
+  }
+
+  return overrides
+}
+
 function bundledEngineAssetName() {
   if (process.platform === 'darwin') {
     return `mira-engine-macos-${process.arch === 'arm64' ? 'arm64' : 'x86_64'}`
@@ -192,6 +207,7 @@ const builderArgs = [
   'never',
   '-c',
   'electron-builder.bundle.config.cjs',
+  ...bundleVersionOverrideArgs(),
   ...args,
 ]
 
