@@ -159,7 +159,15 @@ For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Par
 .\scripts\build-win-arm64-bundle.ps1
 ```
 
-The script builds an ARM64 `mira-engine.exe`, downloads the .NET Framework `WinSW-net461.exe` wrapper, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users. Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
+The script builds an ARM64 `mira-engine.exe`, downloads the .NET Framework `WinSW-net461.exe` wrapper, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users. The repo `package.json` intentionally remains `0.1.0`, so pass bundle version metadata explicitly when producing a named test build:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -BundleVersion 0.4.0-rc.3.dev2 `
+  -BundleArtifactVersion v0.4.0rc3.dev2
+```
+
+Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
 
 ```powershell
 winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended"

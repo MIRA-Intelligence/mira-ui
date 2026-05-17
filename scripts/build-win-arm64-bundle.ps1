@@ -8,6 +8,8 @@ param(
   [string]$WinSwLocalBinary = "",
   [string]$WinSwAsset = "WinSW-net461.exe",
   [string]$WinSwVersion = "v3.0.0-alpha.11",
+  [string]$BundleVersion = "",
+  [string]$BundleArtifactVersion = "",
   [switch]$RecreateVenv,
   [switch]$SkipEngineBuild,
   [switch]$SkipNpmCi
@@ -70,6 +72,18 @@ function Get-CommandPath {
     throw "Required command not found on PATH: $Name"
   }
   return $command.Source
+}
+
+function Assert-BundleVersion {
+  param([string]$Version)
+
+  if (-not $Version) {
+    return
+  }
+
+  if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$') {
+    throw "BundleVersion must be npm semver, for example 0.4.0-rc.3 or 0.4.0-rc.3.dev2. Do not include the leading v."
+  }
 }
 
 function Invoke-DownloadFile {
@@ -401,6 +415,8 @@ if ($nodeArch -ne "arm64") {
   throw "Node is '$nodeArch', not 'arm64'. Install the Windows ARM64 Node.js build and ensure it is first on PATH."
 }
 
+Assert-BundleVersion -Version $BundleVersion
+
 if (-not $SkipEngineBuild) {
   Assert-Arm64NativeBuildTools
   $resolvedOpenSslDir = Resolve-Arm64OpenSslDir -ConfiguredOpenSslDir $OpenSslDir -MiraRepo $MiraRepo -MiraUiRepo $MiraUiRepo
@@ -457,7 +473,14 @@ $oldWinSwBinary = [System.Environment]::GetEnvironmentVariable("MIRA_WINSW_LOCAL
 try {
   $env:MIRA_ENGINE_LOCAL_BINARY = $engineExe
   $env:MIRA_WINSW_LOCAL_BINARY = $resolvedWinSwExe
-  Invoke-Checked -FilePath $npmPath -Arguments @("run", "dist:bundle:win", "--", "--arm64") -WorkingDirectory $MiraUiRepo
+  $bundleArgs = @("run", "dist:bundle:win", "--", "--arm64")
+  if ($BundleVersion) {
+    $bundleArgs += "-c.extraMetadata.version=$BundleVersion"
+  }
+  if ($BundleArtifactVersion) {
+    $bundleArgs += "-c.nsis.artifactName=MIRA-bundle-$BundleArtifactVersion-" + '${os}-${arch}-setup.${ext}'
+  }
+  Invoke-Checked -FilePath $npmPath -Arguments $bundleArgs -WorkingDirectory $MiraUiRepo
 } finally {
   if ($null -eq $oldEngineBinary) {
     Remove-Item Env:\MIRA_ENGINE_LOCAL_BINARY -ErrorAction SilentlyContinue
