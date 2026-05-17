@@ -6,6 +6,7 @@ param(
   [string]$UvLocalBinary = "",
   [string]$UvArchive = "",
   [string]$WinSwLocalBinary = "",
+  [string]$WinSwAsset = "WinSW-net461.exe",
   [string]$WinSwVersion = "v3.0.0-alpha.11",
   [switch]$RecreateVenv,
   [switch]$SkipEngineBuild,
@@ -434,14 +435,14 @@ if (-not (Test-Path $engineExe)) {
 }
 
 $downloadsDir = Join-Path $env:USERPROFILE "Downloads"
-$resolvedWinSwExe = if ($WinSwLocalBinary) { $WinSwLocalBinary } else { Join-Path $downloadsDir "WinSW-arm64.exe" }
+$resolvedWinSwExe = if ($WinSwLocalBinary) { $WinSwLocalBinary } else { Join-Path $downloadsDir $WinSwAsset }
 if ($WinSwLocalBinary -and -not (Test-Path $resolvedWinSwExe)) {
   throw "WinSwLocalBinary does not exist: $resolvedWinSwExe"
 }
 if (-not (Test-Path $resolvedWinSwExe)) {
   New-Item -ItemType Directory -Force -Path $downloadsDir | Out-Null
-  $winSwUrl = "https://github.com/winsw/winsw/releases/download/$WinSwVersion/WinSW-arm64.exe"
-  $downloadedWithGh = Invoke-GhReleaseDownload -Repo "winsw/winsw" -Patterns @("WinSW-arm64.exe") -Dir $downloadsDir -Tag $WinSwVersion
+  $winSwUrl = "https://github.com/winsw/winsw/releases/download/$WinSwVersion/$WinSwAsset"
+  $downloadedWithGh = Invoke-GhReleaseDownload -Repo "winsw/winsw" -Patterns @($WinSwAsset) -Dir $downloadsDir -Tag $WinSwVersion
   if (-not $downloadedWithGh) {
     Invoke-DownloadFile -Url $winSwUrl -Output $resolvedWinSwExe -WorkingDirectory $MiraUiRepo
   }
