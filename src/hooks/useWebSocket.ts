@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
 import { bootstrapLocalEngine, hasDesktopEngineManager } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
-import { updateProjectsRoot } from '@/services/runtimeConfig'
+import { fetchRuntimeConfig } from '@/services/runtimeConfig'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -10,10 +10,22 @@ import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 
 async function syncOnConnect() {
-  const { workspacePath, apiUrl } = useSettingsStore.getState()
+  const { workspacePath, apiUrl, setRuntimeConfig, setRuntimeConfigLoaded, setRuntimeConfigError } = useSettingsStore.getState()
   try {
-    await updateProjectsRoot(workspacePath, apiUrl)
-  } catch { /* gateway may be unreachable */ }
+    const payload = await fetchRuntimeConfig(apiUrl)
+    const nextWorkspacePath = payload.runtime.workspace || payload.projects_root
+    if (workspacePath.trim() !== nextWorkspacePath.trim()) {
+      useAgentStore.getState().resetWorkspaceState()
+      useProjectStore.getState().resetWorkspaceState()
+    }
+    setRuntimeConfig(payload)
+    setRuntimeConfigLoaded(true)
+    setRuntimeConfigError(null)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    setRuntimeConfigError(message)
+    setRuntimeConfigLoaded(false)
+  }
 
   await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
 }

@@ -5,7 +5,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
-import { updateProjectsRoot } from '@/services/runtimeConfig'
+import { fetchRuntimeConfig } from '@/services/runtimeConfig'
 import { cn } from '@/lib/utils'
 import type {
   AgentProfile,
@@ -455,13 +455,12 @@ export function NewProjectModal() {
     try {
       let effectiveWorkspacePath = workspacePath.trim()
       if (deploymentMode === 'remoteManual') {
-        const payload = await updateProjectsRoot(effectiveWorkspacePath)
+        const payload = await fetchRuntimeConfig()
         const settingsStore = useSettingsStore.getState()
-        settingsStore.setWorkspacePath(payload.projects_root)
+        effectiveWorkspacePath = payload.runtime.workspace || payload.projects_root
         settingsStore.setRuntimeConfig(payload)
         settingsStore.setRuntimeConfigLoaded(true)
         settingsStore.setRuntimeConfigError(null)
-        effectiveWorkspacePath = payload.projects_root
       }
 
       const projectId = await createProject(input)

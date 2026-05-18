@@ -299,6 +299,13 @@ export class LocalEngineManager {
       }
     }
 
+    if (logTail.includes('Mira workspace is not accessible')) {
+      return {
+        message: 'Local engine workspace is not accessible. Open Settings > Workspace and choose a valid path, or edit agents.defaults.workspace in ~/.mira/config.json.',
+        error: logTail,
+      }
+    }
+
     return {
       message: `Timed out waiting for local engine health on http://${DEFAULT_HOST}:${port}/health.`,
       error: logTail || `Timed out waiting for local engine health on http://${DEFAULT_HOST}:${port}/health.`,

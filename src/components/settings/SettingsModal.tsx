@@ -111,10 +111,11 @@ function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload
     ? payload.runtime.provider
     : 'auto'
   const providerSettings = payload.providers[provider]
+  const workspacePath = payload.runtime.workspace || payload.projects_root
 
   return {
     ...draft,
-    workspacePath: payload.projects_root,
+    workspacePath,
     apiUrl: LOCAL_API_URL,
     wsUrl: LOCAL_WS_URL,
     provider,
@@ -136,6 +137,15 @@ function workspacePathChanged(previous: string, next: string): boolean {
   return previous.trim() !== next.trim()
 }
 
+function latestStoredProfile(
+  profiles: ReturnType<typeof useSettingsStore.getState>['engineProfiles'],
+  mode: DeploymentMode,
+) {
+  return Object.values(profiles)
+    .filter((profile) => profile.deploymentMode === mode)
+    .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null
+}
+
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings } = store
@@ -151,35 +161,51 @@ export function SettingsModal() {
 
   const curLang = draft.language
 
-  const loadRuntimeConfig = async (mode: DeploymentMode) => {
-    if (mode !== 'localBundle') return
+  const loadRuntimeConfig = async (
+    mode: DeploymentMode,
+    apiUrlOverride?: string,
+    commitToStore = true,
+  ) => {
     setRuntimeLoading(true)
     setFeedback(null)
     setFeedbackError(false)
     try {
-      const localState = await bootstrapLocalEngine()
-      if (localState) {
-        store.setLocalEngineBootstrap({
-          phase: localState.phase,
-          message: localState.message,
-          executablePath: localState.executablePath,
-          version: localState.version,
-        })
-        if (localState.phase !== 'ready') {
-          throw new Error(localState.message)
+      const targetApiUrl = mode === 'localBundle' ? LOCAL_API_URL : (apiUrlOverride?.trim() || draft.apiUrl.trim())
+
+      if (mode === 'localBundle') {
+        const localState = await bootstrapLocalEngine()
+        if (localState) {
+          store.setLocalEngineBootstrap({
+            phase: localState.phase,
+            message: localState.message,
+            executablePath: localState.executablePath,
+            version: localState.version,
+          })
+          if (localState.phase !== 'ready') {
+            throw new Error(localState.message)
+          }
         }
       }
 
-      const payload = await fetchRuntimeConfig()
-      store.setRuntimeConfig(payload)
-      store.setRuntimeConfigLoaded(true)
-      store.setRuntimeConfigError(null)
+      const payload = await fetchRuntimeConfig(targetApiUrl)
+      if (commitToStore) {
+        store.setRuntimeConfig(payload)
+        store.setRuntimeConfigLoaded(true)
+        store.setRuntimeConfigError(null)
+      }
       setRuntimeProviders(payload.providers)
-      setDraft((current) => applyRuntimePayload(current, payload))
+      setDraft((current) => ({
+        ...applyRuntimePayload(current, payload),
+        deploymentMode: mode,
+        apiUrl: targetApiUrl,
+        wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : current.wsUrl,
+      }))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      store.setRuntimeConfigError(message)
-      store.setRuntimeConfigLoaded(false)
+      if (commitToStore) {
+        store.setRuntimeConfigError(message)
+        store.setRuntimeConfigLoaded(false)
+      }
       setFeedbackError(true)
       setFeedback(message)
     } finally {
@@ -197,9 +223,7 @@ export function SettingsModal() {
     setFeedbackError(false)
     setFeedback(null)
     setRuntimeProviders(store.runtimeConfig?.providers ?? {})
-    if (store.deploymentMode === 'localBundle') {
-      void loadRuntimeConfig(store.deploymentMode)
-    }
+    void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true)
   }, [
     settingsOpen,
     store.workspacePath,
@@ -221,21 +245,33 @@ export function SettingsModal() {
   if (!settingsOpen) return null
 
   const handleSwitchMode = (mode: DeploymentMode) => {
-    setDraft((current) => ({
-      ...current,
-      deploymentMode: mode,
-      apiUrl: mode === 'localBundle'
-        ? LOCAL_API_URL
-        : (current.apiUrl === LOCAL_API_URL ? remoteApiFallback() : current.apiUrl),
-      wsUrl: mode === 'localBundle'
-        ? LOCAL_WS_URL
-        : (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
-    }))
+    const storedRemote = mode === 'remoteManual'
+      ? latestStoredProfile(store.engineProfiles, 'remoteManual')
+      : null
+    if (storedRemote?.runtimeConfig) {
+      setRuntimeProviders(storedRemote.runtimeConfig.providers)
+    }
+    setDraft((current) => {
+      const base = storedRemote?.runtimeConfig
+        ? applyRuntimePayload(current, storedRemote.runtimeConfig)
+        : current
+      return {
+        ...base,
+        deploymentMode: mode,
+        apiUrl: mode === 'localBundle'
+          ? LOCAL_API_URL
+          : storedRemote?.apiUrl ?? (current.apiUrl === LOCAL_API_URL ? remoteApiFallback() : current.apiUrl),
+        wsUrl: mode === 'localBundle'
+          ? LOCAL_WS_URL
+          : storedRemote?.wsUrl ?? (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
+        workspacePath: storedRemote?.workspacePath ?? base.workspacePath,
+      }
+    })
     if (mode !== 'localBundle') {
       setActiveTab('connection')
     }
     if (mode === 'localBundle') {
-      void loadRuntimeConfig(mode)
+      void loadRuntimeConfig(mode, LOCAL_API_URL, false)
     }
   }
 
@@ -318,10 +354,9 @@ export function SettingsModal() {
           providers: providerUpdates,
         })
 
-        if (workspacePathChanged(previousWorkspacePath, payload.projects_root)) {
+        if (workspacePathChanged(previousWorkspacePath, payload.runtime.workspace || payload.projects_root)) {
           resetWorkspaceScopedState()
         }
-        store.setWorkspacePath(payload.projects_root)
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
         store.setRuntimeConfigError(null)
@@ -340,17 +375,16 @@ export function SettingsModal() {
           throw new Error(t('settingsRemoteRequiresUrls', curLang))
         }
         const payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
-        if (workspacePathChanged(previousWorkspacePath, payload.projects_root)) {
+        if (workspacePathChanged(previousWorkspacePath, payload.runtime.workspace || payload.projects_root)) {
           resetWorkspaceScopedState()
         }
-        store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
         store.setDeploymentMode('remoteManual')
-        store.setWorkspacePath(payload.projects_root)
+        store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
         store.setRuntimeConfigError(null)
         setRuntimeProviders(payload.providers)
-        setDraft((current) => ({ ...current, workspacePath: payload.projects_root }))
+        setDraft((current) => ({ ...current, workspacePath: payload.runtime.workspace || payload.projects_root }))
 
         const probe = await probeEngineCompatibility(nextApiUrl)
         store.setEngineBootstrap({
@@ -640,6 +674,14 @@ export function SettingsModal() {
                   <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
                     Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
                   </p>
+                  <div className="mt-3">
+                    <ActionButton
+                      disabled={busy || runtimeLoading || !draft.apiUrl.trim()}
+                      onClick={() => void loadRuntimeConfig('remoteManual', draft.apiUrl, false)}
+                    >
+                      {runtimeLoading ? 'Loading...' : 'Load engine config'}
+                    </ActionButton>
+                  </div>
                 </Section>
               )}
             </div>
@@ -677,7 +719,7 @@ export function SettingsModal() {
                   <ActionButton disabled={busy} onClick={handleUpgradeEngine}>
                     Upgrade local engine
                   </ActionButton>
-                  <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle')}>
+                  <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle', LOCAL_API_URL, true)}>
                     {runtimeLoading ? 'Refreshing...' : 'Refresh config'}
                   </ActionButton>
                 </div>

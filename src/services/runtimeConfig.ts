@@ -22,6 +22,7 @@ export interface RuntimeConfigPayload {
   persisted: boolean
   runtime: {
     workspace: string
+    workspace_resolved?: string
     provider: string
     model: string
     reasoning_effort: ReasoningEffort
