@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { chmod, copyFile, mkdir, readFile, rename } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, rename } from 'node:fs/promises'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
@@ -13,6 +13,26 @@ const enginePath = path.resolve(
   process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine',
 )
 const winswPath = path.join(engineDir, 'MiraEngineService.exe')
+
+async function localElectronDistPreservesFrameworkSymlinks() {
+  if (process.platform !== 'darwin') return false
+  const frameworkLink = path.resolve(
+    process.cwd(),
+    'node_modules',
+    'electron',
+    'dist',
+    'Electron.app',
+    'Contents',
+    'Frameworks',
+    'Electron Framework.framework',
+    'Electron Framework',
+  )
+  try {
+    return (await lstat(frameworkLink)).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
 
 function bundleVersionOverrideArgs() {
   const version = process.env.MIRA_UI_BUNDLE_VERSION?.trim()
@@ -211,8 +231,10 @@ const builderArgs = [
   ...args,
 ]
 
-if (process.platform === 'darwin' && args.includes('--mac')) {
+if (process.platform === 'darwin' && args.includes('--mac') && await localElectronDistPreservesFrameworkSymlinks()) {
   builderArgs.push('-c.electronDist=node_modules/electron/dist')
+} else if (process.platform === 'darwin' && args.includes('--mac')) {
+  console.warn('Local Electron dist does not preserve macOS framework symlinks; using electron-builder default Electron runtime.')
 }
 
 await ensureBundledEngine()
