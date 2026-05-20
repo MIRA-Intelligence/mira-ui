@@ -106,18 +106,26 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
   }
 }
 
-function applyRuntimePayload(draft: SettingsDraft, payload: RuntimeConfigPayload): SettingsDraft {
+function runtimeWorkspacePath(payload: RuntimeConfigPayload): string {
+  return payload.runtime.workspace || payload.projects_root
+}
+
+function applyRuntimePayload(
+  draft: SettingsDraft,
+  payload: RuntimeConfigPayload,
+  endpoints?: { apiUrl: string; wsUrl: string },
+): SettingsDraft {
   const provider = typeof payload.runtime.provider === 'string' && payload.runtime.provider.trim().length > 0
     ? payload.runtime.provider
     : 'auto'
   const providerSettings = payload.providers[provider]
-  const workspacePath = payload.runtime.workspace || payload.projects_root
+  const workspacePath = runtimeWorkspacePath(payload)
 
   return {
     ...draft,
     workspacePath,
-    apiUrl: LOCAL_API_URL,
-    wsUrl: LOCAL_WS_URL,
+    apiUrl: endpoints?.apiUrl ?? draft.apiUrl,
+    wsUrl: endpoints?.wsUrl ?? draft.wsUrl,
     provider,
     model: payload.runtime.model,
     reasoningEffort: payload.runtime.reasoning_effort,
@@ -135,6 +143,10 @@ function resetWorkspaceScopedState() {
 
 function workspacePathChanged(previous: string, next: string): boolean {
   return previous.trim() !== next.trim()
+}
+
+function endpointChanged(previousApiUrl: string, previousWsUrl: string, nextApiUrl: string, nextWsUrl: string): boolean {
+  return previousApiUrl.trim() !== nextApiUrl.trim() || previousWsUrl.trim() !== nextWsUrl.trim()
 }
 
 function latestStoredProfile(
@@ -158,6 +170,7 @@ export function SettingsModal() {
   const [feedback, setFeedback] = useState<string | null>(null)
   const [feedbackError, setFeedbackError] = useState(false)
   const [activeTab, setActiveTab] = useState<SettingsTab>('connection')
+  const [workspaceEdited, setWorkspaceEdited] = useState(false)
 
   const curLang = draft.language
 
@@ -194,11 +207,13 @@ export function SettingsModal() {
         store.setRuntimeConfigError(null)
       }
       setRuntimeProviders(payload.providers)
+      setWorkspaceEdited(false)
       setDraft((current) => ({
-        ...applyRuntimePayload(current, payload),
+        ...applyRuntimePayload(current, payload, {
+          apiUrl: targetApiUrl,
+          wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : current.wsUrl,
+        }),
         deploymentMode: mode,
-        apiUrl: targetApiUrl,
-        wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : current.wsUrl,
       }))
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -222,19 +237,10 @@ export function SettingsModal() {
     setRuntimeLoading(false)
     setFeedbackError(false)
     setFeedback(null)
+    setWorkspaceEdited(false)
     setRuntimeProviders(store.runtimeConfig?.providers ?? {})
     void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true)
-  }, [
-    settingsOpen,
-    store.workspacePath,
-    store.theme,
-    store.language,
-    store.deploymentMode,
-    store.apiUrl,
-    store.wsUrl,
-    store.showProgressMessages,
-    store.showToolCallHistory,
-  ])
+  }, [settingsOpen])
 
   useEffect(() => {
     if (draft.deploymentMode !== 'localBundle' && activeTab === 'localEngine') {
@@ -253,7 +259,10 @@ export function SettingsModal() {
     }
     setDraft((current) => {
       const base = storedRemote?.runtimeConfig
-        ? applyRuntimePayload(current, storedRemote.runtimeConfig)
+        ? applyRuntimePayload(current, storedRemote.runtimeConfig, {
+            apiUrl: storedRemote.apiUrl,
+            wsUrl: storedRemote.wsUrl,
+          })
         : current
       return {
         ...base,
@@ -273,6 +282,7 @@ export function SettingsModal() {
     if (mode === 'localBundle') {
       void loadRuntimeConfig(mode, LOCAL_API_URL, false)
     }
+    setWorkspaceEdited(false)
   }
 
   const handleProviderChange = (provider: string) => {
@@ -289,6 +299,8 @@ export function SettingsModal() {
     const nextApiUrl = draft.apiUrl.trim()
     const nextWsUrl = draft.wsUrl.trim()
     const nextWorkspacePath = draft.workspacePath.trim()
+    const previousApiUrl = store.apiUrl
+    const previousWsUrl = store.wsUrl
     const previousWorkspacePath = store.workspacePath
     setBusy(true)
     setFeedback(null)
@@ -354,14 +366,18 @@ export function SettingsModal() {
           providers: providerUpdates,
         })
 
-        if (workspacePathChanged(previousWorkspacePath, payload.runtime.workspace || payload.projects_root)) {
+        if (workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))) {
           resetWorkspaceScopedState()
         }
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
         store.setRuntimeConfigError(null)
         setRuntimeProviders(payload.providers)
-        setDraft((current) => applyRuntimePayload(current, payload))
+        setWorkspaceEdited(false)
+        setDraft((current) => applyRuntimePayload(current, payload, {
+          apiUrl: LOCAL_API_URL,
+          wsUrl: LOCAL_WS_URL,
+        }))
 
         const probe = await probeEngineCompatibility(LOCAL_API_URL)
         store.setEngineBootstrap({
@@ -374,8 +390,18 @@ export function SettingsModal() {
         if (!nextApiUrl || !nextWsUrl) {
           throw new Error(t('settingsRemoteRequiresUrls', curLang))
         }
-        const payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
-        if (workspacePathChanged(previousWorkspacePath, payload.runtime.workspace || payload.projects_root)) {
+        const switchedEngine = store.deploymentMode !== 'remoteManual'
+          || endpointChanged(previousApiUrl, previousWsUrl, nextApiUrl, nextWsUrl)
+
+        let payload = await fetchRuntimeConfig(nextApiUrl)
+        const engineWorkspacePath = runtimeWorkspacePath(payload)
+        const shouldUpdateWorkspace = workspaceEdited && workspacePathChanged(engineWorkspacePath, nextWorkspacePath)
+        if (shouldUpdateWorkspace) {
+          payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
+        }
+
+        const resolvedWorkspacePath = runtimeWorkspacePath(payload)
+        if (switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)) {
           resetWorkspaceScopedState()
         }
         store.setDeploymentMode('remoteManual')
@@ -384,7 +410,11 @@ export function SettingsModal() {
         store.setRuntimeConfigLoaded(true)
         store.setRuntimeConfigError(null)
         setRuntimeProviders(payload.providers)
-        setDraft((current) => ({ ...current, workspacePath: payload.runtime.workspace || payload.projects_root }))
+        setWorkspaceEdited(false)
+        setDraft((current) => applyRuntimePayload(current, payload, {
+          apiUrl: nextApiUrl,
+          wsUrl: nextWsUrl,
+        }))
 
         const probe = await probeEngineCompatibility(nextApiUrl)
         store.setEngineBootstrap({
@@ -579,7 +609,10 @@ export function SettingsModal() {
                 <Label text={t('workspacePath', curLang)} />
                 <input
                   value={draft.workspacePath}
-                  onChange={(e) => setDraft((current) => ({ ...current, workspacePath: e.target.value }))}
+                  onChange={(e) => {
+                    setWorkspaceEdited(true)
+                    setDraft((current) => ({ ...current, workspacePath: e.target.value }))
+                  }}
                   className={inputClass}
                 />
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
@@ -679,7 +712,7 @@ export function SettingsModal() {
                       disabled={busy || runtimeLoading || !draft.apiUrl.trim()}
                       onClick={() => void loadRuntimeConfig('remoteManual', draft.apiUrl, false)}
                     >
-                      {runtimeLoading ? 'Loading...' : 'Load engine config'}
+                      {runtimeLoading ? 'Refreshing...' : 'Refresh from engine'}
                     </ActionButton>
                   </div>
                 </Section>
