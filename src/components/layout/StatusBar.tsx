@@ -37,6 +37,9 @@ export function StatusBar() {
     const versionLabel = engineVersion ? `mira-engine ${engineVersion}` : 'mira-engine'
     return versionLabel
   }, [engineVersion])
+  const engineChipLabel = isEnginePhaseDisplayable(localEnginePhase)
+    ? `Phase: ${localEnginePhase}`
+    : engineLabel
 
   const modelLabel = runtimeConfig?.runtime?.model ?? null
 
@@ -52,10 +55,11 @@ export function StatusBar() {
 
         <div className="flex items-stretch gap-0.5 shrink-0">
           <EngineChip
-            label={engineLabel}
+            label={engineChipLabel}
             status={engineStatus}
             phase={localEnginePhase}
             message={engineMessage}
+            engineLabel={engineLabel}
             statusLabel={t(engineStatusKey(engineStatus, localEnginePhase), lang)}
           />
           {modelLabel ? (
@@ -154,16 +158,18 @@ function EngineChip({
   status,
   phase,
   message,
+  engineLabel,
   statusLabel,
 }: {
   label: string
   status: ReturnType<typeof useSettingsStore.getState>['engineStatus']
   phase: ReturnType<typeof useSettingsStore.getState>['localEnginePhase']
   message: string | null
+  engineLabel: string
   statusLabel: string
 }) {
   const dotClass = engineDotClass(status, phase)
-  const tooltipParts = [statusLabel]
+  const tooltipParts = [engineLabel, statusLabel]
   if (message) tooltipParts.push(message)
   return (
     <Chip title={tooltipParts.join(' — ')}>
@@ -271,7 +277,7 @@ function engineDotClass(
   status: ReturnType<typeof useSettingsStore.getState>['engineStatus'],
   phase: ReturnType<typeof useSettingsStore.getState>['localEnginePhase'],
 ): string {
-  if (phase === 'checking' || phase === 'installing' || phase === 'starting') {
+  if (isEnginePhaseActive(phase)) {
     return 'bg-sky-400 animate-pulse'
   }
   if (status === 'compatible') return 'bg-emerald-400'
@@ -296,7 +302,7 @@ function engineStatusKey(
   | 'engineStatusSetupRequired'
   | 'engineStatusUnreachable'
   | 'engineStatusUnknown' {
-  if (phase === 'checking' || phase === 'installing' || phase === 'starting') {
+  if (isEnginePhaseActive(phase)) {
     return 'engineStatusBooting'
   }
   if (phase === 'error') return 'engineStatusError'
@@ -304,6 +310,22 @@ function engineStatusKey(
   if (status === 'setup_required') return 'engineStatusSetupRequired'
   if (status === 'unreachable' || status === 'incompatible') return 'engineStatusUnreachable'
   return 'engineStatusUnknown'
+}
+
+function isEnginePhaseActive(
+  phase: ReturnType<typeof useSettingsStore.getState>['localEnginePhase'],
+): boolean {
+  return phase === 'checking'
+    || phase === 'installing'
+    || phase === 'updating'
+    || phase === 'repairing'
+    || phase === 'starting'
+}
+
+function isEnginePhaseDisplayable(
+  phase: ReturnType<typeof useSettingsStore.getState>['localEnginePhase'],
+): boolean {
+  return isEnginePhaseActive(phase) || phase === 'error'
 }
 
 function severityDotClass(severity: SystemMessageSeverity): string {

@@ -1,4 +1,5 @@
-export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'starting' | 'ready' | 'error'
+export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
+export type LocalEngineOperation = 'bootstrap' | 'install' | 'update' | 'repair' | 'start' | null
 
 export interface LocalEngineCommandResult {
   ok: boolean
@@ -15,6 +16,10 @@ export interface LocalEngineStatusResult {
     installed?: boolean
     running?: boolean
     port?: number
+    engine_executable?: string | null
+    engine_manifest?: { sha256?: string } | null
+    engine_sha256?: string | null
+    launchd_program?: string | null
   } | null
 }
 
@@ -24,6 +29,7 @@ export interface LocalEngineBootstrapState {
   executablePath: string | null
   healthUrl: string
   version: string | null
+  operation: LocalEngineOperation
   serviceInstalled: boolean | null
   serviceRunning: boolean | null
   lastCommand: string[] | null
@@ -52,6 +58,10 @@ export async function getLocalEngineStatus(): Promise<LocalEngineStatusResult | 
 
 export async function installLocalEngineService(): Promise<LocalEngineCommandResult | null> {
   return getElectronApi()?.installLocalEngineService?.() ?? null
+}
+
+export async function repairLocalEngineService(): Promise<LocalEngineBootstrapState | null> {
+  return getElectronApi()?.repairLocalEngineService?.() ?? null
 }
 
 export async function startLocalEngine(): Promise<LocalEngineCommandResult | null> {

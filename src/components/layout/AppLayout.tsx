@@ -9,6 +9,7 @@ import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
+import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -107,6 +108,7 @@ export function AppLayout() {
 
       <StatusBar />
       <SettingsModal />
+      <LocalEngineUpdateModal />
       <SkillsPluginsModal />
       <NewProjectModal />
     </div>
