@@ -126,9 +126,9 @@ npm run dist:all
 
 ### Bundle packaging
 
-`MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, auto-installs the local service on first launch, and exposes the local runtime config inside the UI.
+`MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, installs the local engine service from the desktop installer, and exposes the local runtime config inside the UI.
 
-By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. You can override the source with:
+By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. Windows bundle builds also download a WinSW service wrapper so the engine runs as `MiraEngine` without a foreground console window. You can override the sources with:
 
 ```bash
 # Use a specific mira release asset
@@ -136,6 +136,9 @@ export MIRA_ENGINE_RELEASE_TAG=v0.2.0rc8
 
 # Or inject a locally built binary
 export MIRA_ENGINE_LOCAL_BINARY=/absolute/path/to/mira-engine
+
+# Windows only: inject a local WinSW wrapper
+export MIRA_WINSW_LOCAL_BINARY=/absolute/path/to/WinSW-x64.exe
 ```
 
 Then build with:
@@ -148,7 +151,63 @@ npm run dist:bundle:mac
 npm run dist:bundle:win
 ```
 
-Bundle artifacts are written to `release-bundle/` and use the `MIRA-bundle-*` naming convention.
+Bundle artifacts are written to `release-bundle/` and use the `MIRA-bundle-*` naming convention. Windows bundle builds publish the NSIS setup artifact only; the portable bundle is intentionally not produced because the engine is registered as a Windows Service.
+
+For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Parallels, use the helper script from an ARM64 PowerShell session:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1
+```
+
+The script builds an ARM64 `mira-engine.exe`, downloads the .NET Framework `WinSW-net461.exe` wrapper, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users. The repo `package.json` intentionally remains `0.1.0`, so pass bundle version metadata explicitly when producing a named test build:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -BundleVersion 0.4.0-rc.3.dev2 `
+  -BundleArtifactVersion v0.4.0rc3.dev2
+```
+
+The helper forwards those values to `electron-builder` through `MIRA_UI_BUNDLE_VERSION` and `MIRA_UI_BUNDLE_ARTIFACT_VERSION`, so direct bundle builds can use the same environment variables.
+
+Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended"
+
+curl.exe -L -o "$env:TEMP\rustup-init-aarch64.exe" "https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe"
+& "$env:TEMP\rustup-init-aarch64.exe" -y --default-toolchain stable
+```
+
+`cryptography` also needs ARM64 OpenSSL development libraries when pip builds it from source:
+
+```powershell
+cd C:\Users\$env:USERNAME\Code
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat -disableMetrics
+.\vcpkg.exe install openssl:arm64-windows
+```
+
+After installing these prerequisites, close and reopen ARM64 PowerShell before running the bundle script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows
+```
+
+If GitHub release downloads are unstable in the VM, download the ARM64 assets in a browser and pass them to the script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows `
+  -UvArchive C:\Users\$env:USERNAME\Downloads\uv-aarch64-pc-windows-msvc.zip `
+  -WinSwLocalBinary C:\Users\$env:USERNAME\Downloads\WinSW-net461.exe
+```
+
+If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -PythonExe C:\Path\To\ARM64\python.exe -RecreateVenv
+```
 
 ## 6) Script reference
 

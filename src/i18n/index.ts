@@ -335,7 +335,7 @@ const dict = {
     connected: '已连接',
     disconnected: '未连接',
     sendMessage: '发送消息与 Agent 对话',
-    typeMessage: '输入消息...',
+    typeMessage: '输入prompt，按Shift + Enter发送',
     send: '发送',
     hypothesis: '假设',
     paper: '论文',

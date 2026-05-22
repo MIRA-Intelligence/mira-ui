@@ -104,7 +104,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: npm run dist:win
 
-      - name: Package Windows standalone executables as zip
+      - name: Package Windows standalone setup as zip
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
@@ -115,14 +115,6 @@ jobs:
           }
           $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
           Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
-
-          $portableExe = Get-ChildItem -Path release -Filter "MIRA-standalone-*-win-*-portable.exe" | Select-Object -First 1
-          if (-not $portableExe) {
-            Write-Error "Standalone portable executable not found in release/"
-            exit 1
-          }
-          $portableZip = [System.IO.Path]::ChangeExtension($portableExe.FullName, ".zip")
-          Compress-Archive -Path $portableExe.FullName -DestinationPath $portableZip -Force
 
       - name: Upload macOS standalone release assets
         if: matrix.os == 'macos-latest'
@@ -144,7 +136,6 @@ jobs:
           name: miraui-release-standalone-windows
           path: |
             release/MIRA-standalone-*-win-*-setup.zip
-            release/MIRA-standalone-*-win-*-portable.zip
 
   build-bundle:
     needs: verify-compatibility
@@ -223,7 +214,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: npm run dist:bundle:win
 
-      - name: Package Windows bundle executables as zip
+      - name: Package Windows bundle setup as zip
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
@@ -234,14 +225,6 @@ jobs:
           }
           $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
           Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
-
-          $portableExe = Get-ChildItem -Path release-bundle -Filter "MIRA-bundle-*-win-*-portable.exe" | Select-Object -First 1
-          if (-not $portableExe) {
-            Write-Error "Bundle portable executable not found in release-bundle/"
-            exit 1
-          }
-          $portableZip = [System.IO.Path]::ChangeExtension($portableExe.FullName, ".zip")
-          Compress-Archive -Path $portableExe.FullName -DestinationPath $portableZip -Force
 
       - name: Upload macOS bundle release assets
         if: matrix.os == 'macos-latest'
@@ -263,7 +246,6 @@ jobs:
           name: miraui-release-bundle-windows
           path: |
             release-bundle/MIRA-bundle-*-win-*-setup.zip
-            release-bundle/MIRA-bundle-*-win-*-portable.zip
 
   publish-release:
     needs:

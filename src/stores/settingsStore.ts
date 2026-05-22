@@ -1,11 +1,23 @@
 import { create } from 'zustand'
-import type { LocalEnginePhase } from '@/services/desktop'
+import type { LocalEngineOperation, LocalEnginePhase } from '@/services/desktop'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 export type DeploymentMode = 'localBundle' | 'remoteManual'
+
+export interface EngineProfile {
+  key: string
+  deploymentMode: DeploymentMode
+  apiUrl: string
+  wsUrl: string
+  workspacePath: string
+  runtimeConfig: RuntimeConfigPayload | null
+  engineVersion: string | null
+  configPath: string | null
+  updatedAt: number
+}
 
 const GATEWAY_PORT = 18790
 const DEFAULT_WORKSPACE_PATH = '~/.mira/workspace'
@@ -37,6 +49,8 @@ function defaultDeploymentMode(): DeploymentMode {
 }
 
 interface SettingsState {
+  activeEngineKey: string
+  engineProfiles: Record<string, EngineProfile>
   workspacePath: string
   theme: Theme
   language: Language
@@ -55,6 +69,7 @@ interface SettingsState {
   engineVersion: string | null
   connectionMessage: string | null
   localEnginePhase: LocalEnginePhase
+  localEngineOperation: LocalEngineOperation
   localEngineExecutablePath: string | null
   runtimeConfig: RuntimeConfigPayload | null
   runtimeConfigLoaded: boolean
@@ -81,6 +96,7 @@ interface SettingsState {
     message: string | null
     executablePath?: string | null
     version?: string | null
+    operation?: LocalEngineOperation
   }) => void
   setRuntimeConfig: (payload: RuntimeConfigPayload | null) => void
   setRuntimeConfigError: (message: string | null) => void
@@ -118,6 +134,128 @@ function isStaleLocalhost(url: string | undefined): boolean {
   } catch { return false }
 }
 
+function normalizeEndpoint(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ''
+    parsed.search = ''
+    return parsed.toString().replace(/\/$/, '')
+  } catch {
+    return url.trim()
+  }
+}
+
+function engineProfileKey(mode: DeploymentMode, apiUrl: string): string {
+  if (mode === 'localBundle') return 'localBundle'
+  return `remote:${normalizeEndpoint(apiUrl)}`
+}
+
+function workspaceFromRuntime(payload: RuntimeConfigPayload): string {
+  return payload.runtime.workspace || payload.projects_root || DEFAULT_WORKSPACE_PATH
+}
+
+function createEngineProfile(input: {
+  deploymentMode: DeploymentMode
+  apiUrl: string
+  wsUrl: string
+  workspacePath?: string
+  runtimeConfig?: RuntimeConfigPayload | null
+  engineVersion?: string | null
+  configPath?: string | null
+}): EngineProfile {
+  const key = engineProfileKey(input.deploymentMode, input.apiUrl)
+  const runtimeConfig = input.runtimeConfig ?? null
+  return {
+    key,
+    deploymentMode: input.deploymentMode,
+    apiUrl: input.apiUrl,
+    wsUrl: input.wsUrl,
+    workspacePath: input.workspacePath ?? (runtimeConfig ? workspaceFromRuntime(runtimeConfig) : DEFAULT_WORKSPACE_PATH),
+    runtimeConfig,
+    engineVersion: input.engineVersion ?? null,
+    configPath: input.configPath ?? runtimeConfig?.config_path ?? null,
+    updatedAt: Date.now(),
+  }
+}
+
+function sanitizeEngineProfile(value: unknown): EngineProfile | null {
+  if (!isRecord(value)) return null
+  const deploymentMode = value.deploymentMode === 'localBundle' || value.deploymentMode === 'remoteManual'
+    ? value.deploymentMode
+    : null
+  const apiUrl = typeof value.apiUrl === 'string' ? value.apiUrl : null
+  const wsUrl = typeof value.wsUrl === 'string' ? value.wsUrl : null
+  if (!deploymentMode || !apiUrl || !wsUrl) return null
+
+  const runtimeConfig = isRecord(value.runtimeConfig) ? value.runtimeConfig as unknown as RuntimeConfigPayload : null
+  const profile = createEngineProfile({
+    deploymentMode,
+    apiUrl,
+    wsUrl,
+    workspacePath: typeof value.workspacePath === 'string' ? value.workspacePath : undefined,
+    runtimeConfig,
+    engineVersion: typeof value.engineVersion === 'string' ? value.engineVersion : null,
+    configPath: typeof value.configPath === 'string' ? value.configPath : null,
+  })
+  if (typeof value.key === 'string' && value.key.trim()) {
+    profile.key = value.key
+  }
+  if (typeof value.updatedAt === 'number' && Number.isFinite(value.updatedAt)) {
+    profile.updatedAt = value.updatedAt
+  }
+  return profile
+}
+
+function currentProfileFromState(state: SettingsState): EngineProfile {
+  return createEngineProfile({
+    deploymentMode: state.deploymentMode,
+    apiUrl: state.apiUrl,
+    wsUrl: state.wsUrl,
+    workspacePath: state.workspacePath,
+    runtimeConfig: state.runtimeConfig,
+    engineVersion: state.engineVersion,
+    configPath: state.runtimeConfig?.config_path ?? null,
+  })
+}
+
+function profilesWithCurrent(state: SettingsState): Record<string, EngineProfile> {
+  const current = currentProfileFromState(state)
+  return {
+    ...state.engineProfiles,
+    [current.key]: current,
+  }
+}
+
+function selectProfile(
+  profiles: Record<string, EngineProfile>,
+  mode: DeploymentMode,
+  apiUrl: string,
+  wsUrl: string,
+  fallbackWorkspace = DEFAULT_WORKSPACE_PATH,
+): EngineProfile {
+  const key = engineProfileKey(mode, apiUrl)
+  return profiles[key] ?? createEngineProfile({
+    deploymentMode: mode,
+    apiUrl,
+    wsUrl,
+    workspacePath: fallbackWorkspace,
+  })
+}
+
+function latestProfileForMode(
+  profiles: Record<string, EngineProfile>,
+  mode: DeploymentMode,
+): EngineProfile | null {
+  let latest: EngineProfile | null = null
+  for (const profile of Object.values(profiles)) {
+    if (profile.deploymentMode !== mode) continue
+    if (!latest || profile.updatedAt >= latest.updatedAt) {
+      latest = profile
+    }
+  }
+  return latest
+}
+
 function loadPersisted(): Partial<SettingsState> {
   try {
     if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
@@ -134,6 +272,19 @@ function loadPersisted(): Partial<SettingsState> {
 
     if (typeof parsed.workspacePath === 'string') {
       sanitized.workspacePath = parsed.workspacePath
+    }
+    if (typeof parsed.activeEngineKey === 'string') {
+      sanitized.activeEngineKey = parsed.activeEngineKey
+    }
+    if (isRecord(parsed.engineProfiles)) {
+      const profiles: Record<string, EngineProfile> = {}
+      for (const [key, rawProfile] of Object.entries(parsed.engineProfiles)) {
+        const profile = sanitizeEngineProfile(rawProfile)
+        if (profile) {
+          profiles[key] = profile
+        }
+      }
+      sanitized.engineProfiles = profiles
     }
     if (parsed.theme === 'dark' || parsed.theme === 'light') {
       sanitized.theme = parsed.theme
@@ -176,6 +327,7 @@ function persist(state: SettingsState) {
   }
   const {
     workspacePath,
+    activeEngineKey,
     theme,
     language,
     deploymentMode,
@@ -185,7 +337,10 @@ function persist(state: SettingsState) {
     showToolCallHistory,
     receivePrereleases,
   } = state
+  const profiles = profilesWithCurrent(state)
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    activeEngineKey,
+    engineProfiles: profiles,
     workspacePath,
     theme,
     language,
@@ -206,14 +361,28 @@ const initialApiUrl = initialDeploymentMode === 'localBundle'
 const initialWsUrl = initialDeploymentMode === 'localBundle'
   ? localWsUrl()
   : saved.wsUrl ?? defaultRemoteWsUrl()
+const initialEngineProfiles = saved.engineProfiles ?? {}
+const initialEngineKey = saved.activeEngineKey ?? engineProfileKey(initialDeploymentMode, initialApiUrl)
+const seededInitialProfile = initialEngineProfiles[initialEngineKey]
+  ?? createEngineProfile({
+    deploymentMode: initialDeploymentMode,
+    apiUrl: initialApiUrl,
+    wsUrl: initialWsUrl,
+    workspacePath: saved.workspacePath ?? DEFAULT_WORKSPACE_PATH,
+  })
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  workspacePath: saved.workspacePath ?? DEFAULT_WORKSPACE_PATH,
+  activeEngineKey: seededInitialProfile.key,
+  engineProfiles: {
+    ...initialEngineProfiles,
+    [seededInitialProfile.key]: seededInitialProfile,
+  },
+  workspacePath: seededInitialProfile.workspacePath,
   theme: (saved.theme as Theme) ?? 'dark',
   language: (saved.language as Language) ?? 'en',
   deploymentMode: initialDeploymentMode,
-  apiUrl: initialApiUrl,
-  wsUrl: initialWsUrl,
+  apiUrl: seededInitialProfile.apiUrl,
+  wsUrl: seededInitialProfile.wsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? true,
   receivePrereleases: saved.receivePrereleases ?? false,
@@ -223,12 +392,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   engineVersion: null,
   connectionMessage: null,
   localEnginePhase: 'idle',
+  localEngineOperation: null,
   localEngineExecutablePath: null,
-  runtimeConfig: null,
-  runtimeConfigLoaded: false,
+  runtimeConfig: seededInitialProfile.runtimeConfig,
+  runtimeConfigLoaded: Boolean(seededInitialProfile.runtimeConfig),
   runtimeConfigError: null,
 
-  setWorkspacePath: (p) => { set({ workspacePath: p }); persist(get()) },
+  setWorkspacePath: (p) => {
+    set((state) => {
+      const profile = createEngineProfile({
+        deploymentMode: state.deploymentMode,
+        apiUrl: state.apiUrl,
+        wsUrl: state.wsUrl,
+        workspacePath: p,
+        runtimeConfig: state.runtimeConfig,
+        engineVersion: state.engineVersion,
+      })
+      return {
+        workspacePath: p,
+        engineProfiles: { ...state.engineProfiles, [profile.key]: profile },
+      }
+    })
+    persist(get())
+  },
   setTheme: (t) => { set({ theme: t }); persist(get()); applyTheme(t) },
   setLanguage: (l) => { set({ language: l }); persist(get()) },
   setDeploymentMode: (mode) => {
@@ -236,29 +422,96 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (state.deploymentMode === mode) {
         return state
       }
+      const profiles = profilesWithCurrent(state)
       if (mode === 'localBundle') {
+        const profile = selectProfile(profiles, mode, localApiUrl(), localWsUrl())
         return {
           deploymentMode: mode,
-          apiUrl: localApiUrl(),
-          wsUrl: localWsUrl(),
+          activeEngineKey: profile.key,
+          engineProfiles: { ...profiles, [profile.key]: profile },
+          apiUrl: profile.apiUrl,
+          wsUrl: profile.wsUrl,
+          workspacePath: profile.workspacePath,
+          runtimeConfig: profile.runtimeConfig,
+          runtimeConfigLoaded: Boolean(profile.runtimeConfig),
         }
       }
+      const latestRemote = latestProfileForMode(profiles, mode)
+      const nextApiUrl = isStaleLocalhost(state.apiUrl)
+        ? latestRemote?.apiUrl ?? defaultRemoteApiUrl()
+        : state.apiUrl
+      const nextWsUrl = isStaleLocalhost(state.wsUrl)
+        ? latestRemote?.wsUrl ?? defaultRemoteWsUrl()
+        : state.wsUrl
+      const profile = profiles[engineProfileKey(mode, nextApiUrl)]
+        ?? latestRemote
+        ?? selectProfile(profiles, mode, nextApiUrl, nextWsUrl)
       return {
         deploymentMode: mode,
-        apiUrl: state.apiUrl,
-        wsUrl: state.wsUrl,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...profiles, [profile.key]: profile },
+        apiUrl: profile.apiUrl,
+        wsUrl: profile.wsUrl,
+        workspacePath: profile.workspacePath,
+        runtimeConfig: profile.runtimeConfig,
+        runtimeConfigLoaded: Boolean(profile.runtimeConfig),
       }
     })
     persist(get())
   },
-  setApiUrl: (u) => { set({ apiUrl: u }); persist(get()) },
-  setWsUrl: (u) => { set({ wsUrl: u }); persist(get()) },
+  setApiUrl: (u) => {
+    set((state) => {
+      const profile = createEngineProfile({
+        deploymentMode: state.deploymentMode,
+        apiUrl: u,
+        wsUrl: state.wsUrl,
+        workspacePath: state.workspacePath,
+        runtimeConfig: state.runtimeConfig,
+        engineVersion: state.engineVersion,
+      })
+      return {
+        apiUrl: u,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...profilesWithCurrent(state), [profile.key]: profile },
+      }
+    })
+    persist(get())
+  },
+  setWsUrl: (u) => {
+    set((state) => {
+      const profile = createEngineProfile({
+        deploymentMode: state.deploymentMode,
+        apiUrl: state.apiUrl,
+        wsUrl: u,
+        workspacePath: state.workspacePath,
+        runtimeConfig: state.runtimeConfig,
+        engineVersion: state.engineVersion,
+      })
+      return {
+        wsUrl: u,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...profilesWithCurrent(state), [profile.key]: profile },
+      }
+    })
+    persist(get())
+  },
   setConnectionEndpoints: (apiUrl, wsUrl) => {
-    set((state) => (
-      state.apiUrl === apiUrl && state.wsUrl === wsUrl
-        ? state
-        : { apiUrl, wsUrl }
-    ))
+    set((state) => {
+      if (state.apiUrl === apiUrl && state.wsUrl === wsUrl) {
+        return state
+      }
+      const profiles = profilesWithCurrent(state)
+      const profile = selectProfile(profiles, state.deploymentMode, apiUrl, wsUrl)
+      return {
+        apiUrl: profile.apiUrl,
+        wsUrl: profile.wsUrl,
+        activeEngineKey: profile.key,
+        workspacePath: profile.workspacePath,
+        runtimeConfig: profile.runtimeConfig,
+        runtimeConfigLoaded: Boolean(profile.runtimeConfig),
+        engineProfiles: { ...profiles, [profile.key]: profile },
+      }
+    })
     persist(get())
   },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
@@ -274,21 +527,66 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       ) {
         return state
       }
-      return { engineStatus: status, engineMessage: message, engineVersion: nextVersion }
+      const nextState = { ...state, engineStatus: status, engineMessage: message, engineVersion: nextVersion }
+      return {
+        engineStatus: status,
+        engineMessage: message,
+        engineVersion: nextVersion,
+        engineProfiles: profilesWithCurrent(nextState),
+      }
     })
   },
   setConnectionMessage: (message) => set((state) => (
     state.connectionMessage === message ? state : { connectionMessage: message }
   )),
-  setLocalEngineBootstrap: ({ phase, message, executablePath, version }) => {
-    set((state) => ({
-      localEnginePhase: phase,
-      localEngineExecutablePath: executablePath ?? state.localEngineExecutablePath,
-      engineMessage: message ?? state.engineMessage,
-      engineVersion: version ?? state.engineVersion,
-    }))
+  setLocalEngineBootstrap: ({ phase, message, executablePath, version, operation }) => {
+    set((state) => {
+      const nextState = {
+        ...state,
+        localEnginePhase: phase,
+        localEngineOperation: operation === undefined ? state.localEngineOperation : operation,
+        localEngineExecutablePath: executablePath ?? state.localEngineExecutablePath,
+        engineMessage: message ?? state.engineMessage,
+        engineVersion: version ?? state.engineVersion,
+      }
+      return {
+        localEnginePhase: nextState.localEnginePhase,
+        localEngineOperation: nextState.localEngineOperation,
+        localEngineExecutablePath: nextState.localEngineExecutablePath,
+        engineMessage: nextState.engineMessage,
+        engineVersion: nextState.engineVersion,
+        engineProfiles: profilesWithCurrent(nextState),
+      }
+    })
   },
-  setRuntimeConfig: (payload) => set({ runtimeConfig: payload }),
+  setRuntimeConfig: (payload) => {
+    set((state) => {
+      if (!payload) {
+        const nextState = { ...state, runtimeConfig: null }
+        return {
+          runtimeConfig: null,
+          engineProfiles: profilesWithCurrent(nextState),
+        }
+      }
+      const workspacePath = workspaceFromRuntime(payload)
+      const profile = createEngineProfile({
+        deploymentMode: state.deploymentMode,
+        apiUrl: state.apiUrl,
+        wsUrl: state.wsUrl,
+        workspacePath,
+        runtimeConfig: payload,
+        engineVersion: state.engineVersion,
+        configPath: payload.config_path,
+      })
+      return {
+        runtimeConfig: payload,
+        workspacePath,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...state.engineProfiles, [profile.key]: profile },
+      }
+    })
+    persist(get())
+  },
   setRuntimeConfigError: (message) => set({ runtimeConfigError: message }),
   setRuntimeConfigLoaded: (loaded) => set({ runtimeConfigLoaded: loaded }),
   openSettings: () => set({ settingsOpen: true }),

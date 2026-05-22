@@ -1,6 +1,6 @@
 {
   "name": "mira-ui",
-  "version": "0.1.0",
+  "version": "0.4.0-rc.4",
   "description": "AI Agent UI for radiology workflows",
   "author": "MIRA Intelligence",
   "license": "GPL-3.0-or-later",
@@ -65,15 +65,11 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     },
     "nsis": {
       "artifactName": "${productName}-standalone-${version}-${os}-${arch}-setup.${ext}"
-    },
-    "portable": {
-      "artifactName": "${productName}-standalone-${version}-${os}-${arch}-portable.${ext}"
     }
   },
   "dependencies": {

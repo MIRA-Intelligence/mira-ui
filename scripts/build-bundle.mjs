@@ -1,16 +1,55 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { chmod, copyFile, mkdir, readFile, rename } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
 const platformDir = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
+const engineDir = path.resolve(process.cwd(), 'bundled-engine', platformDir)
 const enginePath = path.resolve(
   process.cwd(),
   'bundled-engine',
   platformDir,
   process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine',
 )
+const engineManifestPath = path.resolve(engineDir, 'mira-engine.manifest.json')
+const winswPath = path.join(engineDir, 'MiraEngineService.exe')
+
+async function localElectronDistPreservesFrameworkSymlinks() {
+  if (process.platform !== 'darwin') return false
+  const frameworkLink = path.resolve(
+    process.cwd(),
+    'node_modules',
+    'electron',
+    'dist',
+    'Electron.app',
+    'Contents',
+    'Frameworks',
+    'Electron Framework.framework',
+    'Electron Framework',
+  )
+  try {
+    return (await lstat(frameworkLink)).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+function bundleVersionOverrideArgs() {
+  const version = process.env.MIRA_UI_BUNDLE_VERSION?.trim()
+  const artifactVersion = process.env.MIRA_UI_BUNDLE_ARTIFACT_VERSION?.trim()
+  const overrides = []
+
+  if (version) {
+    overrides.push(`-c.extraMetadata.version=${version}`)
+  }
+  if (artifactVersion) {
+    overrides.push(`-c.nsis.artifactName=MIRA-bundle-${artifactVersion}-\${os}-\${arch}-setup.\${ext}`)
+  }
+
+  return overrides
+}
 
 function bundledEngineAssetName() {
   if (process.platform === 'darwin') {
@@ -89,6 +128,126 @@ async function copyLocalEngineBinary(localBinary) {
   await chmod(enginePath, 0o755)
 }
 
+async function copyLocalWinSwBinary(localBinary) {
+  await mkdir(engineDir, { recursive: true })
+  await copyFile(localBinary, winswPath)
+  await chmod(winswPath, 0o755)
+}
+
+async function sha256File(filePath) {
+  const hash = createHash('sha256')
+  const raw = await readFile(filePath)
+  hash.update(raw)
+  return hash.digest('hex')
+}
+
+function currentGitSha(cwd) {
+  const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+  if (result.status !== 0) return null
+  return result.stdout.trim() || null
+}
+
+function currentPackageVersion() {
+  const version = process.env.MIRA_UI_BUNDLE_VERSION?.trim()
+  if (version) return version
+  try {
+    const raw = spawnSync(process.execPath, [
+      '-e',
+      "process.stdout.write(require('./package.json').version || '')",
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return raw.status === 0 ? raw.stdout.trim() || null : null
+  } catch {
+    return null
+  }
+}
+
+async function writeBundledEngineManifest() {
+  const stats = await stat(enginePath)
+  const manifest = {
+    schema: 1,
+    kind: 'mira-bundled-engine',
+    generatedAt: new Date().toISOString(),
+    platform: process.platform,
+    arch: process.arch,
+    executable: path.basename(enginePath),
+    sha256: await sha256File(enginePath),
+    size: stats.size,
+    uiBundleVersion: currentPackageVersion(),
+    engineReleaseTag: process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || null,
+    source: process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
+    miraUiGitSha: currentGitSha(process.cwd()),
+  }
+  await writeFile(engineManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
+async function downloadWinSwAsset() {
+  const repo = process.env.MIRA_WINSW_REPO || 'winsw/winsw'
+  const configuredTag = process.env.MIRA_WINSW_RELEASE_TAG?.trim()
+  const releaseTag = configuredTag || latestReleaseTag(repo)
+  if (!releaseTag) {
+    throw new Error(`Unable to resolve latest WinSW release tag from ${repo}`)
+  }
+
+  await mkdir(engineDir, { recursive: true })
+  const result = spawnSync(
+    'gh',
+    ['release', 'download', releaseTag, '--repo', repo, '--pattern', 'WinSW-x64.exe', '--dir', engineDir, '--clobber'],
+    {
+      stdio: 'inherit',
+      env: process.env,
+    },
+  )
+
+  if (result.status !== 0) {
+    throw new Error(`Failed to download WinSW-x64.exe from ${repo}@${releaseTag}`)
+  }
+
+  const downloadedPath = path.join(engineDir, 'WinSW-x64.exe')
+  if (downloadedPath !== winswPath) {
+    await rename(downloadedPath, winswPath)
+  }
+  await chmod(winswPath, 0o755)
+}
+
+async function ensureWindowsServiceWrapper() {
+  if (process.platform !== 'win32') return
+
+  const localBinary = process.env.MIRA_WINSW_LOCAL_BINARY?.trim()
+  if (localBinary) {
+    await copyLocalWinSwBinary(localBinary)
+    return
+  }
+
+  if (hasGhCli()) {
+    try {
+      await downloadWinSwAsset()
+      return
+    } catch (error) {
+      if (!existsSync(winswPath)) {
+        throw error
+      }
+      console.warn(String(error))
+      console.warn(`Falling back to existing WinSW wrapper at ${winswPath}`)
+      return
+    }
+  }
+
+  if (!existsSync(winswPath)) {
+    throw new Error(
+      `Windows service wrapper not found: ${winswPath}\n` +
+      'Install gh and set MIRA_WINSW_RELEASE_TAG, or provide MIRA_WINSW_LOCAL_BINARY.',
+    )
+  }
+}
+
 async function ensureBundledEngine() {
   const localBinary = process.env.MIRA_ENGINE_LOCAL_BINARY?.trim()
   if (localBinary) {
@@ -124,14 +283,19 @@ const builderArgs = [
   'never',
   '-c',
   'electron-builder.bundle.config.cjs',
+  ...bundleVersionOverrideArgs(),
   ...args,
 ]
 
-if (process.platform === 'darwin' && args.includes('--mac')) {
+if (process.platform === 'darwin' && args.includes('--mac') && await localElectronDistPreservesFrameworkSymlinks()) {
   builderArgs.push('-c.electronDist=node_modules/electron/dist')
+} else if (process.platform === 'darwin' && args.includes('--mac')) {
+  console.warn('Local Electron dist does not preserve macOS framework symlinks; using electron-builder default Electron runtime.')
 }
 
 await ensureBundledEngine()
+await writeBundledEngineManifest()
+await ensureWindowsServiceWrapper()
 
 const child = spawn(process.execPath, builderArgs, {
   stdio: 'inherit',
