@@ -65,15 +65,11 @@
     },
     "win": {
       "target": [
-        "nsis",
-        "portable"
+        "nsis"
       ]
     },
     "nsis": {
       "artifactName": "${productName}-standalone-${version}-${os}-${arch}-setup.${ext}"
-    },
-    "portable": {
-      "artifactName": "${productName}-standalone-${version}-${os}-${arch}-portable.${ext}"
     }
   },
   "dependencies": {
