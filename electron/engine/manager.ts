@@ -797,6 +797,21 @@ export class LocalEngineManager {
       const fastExecutablePath = await resolveExecutable()
       const bundledManifest = await readEngineManifest(fastExecutablePath)
 
+      const fastHealth = await this.probeHealth(DEFAULT_PORT)
+      if (fastHealth.ok) {
+        return this.setState({
+          phase: 'ready',
+          operation: null,
+          message: 'Local engine is ready.',
+          executablePath: fastExecutablePath,
+          serviceInstalled: true,
+          serviceRunning: true,
+          healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+          version: fastHealth.version,
+          error: null,
+        })
+      }
+
       const status = await this.status()
       if (!status.result.ok && !status.result.executablePath) {
         return this.setState({
@@ -837,21 +852,6 @@ export class LocalEngineManager {
       if (!this.serviceMatchesBundledEngine(status.payload, fastExecutablePath, bundledManifest)) {
         const updated = await this.reinstallBundledEngineService(port, status.payload?.log_file)
         if (updated) return updated
-      }
-
-      const fastHealth = await this.probeHealth(DEFAULT_PORT)
-      if (fastHealth.ok) {
-        return this.setState({
-          phase: 'ready',
-          operation: null,
-          message: 'Local engine is ready.',
-          executablePath: fastExecutablePath,
-          serviceInstalled: true,
-          serviceRunning: true,
-          healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
-          version: fastHealth.version,
-          error: null,
-        })
       }
 
       if (!serviceInstalled) {
