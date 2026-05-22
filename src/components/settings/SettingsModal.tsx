@@ -193,6 +193,7 @@ export function SettingsModal() {
             message: localState.message,
             executablePath: localState.executablePath,
             version: localState.version,
+            operation: localState.operation,
           })
           if (localState.phase !== 'ready') {
             throw new Error(localState.message)
@@ -338,6 +339,7 @@ export function SettingsModal() {
           message: localState.message,
           executablePath: localState.executablePath,
           version: localState.version,
+          operation: localState.operation,
         })
         if (localState.phase !== 'ready') {
           throw new Error(localState.message)
@@ -448,6 +450,7 @@ export function SettingsModal() {
           message: localState.message,
           executablePath: localState.executablePath,
           version: localState.version,
+          operation: localState.operation,
         })
       }
       const probe = await probeEngineCompatibility(LOCAL_API_URL)
@@ -480,6 +483,7 @@ export function SettingsModal() {
         message: localState.message,
         executablePath: localState.executablePath,
         version: localState.version,
+        operation: localState.operation,
       })
       const probe = await probeEngineCompatibility(LOCAL_API_URL)
       store.setEngineBootstrap({
@@ -531,6 +535,7 @@ export function SettingsModal() {
           message: localState.message,
           executablePath: localState.executablePath,
           version: localState.version,
+          operation: localState.operation,
         })
       }
       const probe = await probeEngineCompatibility(LOCAL_API_URL)

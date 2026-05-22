@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
-import { bootstrapLocalEngine, hasDesktopEngineManager } from '@/services/desktop'
+import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager } from '@/services/desktop'
+import type { LocalEngineBootstrapState } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import { fetchRuntimeConfig } from '@/services/runtimeConfig'
 import { useAgentStore } from '@/stores/agentStore'
@@ -43,6 +44,24 @@ export function useWebSocket() {
 
   useEffect(() => {
     let disposed = false
+    let bootstrapPoll: ReturnType<typeof setInterval> | null = null
+
+    const clearBootstrapPoll = () => {
+      if (bootstrapPoll) {
+        clearInterval(bootstrapPoll)
+        bootstrapPoll = null
+      }
+    }
+
+    const applyLocalState = (localState: LocalEngineBootstrapState) => {
+      setLocalEngineBootstrap({
+        phase: localState.phase,
+        message: localState.message,
+        executablePath: localState.executablePath,
+        version: localState.version,
+        operation: localState.operation,
+      })
+    }
 
     const bootstrap = async () => {
       try {
@@ -74,15 +93,18 @@ export function useWebSocket() {
             message: t('localBundleBootstrapping', lang),
             executablePath: null,
             version: null,
+            operation: 'bootstrap',
           })
-          const localState = await bootstrapLocalEngine()
+          const bootstrapPromise = bootstrapLocalEngine()
+          bootstrapPoll = setInterval(() => {
+            void getBootstrapState().then((snapshot) => {
+              if (!disposed && snapshot) applyLocalState(snapshot)
+            })
+          }, 500)
+          const localState = await bootstrapPromise
+          clearBootstrapPoll()
           if (!localState || disposed) return
-          setLocalEngineBootstrap({
-            phase: localState.phase,
-            message: localState.message,
-            executablePath: localState.executablePath,
-            version: localState.version,
-          })
+          applyLocalState(localState)
           if (localState.phase !== 'ready') {
             setEngineBootstrap({
               status: 'unreachable',
@@ -110,6 +132,7 @@ export function useWebSocket() {
           return
         }
       } catch (error) {
+        clearBootstrapPoll()
         if (disposed) return
         const message = error instanceof Error ? error.message : String(error)
         const lang = useSettingsStore.getState().language
@@ -127,6 +150,7 @@ export function useWebSocket() {
 
     return () => {
       disposed = true
+      clearBootstrapPoll()
     }
   }, [apiUrl, deploymentMode, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 

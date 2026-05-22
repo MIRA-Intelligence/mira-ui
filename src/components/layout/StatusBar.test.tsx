@@ -117,6 +117,15 @@ describe('StatusBar', () => {
     ).toBeInTheDocument()
   })
 
+  it('shows the live local engine phase in the engine chip while bootstrapping', () => {
+    useSettingsStore.setState({
+      localEnginePhase: 'updating',
+      engineMessage: 'Updating local engine service...',
+    })
+    render(<StatusBar />)
+    expect(screen.getByText('Phase: updating')).toBeInTheDocument()
+  })
+
   it('renders the most recent system message in the slot', () => {
     render(<StatusBar />)
     act(() => {

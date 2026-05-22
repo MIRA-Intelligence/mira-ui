@@ -55,10 +55,12 @@ describe('settingsStore', () => {
       message: 'Local engine is ready.',
       executablePath: '/tmp/mira-engine',
       version: '0.2.0',
+      operation: null,
     })
 
     const state = useSettingsStore.getState()
     expect(state.localEnginePhase).toBe('ready')
+    expect(state.localEngineOperation).toBeNull()
     expect(state.localEngineExecutablePath).toBe('/tmp/mira-engine')
     expect(state.engineVersion).toBe('0.2.0')
     expect(state.engineMessage).toBe('Local engine is ready.')

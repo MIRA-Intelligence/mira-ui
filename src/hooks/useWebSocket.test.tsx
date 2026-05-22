@@ -15,6 +15,7 @@ vi.mock('@/services/websocket', () => ({
 vi.mock('@/services/desktop', () => ({
   hasDesktopEngineManager: vi.fn(() => true),
   bootstrapLocalEngine: vi.fn(),
+  getBootstrapState: vi.fn(),
 }))
 
 vi.mock('@/services/engine', () => ({
@@ -22,7 +23,7 @@ vi.mock('@/services/engine', () => ({
 }))
 
 import { useWebSocket } from './useWebSocket'
-import { bootstrapLocalEngine } from '@/services/desktop'
+import { bootstrapLocalEngine, getBootstrapState } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -56,6 +57,19 @@ describe('useWebSocket', () => {
       executablePath: 'C:\\Program Files\\MIRA\\mira-engine.exe',
       healthUrl: 'http://127.0.0.1:18790/health',
       version: '0.2.0',
+      operation: null,
+      serviceInstalled: true,
+      serviceRunning: true,
+      lastCommand: null,
+      error: null,
+    })
+    vi.mocked(getBootstrapState).mockResolvedValue({
+      phase: 'ready',
+      message: 'Local engine is ready.',
+      executablePath: 'C:\\Program Files\\MIRA\\mira-engine.exe',
+      healthUrl: 'http://127.0.0.1:18790/health',
+      version: '0.2.0',
+      operation: null,
       serviceInstalled: true,
       serviceRunning: true,
       lastCommand: null,

@@ -1,4 +1,5 @@
-export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'repairing' | 'starting' | 'ready' | 'error'
+export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
+export type LocalEngineOperation = 'bootstrap' | 'install' | 'update' | 'repair' | 'start' | null
 
 export interface LocalEngineCommandResult {
   ok: boolean
@@ -15,6 +16,10 @@ export interface LocalEngineStatusResult {
     installed?: boolean
     running?: boolean
     port?: number
+    engine_executable?: string | null
+    engine_manifest?: { sha256?: string } | null
+    engine_sha256?: string | null
+    launchd_program?: string | null
   } | null
 }
 
@@ -24,6 +29,7 @@ export interface LocalEngineBootstrapState {
   executablePath: string | null
   healthUrl: string
   version: string | null
+  operation: LocalEngineOperation
   serviceInstalled: boolean | null
   serviceRunning: boolean | null
   lastCommand: string[] | null

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, readFile, rename } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
@@ -12,6 +13,7 @@ const enginePath = path.resolve(
   platformDir,
   process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine',
 )
+const engineManifestPath = path.resolve(engineDir, 'mira-engine.manifest.json')
 const winswPath = path.join(engineDir, 'MiraEngineService.exe')
 
 async function localElectronDistPreservesFrameworkSymlinks() {
@@ -132,6 +134,60 @@ async function copyLocalWinSwBinary(localBinary) {
   await chmod(winswPath, 0o755)
 }
 
+async function sha256File(filePath) {
+  const hash = createHash('sha256')
+  const raw = await readFile(filePath)
+  hash.update(raw)
+  return hash.digest('hex')
+}
+
+function currentGitSha(cwd) {
+  const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], {
+    cwd,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  })
+  if (result.status !== 0) return null
+  return result.stdout.trim() || null
+}
+
+function currentPackageVersion() {
+  const version = process.env.MIRA_UI_BUNDLE_VERSION?.trim()
+  if (version) return version
+  try {
+    const raw = spawnSync(process.execPath, [
+      '-e',
+      "process.stdout.write(require('./package.json').version || '')",
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return raw.status === 0 ? raw.stdout.trim() || null : null
+  } catch {
+    return null
+  }
+}
+
+async function writeBundledEngineManifest() {
+  const stats = await stat(enginePath)
+  const manifest = {
+    schema: 1,
+    kind: 'mira-bundled-engine',
+    generatedAt: new Date().toISOString(),
+    platform: process.platform,
+    arch: process.arch,
+    executable: path.basename(enginePath),
+    sha256: await sha256File(enginePath),
+    size: stats.size,
+    uiBundleVersion: currentPackageVersion(),
+    engineReleaseTag: process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || null,
+    source: process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
+    miraUiGitSha: currentGitSha(process.cwd()),
+  }
+  await writeFile(engineManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
 async function downloadWinSwAsset() {
   const repo = process.env.MIRA_WINSW_REPO || 'winsw/winsw'
   const configuredTag = process.env.MIRA_WINSW_RELEASE_TAG?.trim()
@@ -238,6 +294,7 @@ if (process.platform === 'darwin' && args.includes('--mac') && await localElectr
 }
 
 await ensureBundledEngine()
+await writeBundledEngineManifest()
 await ensureWindowsServiceWrapper()
 
 const child = spawn(process.execPath, builderArgs, {

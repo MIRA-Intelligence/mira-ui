@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LocalEnginePhase } from '@/services/desktop'
+import type { LocalEngineOperation, LocalEnginePhase } from '@/services/desktop'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 export type Theme = 'dark' | 'light'
@@ -69,6 +69,7 @@ interface SettingsState {
   engineVersion: string | null
   connectionMessage: string | null
   localEnginePhase: LocalEnginePhase
+  localEngineOperation: LocalEngineOperation
   localEngineExecutablePath: string | null
   runtimeConfig: RuntimeConfigPayload | null
   runtimeConfigLoaded: boolean
@@ -95,6 +96,7 @@ interface SettingsState {
     message: string | null
     executablePath?: string | null
     version?: string | null
+    operation?: LocalEngineOperation
   }) => void
   setRuntimeConfig: (payload: RuntimeConfigPayload | null) => void
   setRuntimeConfigError: (message: string | null) => void
@@ -390,6 +392,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   engineVersion: null,
   connectionMessage: null,
   localEnginePhase: 'idle',
+  localEngineOperation: null,
   localEngineExecutablePath: null,
   runtimeConfig: seededInitialProfile.runtimeConfig,
   runtimeConfigLoaded: Boolean(seededInitialProfile.runtimeConfig),
@@ -536,17 +539,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setConnectionMessage: (message) => set((state) => (
     state.connectionMessage === message ? state : { connectionMessage: message }
   )),
-  setLocalEngineBootstrap: ({ phase, message, executablePath, version }) => {
+  setLocalEngineBootstrap: ({ phase, message, executablePath, version, operation }) => {
     set((state) => {
       const nextState = {
         ...state,
         localEnginePhase: phase,
+        localEngineOperation: operation === undefined ? state.localEngineOperation : operation,
         localEngineExecutablePath: executablePath ?? state.localEngineExecutablePath,
         engineMessage: message ?? state.engineMessage,
         engineVersion: version ?? state.engineVersion,
       }
       return {
         localEnginePhase: nextState.localEnginePhase,
+        localEngineOperation: nextState.localEngineOperation,
         localEngineExecutablePath: nextState.localEngineExecutablePath,
         engineMessage: nextState.engineMessage,
         engineVersion: nextState.engineVersion,
