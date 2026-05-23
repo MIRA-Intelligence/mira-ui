@@ -21,7 +21,7 @@ describe('NewProjectModal', () => {
     useSettingsStore.setState(initialSettingsState, true)
     useAgentStore.setState(initialAgentState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'research', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
@@ -59,7 +59,7 @@ describe('NewProjectModal', () => {
         title: 'Demo',
         coreQuestion: 'demo',
         runMode: 'auto',
-        agentProfile: 'default',
+        agentProfile: 'research',
         contractVersion: 1,
         currentExperiment: 'Exp001',
         experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
@@ -70,7 +70,7 @@ describe('NewProjectModal', () => {
       }],
       selectedTaskId: 'PRJ-0001',
       selectedExpId: 'Exp001',
-      agentProfile: 'default',
+      agentProfile: 'research',
       contractVersion: 1,
     })
 

@@ -1,7 +1,8 @@
 /* ── Pipeline stages ───────────────────────────── */
 
 export type PipelineStage = 'research' | 'experiment' | 'result'
-export type AgentProfile = 'engineer' | 'default' | 'research'
+export type AppMode = 'normal' | 'project'
+export type AgentProfile = 'engineer' | 'research'
 export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
@@ -295,6 +296,7 @@ export interface WsMessage {
   session_id: string
   user_id?: string
   media?: string[]
+  loop_mode?: AppMode
   mode?: 'manual' | 'auto'
   agent_profile?: AgentProfile
   contract_version?: ContractVersion

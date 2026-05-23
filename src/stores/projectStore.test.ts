@@ -12,7 +12,7 @@ describe('projectStore runtime preferences', () => {
     useProjectStore.setState(initialState, true)
     useAgentStore.setState(initialAgentState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'research', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
@@ -24,7 +24,7 @@ describe('projectStore runtime preferences', () => {
         title: 'Demo',
         coreQuestion: 'demo',
         runMode: 'auto',
-        agentProfile: 'default',
+        agentProfile: 'research',
         contractVersion: 1,
         currentExperiment: 'Exp001',
         experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
@@ -36,7 +36,7 @@ describe('projectStore runtime preferences', () => {
       selectedTaskId: 'PRJ-0001',
       selectedExpId: 'Exp001',
       mode: 'auto',
-      agentProfile: 'default',
+      agentProfile: 'research',
       contractVersion: 1,
     })
   })
@@ -104,7 +104,7 @@ describe('projectStore runtime preferences', () => {
               title: 'Demo',
               has_plan: true,
               run_mode: 'auto',
-              agent_profile: 'default',
+              agent_profile: 'research',
               contract_version: 1,
             }],
           }),
@@ -119,6 +119,37 @@ describe('projectStore runtime preferences', () => {
     expect(task?.status).toBe('completed')
   })
 
+  it('keeps normal mode unbound from projects when project list syncs', async () => {
+    useProjectStore.getState().setAppMode('normal')
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/projects')) {
+        return new Response(
+          JSON.stringify({
+            projects: [{
+              id: 'PRJ-0001',
+              display_name: 'PRJ-0001',
+              status: 'in_progress',
+              title: 'Remote Demo',
+              has_plan: false,
+              run_mode: 'auto',
+              agent_profile: 'research',
+              contract_version: 1,
+            }],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().loadProjects()
+
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useProjectStore.getState().selectedTaskId).toBeNull()
+    expect(useProjectStore.getState().tasks.map((task) => task.id)).toContain('PRJ-0001')
+  })
+
   it('replaces stale project list and refreshes plans after source changes', async () => {
     useProjectStore.setState({
       tasks: [
@@ -129,7 +160,7 @@ describe('projectStore runtime preferences', () => {
           title: 'Old Demo',
           coreQuestion: 'old demo',
           runMode: 'auto',
-          agentProfile: 'default',
+          agentProfile: 'research',
           contractVersion: 1,
           currentExperiment: 'Exp001',
           experiments: [{ id: 'Exp001', title: 'stale exp', status: 'pending' }],
@@ -145,7 +176,7 @@ describe('projectStore runtime preferences', () => {
           title: 'Should disappear',
           coreQuestion: 'stale project',
           runMode: 'auto',
-          agentProfile: 'default',
+          agentProfile: 'research',
           contractVersion: 1,
           experiments: [],
           knowledge: [],
@@ -170,7 +201,7 @@ describe('projectStore runtime preferences', () => {
               title: 'Fresh Demo',
               has_plan: true,
               run_mode: 'auto',
-              agent_profile: 'default',
+              agent_profile: 'research',
               contract_version: 1,
             }],
           }),

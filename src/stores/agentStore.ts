@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
+import { NORMAL_CHAT_SESSION_ID } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface SessionUsage {
@@ -56,6 +57,7 @@ function logDedupKey(entry: LogEntry): string {
 }
 
 function ensurePlanPolling(sessionId: string) {
+  if (sessionId === NORMAL_CHAT_SESSION_ID) return
   if (_pollTimers[sessionId]) return
   _pollTimers[sessionId] = setInterval(() => {
     useProjectStore.getState().refreshPlan(sessionId)
@@ -80,6 +82,7 @@ function clearResponseRefreshTimers(sessionId: string) {
 }
 
 function scheduleResponseRefreshes(sessionId: string) {
+  if (sessionId === NORMAL_CHAT_SESSION_ID) return
   clearResponseRefreshTimers(sessionId)
   _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
     void useProjectStore.getState().refreshPlan(sessionId)
@@ -190,8 +193,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       ensurePlanPolling(sessionId)
     } else if (msg.type === 'response') {
       stopPlanPolling(sessionId)
-      void useProjectStore.getState().refreshPlan(sessionId)
-      scheduleResponseRefreshes(sessionId)
+      if (sessionId !== NORMAL_CHAT_SESSION_ID) {
+        void useProjectStore.getState().refreshPlan(sessionId)
+        scheduleResponseRefreshes(sessionId)
+      }
     }
   },
 

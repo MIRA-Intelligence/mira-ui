@@ -20,9 +20,8 @@ import { t } from '@/i18n'
 
 const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
 const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
-const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'balancedMode' | 'researchMode' }> = [
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' }> = [
   { key: 'engineer', labelKey: 'engineerMode' },
-  { key: 'default', labelKey: 'balancedMode' },
   { key: 'research', labelKey: 'researchMode' },
 ]
 const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }> = [

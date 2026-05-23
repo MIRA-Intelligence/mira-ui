@@ -22,7 +22,7 @@ describe('AgentPanel keyboard behavior', () => {
     useProjectStore.setState({
       selectedTaskId: 'PRJ-0001',
       mode: 'manual',
-      agentProfile: 'default',
+      agentProfile: 'research',
     })
     useAgentStore.setState({
       connected: true,
@@ -64,5 +64,30 @@ describe('AgentPanel keyboard behavior', () => {
       ]),
     )
     expect((textarea as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('sends normal chat messages without a selected project', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useProjectStore.setState({
+      appMode: 'normal',
+      selectedTaskId: null,
+      mode: 'manual',
+      agentProfile: 'research',
+    })
+    useAgentStore.setState({ logsByProject: {} })
+
+    render(<AgentPanel />)
+
+    const textarea = screen.getByPlaceholderText('Type a message...')
+    fireEvent.change(textarea, { target: { value: 'general question' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'message',
+      content: 'general question',
+      session_id: '__normal__',
+      loop_mode: 'normal',
+    }))
+    expect(sendSpy.mock.calls[0]?.[0]).not.toHaveProperty('agent_profile')
   })
 })

@@ -3,13 +3,13 @@ import { useTimer } from '@/hooks/useTimer'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
-  const { tasks, selectedTaskId, startedAt } = useProjectStore()
+  const { appMode, tasks, selectedTaskId, startedAt } = useProjectStore()
   const { formatted } = useTimer(startedAt)
   const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
   const dragStyle = isMacDesktop ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined
 
   const selected = tasks.find((t) => t.id === selectedTaskId)
-  const title = selected?.title ?? 'Mira'
+  const title = appMode === 'normal' ? 'Mira Normal' : selected?.title ?? 'Mira'
 
   return (
     <header

@@ -15,6 +15,7 @@ const MODE_SWITCH_POLL_TIMEOUT_MS = 20000
 export function ProjectQueue() {
   const {
     tasks,
+    appMode,
     selectedTaskId,
     selectTask,
     mode,
@@ -61,6 +62,7 @@ export function ProjectQueue() {
   }
 
   const handleModeSwitch = (nextMode: 'manual' | 'auto') => {
+    if (appMode === 'normal') return
     if (mode === nextMode) return
     setMode(nextMode)
     if (!selectedTaskId) return
@@ -116,38 +118,39 @@ export function ProjectQueue() {
         ))}
       </div>
 
-      {/* Mode switch */}
-      <div className="p-3 border-t border-[var(--color-border)] flex items-center justify-center">
-        <div className="relative w-full max-w-[220px] rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1">
-          <span
-            aria-hidden
-            className={cn(
-              'pointer-events-none absolute left-1 top-1 bottom-1 rounded-full transition-transform duration-200 ease-out',
-              isAutoMode ? 'bg-[var(--color-success)]' : 'bg-[var(--color-accent)]',
-            )}
-            style={{
-              width: 'calc(50% - 0.25rem)',
-              transform: isAutoMode ? 'translateX(100%)' : 'translateX(0%)',
-            }}
-          />
+      {appMode === 'project' && (
+        <div className="p-3 border-t border-[var(--color-border)] flex items-center justify-center">
+          <div className="relative w-full max-w-[220px] rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1">
+            <span
+              aria-hidden
+              className={cn(
+                'pointer-events-none absolute left-1 top-1 bottom-1 rounded-full transition-transform duration-200 ease-out',
+                isAutoMode ? 'bg-[var(--color-success)]' : 'bg-[var(--color-accent)]',
+              )}
+              style={{
+                width: 'calc(50% - 0.25rem)',
+                transform: isAutoMode ? 'translateX(100%)' : 'translateX(0%)',
+              }}
+            />
 
-          <div className="relative z-10 grid grid-cols-2">
-            {(['manual', 'auto'] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => handleModeSwitch(m)}
-                className={cn(
-                  'py-1.5 text-xs font-medium rounded-full transition-colors',
-                  mode === m ? 'text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                )}
-              >
-                {t(m, lang)}
-              </button>
-            ))}
+            <div className="relative z-10 grid grid-cols-2">
+              {(['manual', 'auto'] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleModeSwitch(m)}
+                  className={cn(
+                    'py-1.5 text-xs font-medium rounded-full transition-colors',
+                    mode === m ? 'text-white' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
+                  )}
+                >
+                  {t(m, lang)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </aside>
   )
 }

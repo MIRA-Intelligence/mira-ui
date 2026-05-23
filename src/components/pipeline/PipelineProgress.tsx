@@ -24,17 +24,10 @@ const STAGES: { key: PipelineStage; icon: string }[] = [
   { key: 'result', icon: '📝' },
 ]
 
-const AGENT_PROFILES: { key: AgentProfile; labelKey: 'engineerMode' | 'balancedMode' | 'researchMode' }[] = [
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' }> = [
   { key: 'engineer', labelKey: 'engineerMode' },
-  { key: 'default', labelKey: 'balancedMode' },
   { key: 'research', labelKey: 'researchMode' },
 ]
-
-const AGENT_PROFILE_OFFSET: Record<AgentProfile, number> = {
-  engineer: 0,
-  default: 100,
-  research: 200,
-}
 
 const CONTRACT_MODES: { key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }[] = [
   { key: 1, labelKey: 'contractCompat' },
@@ -61,12 +54,13 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
 export function PipelineProgress() {
   const {
     tasks,
+    appMode,
     selectedTaskId,
     activeStage,
-    mode,
     agentProfile,
     contractVersion,
     setActiveStage,
+    setAppMode,
     setAgentProfile,
     setContractVersion,
   } = useProjectStore()
@@ -74,41 +68,66 @@ export function PipelineProgress() {
   const lang = useSettingsStore((s) => s.language)
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
+  const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed)
   const task = tasks.find((t) => t.id === selectedTaskId)
   const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
   const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
   const effectiveContractVersion = task?.contractVersion ?? contractVersion
   const agentProfileSlider = (
-    <div className="min-w-[210px] shrink-0">
-      <div
-        className={cn(
-          'relative w-full rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1 transition-opacity',
-          !canSwitchAgentProfile && 'opacity-60',
-        )}
-        title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
-      >
-        <span
-          aria-hidden
-          className="pointer-events-none absolute left-1 top-1 bottom-1 rounded-full bg-[var(--color-accent)]/25 transition-transform duration-200 ease-out"
-          style={{
-            width: 'calc((100% - 0.5rem) / 3)',
-            transform: `translateX(${AGENT_PROFILE_OFFSET[agentProfile]}%)`,
+    <div className="min-w-[230px] shrink-0">
+      <div className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1">
+        <button
+          type="button"
+          onClick={() => {
+            setAppMode('normal')
+            setSidebarCollapsed(true)
           }}
-        />
-        <div className="relative z-10 grid grid-cols-3">
-          {AGENT_PROFILES.map((profile) => (
+          className={cn(
+            'px-3 py-1 text-xs font-semibold rounded-full transition-colors',
+            appMode === 'normal'
+              ? 'bg-[var(--color-accent)]/25 text-[var(--color-text-primary)]'
+              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
+          )}
+        >
+          {t('normalMode', lang)}
+        </button>
+
+        <div className="h-4 w-px bg-[var(--color-border)]" aria-hidden />
+
+        <div
+          className={cn(
+            'relative grid flex-1 grid-cols-2 rounded-full bg-[var(--color-bg-primary)]/40 p-0.5 transition-opacity',
+            !canSwitchAgentProfile && 'opacity-60',
+          )}
+          title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
+        >
+          {appMode === 'project' && (
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-full bg-[var(--color-accent)]/20 transition-transform duration-200 ease-out"
+              style={{
+                left: '0.125rem',
+                width: 'calc(50% - 0.125rem)',
+                transform: agentProfile === 'research' ? 'translateX(100%)' : 'translateX(0%)',
+              }}
+            />
+          )}
+
+          {PROFILE_OPTIONS.map((profile) => (
             <button
               key={profile.key}
               type="button"
               onClick={() => {
                 if (!canSwitchAgentProfile) return
+                setAppMode('project')
                 setAgentProfile(profile.key)
+                setSidebarCollapsed(false)
               }}
               disabled={!canSwitchAgentProfile}
               className={cn(
-                'py-1 text-xs font-medium rounded-full transition-colors',
-                agentProfile === profile.key
+                'relative z-10 px-2 py-1 text-xs font-medium rounded-full transition-colors',
+                appMode === 'project' && agentProfile === profile.key
                   ? 'text-[var(--color-text-primary)]'
                   : 'text-[var(--color-text-muted)]',
                 canSwitchAgentProfile && 'hover:text-[var(--color-text-secondary)]',

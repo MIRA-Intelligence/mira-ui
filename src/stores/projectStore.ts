@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AgentProfile, ContractVersion,
+  NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AppMode, AgentProfile, ContractVersion,
 } from '@/types'
 import {
   deleteProjectFiles,
@@ -23,6 +23,7 @@ async function clearAgentLogs(projectId: string): Promise<void> {
 
 interface ProjectState {
   tasks: ProjectTask[]
+  appMode: AppMode
   selectedTaskId: string | null
   selectedExpId: string | null
   activeStage: PipelineStage
@@ -34,6 +35,7 @@ interface ProjectState {
   projectsLoaded: boolean
   contractsByTask: Record<string, TaskPlanContract>
 
+  setAppMode: (mode: AppMode) => void
   selectTask: (id: string) => void
   selectExperiment: (id: string | null) => void
   setActiveStage: (stage: PipelineStage) => void
@@ -62,7 +64,7 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'skipped',
 ])
 const MODE_SET = new Set(['manual', 'auto'] as const)
-const AGENT_PROFILE_SET = new Set(['engineer', 'default', 'research'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'research'] as const)
 const CONTRACT_VERSION_SET = new Set([1, 2] as const)
 
 function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
@@ -71,7 +73,7 @@ function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'):
     : fallback
 }
 
-function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'default'): AgentProfile {
+function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'research'): AgentProfile {
   return typeof value === 'string' && AGENT_PROFILE_SET.has(value as AgentProfile)
     ? value as AgentProfile
     : fallback
@@ -275,10 +277,11 @@ function resolveSelectedExperimentId(task: ProjectTask | undefined, selectedExpI
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: [],
+  appMode: 'project',
   selectedTaskId: null,
   selectedExpId: null,
   activeStage: 'research',
-  agentProfile: 'default',
+  agentProfile: 'research',
   contractVersion: 1,
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
@@ -286,10 +289,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   projectsLoaded: false,
   contractsByTask: {},
 
+  setAppMode: (appMode) => {
+    if (appMode === 'normal') {
+      set({
+        appMode,
+        selectedTaskId: null,
+        selectedExpId: null,
+        activeStage: 'research',
+        startedAt: Date.now(),
+      })
+      return
+    }
+    set({ appMode })
+  },
+
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
     const activeExp = pickActiveExperimentId(task)
     set({
+      appMode: 'project',
       selectedTaskId: id,
       selectedExpId: activeExp,
       activeStage: 'research',
@@ -381,6 +399,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const nextSelectedTask = filtered.find((t) => t.id === nextSelectedTaskId)
     set({
       tasks: filtered,
+      appMode: nextSelectedTaskId ? 'project' : get().appMode,
       stats: computeStats(filtered),
       selectedTaskId: nextSelectedTaskId,
       selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
@@ -464,6 +483,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     await clearAgentLogs(id)
     set((state) => ({
       tasks: [task, ...state.tasks],
+      appMode: 'project',
       selectedTaskId: id,
       selectedExpId: null,
       mode,
@@ -478,7 +498,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const remotes = await fetchProjects()
     if (!remotes) return
 
-    const { tasks, selectedTaskId } = get()
+    const { appMode, tasks, selectedTaskId } = get()
     const remoteProjectIds = new Set(
       remotes
         .filter((remote) => isProjectFolderId(remote.id))
@@ -505,7 +525,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         title: r.title || r.id,
         coreQuestion: r.core_question,
         runMode: normalizeRunMode(r.run_mode, 'auto'),
-        agentProfile: normalizeAgentProfile(r.agent_profile, 'default'),
+        agentProfile: normalizeAgentProfile(r.agent_profile, 'research'),
         contractVersion: normalizeContractVersion(r.contract_version, 1),
         experiments: [],
         knowledge: [],
@@ -521,7 +541,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const displayName = (remote.display_name && remote.display_name.trim()) || task.id
       const status: ProjectTask['status'] = remote.status === 'completed' ? 'completed' : 'in_progress'
       const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
-      const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'default')
+      const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'research')
       const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
       const title = remote.title || task.title
       const coreQuestion = remote.core_question ?? task.coreQuestion
@@ -557,13 +577,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       Object.entries(get().contractsByTask).filter(([taskId]) => mergedTaskIds.has(taskId)),
     )
     const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
-    const nextSelectedTaskId = hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
+    const nextSelectedTaskId = appMode === 'normal'
+      ? null
+      : hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
     const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
     set({
       tasks: merged,
       contractsByTask: nextContractsByTask,
       stats: computeStats(merged),
       projectsLoaded: true,
+      appMode,
       selectedTaskId: nextSelectedTaskId,
       selectedExpId: hasSelected ? get().selectedExpId : null,
       mode: normalizeRunMode(selectedTask?.runMode, get().mode),

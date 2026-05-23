@@ -6,6 +6,7 @@ import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
 import { formatTime } from '@/lib/utils'
+import { NORMAL_CHAT_SESSION_ID } from '@/lib/sessions'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 
@@ -14,13 +15,13 @@ type RenderItem =
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
 
 function ChatComposer({
-  selectedTaskId,
+  sessionId,
   isStreaming,
   lang,
   onSend,
   onStop,
 }: {
-  selectedTaskId: string | null
+  sessionId: string | null
   isStreaming: boolean
   lang: ReturnType<typeof useSettingsStore.getState>['language']
   onSend: (text: string) => void
@@ -30,11 +31,11 @@ function ChatComposer({
 
   useEffect(() => {
     setInput('')
-  }, [selectedTaskId])
+  }, [sessionId])
 
   const sendCurrent = () => {
     const text = input.trim()
-    if (!text || !selectedTaskId) return
+    if (!text || !sessionId) return
     onSend(text)
     setInput('')
   }
@@ -51,21 +52,21 @@ function ChatComposer({
               sendCurrent()
             }
           }}
-          placeholder={selectedTaskId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
-          disabled={!selectedTaskId}
+          placeholder={sessionId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
+          disabled={!sessionId}
           rows={1}
           className="flex-1 h-9 overflow-y-auto bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
         />
         <button
           onClick={sendCurrent}
-          disabled={!selectedTaskId}
+          disabled={!sessionId}
           className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
         >
           {t('send', lang)}
         </button>
         <button
           onClick={onStop}
-          disabled={!selectedTaskId}
+          disabled={!sessionId}
           title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
           className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
         >
@@ -81,11 +82,13 @@ export function AgentPanel() {
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? true)
   const lang = useSettingsStore((s) => s.language)
+  const appMode = useProjectStore((s) => s.appMode)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const mode = useProjectStore((s) => s.mode)
+  const sessionId = appMode === 'normal' ? NORMAL_CHAT_SESSION_ID : selectedTaskId
   const isAuto = mode === 'auto'
 
-  const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
+  const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
 
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -128,37 +131,37 @@ export function AgentPanel() {
 
   useEffect(() => {
     setCollapsedProgressGroups({})
-  }, [showProgressMessages, selectedTaskId])
+  }, [showProgressMessages, sessionId])
 
   useEffect(() => {
-    if (!selectedTaskId) return
+    if (!sessionId || appMode === 'normal') return
 
     let cancelled = false
     void (async () => {
-      const history = await fetchSessionHistory(selectedTaskId)
+      const history = await fetchSessionHistory(sessionId)
       if (cancelled || history.length === 0) return
-      hydrateLogs(selectedTaskId, history)
+      hydrateLogs(sessionId, history)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [selectedTaskId, hydrateLogs])
+  }, [appMode, sessionId, hydrateLogs])
 
   useEffect(() => {
-    if (!connected || !selectedTaskId) return
+    if (!connected || !sessionId || appMode === 'normal') return
     // Re-bind current session after websocket reconnects so progress streaming resumes.
     wsClient.send({
       type: 'bind',
       content: '',
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
     })
-  }, [connected, selectedTaskId])
+  }, [appMode, connected, sessionId])
 
   const handleSend = (text: string) => {
-    if (!selectedTaskId) return
-    useAgentStore.getState().addLog(selectedTaskId, {
+    if (!sessionId) return
+    useAgentStore.getState().addLog(sessionId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content: text,
@@ -170,17 +173,20 @@ export function AgentPanel() {
     wsClient.send({
       type: 'message',
       content: text,
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
-      mode: currentMode,
-      agent_profile: currentAgentProfile,
+      loop_mode: appMode,
+      ...(appMode === 'project' && {
+        mode: currentMode,
+        agent_profile: currentAgentProfile,
+      }),
     })
   }
 
   const handleResend = (content: string) => {
-    if (!selectedTaskId) return
+    if (!sessionId) return
 
-    useAgentStore.getState().addLog(selectedTaskId, {
+    useAgentStore.getState().addLog(sessionId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content,
@@ -192,21 +198,25 @@ export function AgentPanel() {
     wsClient.send({
       type: 'message',
       content,
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
-      mode: currentMode,
-      agent_profile: currentAgentProfile,
+      loop_mode: appMode,
+      ...(appMode === 'project' && {
+        mode: currentMode,
+        agent_profile: currentAgentProfile,
+      }),
     })
   }
 
   const handleStop = () => {
-    if (!selectedTaskId) return
+    if (!sessionId) return
 
     wsClient.send({
       type: 'message',
       content: '/stop',
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
+      loop_mode: appMode,
     })
   }
 
@@ -229,9 +239,9 @@ export function AgentPanel() {
             AUTO
           </span>
         )}
-        {selectedTaskId && (
+        {sessionId && appMode === 'project' && (
           <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
-            {selectedTaskId}
+            {sessionId}
           </span>
         )}
       </div>
@@ -334,14 +344,14 @@ export function AgentPanel() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             <span className="text-xs">
-              {selectedTaskId ? t('sendMessageToStart', lang) : t('selectProjectFirst', lang)}
+              {sessionId ? t(appMode === 'normal' ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang) : t('selectProjectFirst', lang)}
             </span>
           </div>
         )}
       </div>
 
       <ChatComposer
-        selectedTaskId={selectedTaskId}
+        sessionId={sessionId}
         isStreaming={isStreaming}
         lang={lang}
         onSend={handleSend}
