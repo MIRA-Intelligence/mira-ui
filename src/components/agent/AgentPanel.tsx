@@ -86,7 +86,9 @@ export function AgentPanel() {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const mode = useProjectStore((s) => s.mode)
   const sessionId = appMode === 'normal' ? NORMAL_CHAT_SESSION_ID : selectedTaskId
-  const isAuto = mode === 'auto'
+  // Auto / manual is a project-mode concept — in normal chat the toggle
+  // is hidden, so the AUTO badge in the header should be hidden too.
+  const isAuto = appMode === 'project' && mode === 'auto'
 
   const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
 

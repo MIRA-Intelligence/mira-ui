@@ -75,7 +75,7 @@ export function PipelineProgress() {
   const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
   const effectiveContractVersion = task?.contractVersion ?? contractVersion
   const agentProfileSlider = (
-    <div className="min-w-[230px] shrink-0">
+    <div className="shrink-0">
       <div className="flex items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1">
         <button
           type="button"
@@ -84,7 +84,7 @@ export function PipelineProgress() {
             setSidebarCollapsed(true)
           }}
           className={cn(
-            'px-3 py-1 text-xs font-semibold rounded-full transition-colors',
+            'w-16 py-1 text-xs font-semibold rounded-full transition-colors',
             appMode === 'normal'
               ? 'bg-[var(--color-accent)]/25 text-[var(--color-text-primary)]'
               : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
@@ -97,7 +97,7 @@ export function PipelineProgress() {
 
         <div
           className={cn(
-            'relative grid flex-1 grid-cols-2 rounded-full bg-[var(--color-bg-primary)]/40 p-0.5 transition-opacity',
+            'relative grid w-32 grid-cols-2 rounded-full bg-[var(--color-bg-primary)]/40 p-0.5 transition-opacity',
             !canSwitchAgentProfile && 'opacity-60',
           )}
           title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
@@ -126,7 +126,7 @@ export function PipelineProgress() {
               }}
               disabled={!canSwitchAgentProfile}
               className={cn(
-                'relative z-10 px-2 py-1 text-xs font-medium rounded-full transition-colors',
+                'relative z-10 w-16 py-1 text-xs font-medium rounded-full transition-colors',
                 appMode === 'project' && agentProfile === profile.key
                   ? 'text-[var(--color-text-primary)]'
                   : 'text-[var(--color-text-muted)]',

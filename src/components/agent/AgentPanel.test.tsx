@@ -90,4 +90,33 @@ describe('AgentPanel keyboard behavior', () => {
     }))
     expect(sendSpy.mock.calls[0]?.[0]).not.toHaveProperty('agent_profile')
   })
+
+  it('shows the AUTO badge when project mode is on auto', () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      selectedTaskId: 'PRJ-0001',
+      mode: 'auto',
+      agentProfile: 'research',
+    })
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('AUTO')).toBeInTheDocument()
+  })
+
+  it('hides the AUTO badge in normal mode even when mode is still auto', () => {
+    // mode may remain "auto" from a prior project session — the badge must
+    // not leak into normal chat where the manual/auto toggle is hidden.
+    useProjectStore.setState({
+      appMode: 'normal',
+      selectedTaskId: null,
+      mode: 'auto',
+      agentProfile: 'research',
+    })
+    useAgentStore.setState({ logsByProject: {} })
+
+    render(<AgentPanel />)
+
+    expect(screen.queryByText('AUTO')).not.toBeInTheDocument()
+  })
 })
