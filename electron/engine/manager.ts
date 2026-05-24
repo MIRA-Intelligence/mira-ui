@@ -1,8 +1,11 @@
-import { spawn } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { access, mkdir, readFile, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
 import path from 'path'
+import { promisify } from 'util'
+
+const execFileAsync = promisify(execFile)
 
 export type LocalEnginePhase = 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
 export type LocalEngineOperation = 'bootstrap' | 'install' | 'update' | 'repair' | 'start' | null
@@ -66,6 +69,7 @@ const HEALTH_POLL_SLOW_INTERVAL_MS = 1_000
 const HEALTH_POLL_FAST_WINDOW_MS = 5_000
 const COMMAND_TIMEOUT_MS = 120_000
 const REPAIR_TIMEOUT_MS = 180_000
+const INSTALL_RETRY_DELAY_MS = 3_000
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
 const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
@@ -289,7 +293,73 @@ export class LocalEngineManager {
     }
   }
 
-  private diagnoseBootstrapFailure(logTail: string, port: number): { message: string; error: string } {
+  private async probePortHolder(port: number): Promise<{ pid: number; command: string } | null> {
+    // Best-effort identification of whichever process is squatting on the
+    // engine port when health checks fail. Treat any error as "unknown" so
+    // diagnostics never block the failure path.
+    try {
+      if (process.platform === 'win32') {
+        const { stdout } = await execFileAsync('netstat', ['-ano', '-p', 'TCP'], { timeout: 3000 })
+        const line = stdout
+          .split(/\r?\n/)
+          .map((row) => row.trim())
+          .find((row) => /\sLISTENING\s/i.test(row) && row.includes(`:${port}`))
+        if (!line) return null
+        const parts = line.split(/\s+/)
+        const pidRaw = parts[parts.length - 1]
+        const pid = Number.parseInt(pidRaw, 10)
+        if (!Number.isFinite(pid) || pid <= 0) return null
+        let command = `pid ${pid}`
+        try {
+          const { stdout: tasklist } = await execFileAsync(
+            'tasklist',
+            ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
+            { timeout: 3000 },
+          )
+          const firstLine = tasklist.split(/\r?\n/).find((row) => row.trim().length > 0)
+          if (firstLine) {
+            const match = firstLine.match(/"([^"]+)"/)
+            if (match) command = match[1]
+          }
+        } catch {
+          // Fall back to pid-only label.
+        }
+        return { pid, command }
+      }
+      // macOS / Linux: lsof is available out of the box on macOS and on
+      // most modern Linux distros. Use a short timeout so we never block
+      // the bootstrap UX more than a second.
+      const { stdout } = await execFileAsync(
+        'lsof',
+        ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'],
+        { timeout: 1500 },
+      )
+      let pid = 0
+      let command = ''
+      for (const row of stdout.split(/\r?\n/)) {
+        if (row.startsWith('p')) pid = Number.parseInt(row.slice(1), 10)
+        else if (row.startsWith('c')) command = row.slice(1)
+      }
+      if (!Number.isFinite(pid) || pid <= 0) return null
+      return { pid, command: command || `pid ${pid}` }
+    } catch {
+      return null
+    }
+  }
+
+  private diagnoseBootstrapFailure(
+    logTail: string,
+    port: number,
+    portHolder: { pid: number; command: string } | null = null,
+  ): { message: string; error: string } {
+    if (portHolder) {
+      const detail = `${portHolder.command} (pid ${portHolder.pid})`
+      return {
+        message: `Local engine port ${port} is already in use by ${detail}. Quit that process or change the engine port, then retry.`,
+        error: logTail || `port ${port} held by ${detail}`,
+      }
+    }
+
     if (logTail.includes("No such command 'run-gateway'")) {
       return {
         message: 'Bundled local engine is too old for bundle mode. Rebuild the bundle with a newer mira-engine asset.',
@@ -524,7 +594,13 @@ export class LocalEngineManager {
     return this.runCommand(['upgrade', '--package', packageName], { timeoutMs: 180_000 })
   }
 
-  private async probeHealth(port = DEFAULT_PORT, timeoutMs = HEALTH_FAST_PATH_TIMEOUT_MS): Promise<{ ok: boolean; version: string | null }> {
+  private async probeHealth(port = DEFAULT_PORT, timeoutMs = HEALTH_FAST_PATH_TIMEOUT_MS): Promise<{
+    ok: boolean
+    version: string | null
+    engineSha256: string | null
+    engineShaAtBoot: string | null
+    engineExecutable: string | null
+  }> {
     const base = `http://${DEFAULT_HOST}:${port}`
     const fetchWithTimeout = async (url: string) => {
       const controller = new AbortController()
@@ -539,26 +615,60 @@ export class LocalEngineManager {
     try {
       const healthResp = await fetchWithTimeout(`${base}/health`)
       if (!healthResp.ok) {
-        return { ok: false, version: null }
+        return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
       }
 
       try {
         const versionResp = await fetchWithTimeout(`${base}/version`)
         if (versionResp.ok) {
-          const payload = await versionResp.json() as { agent_version?: string }
+          const payload = await versionResp.json() as {
+            agent_version?: string
+            engine_sha256?: string | null
+            engine_sha256_at_boot?: string | null
+            engine_executable?: string | null
+          }
           return {
             ok: true,
             version: typeof payload.agent_version === 'string' ? payload.agent_version : null,
+            engineSha256: typeof payload.engine_sha256 === 'string' ? payload.engine_sha256 : null,
+            engineShaAtBoot: typeof payload.engine_sha256_at_boot === 'string' ? payload.engine_sha256_at_boot : null,
+            engineExecutable: typeof payload.engine_executable === 'string' ? payload.engine_executable : null,
           }
         }
       } catch {
         // Ignore version probe failures when health already passed.
       }
 
-      return { ok: true, version: null }
+      return { ok: true, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
     } catch {
-      return { ok: false, version: null }
+      return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
     }
+  }
+
+  private liveEngineMatchesBundle(
+    probe: { engineSha256: string | null; engineShaAtBoot: string | null; engineExecutable: string | null },
+    bundledExecutablePath: string | null,
+    bundledManifest: EngineManifest | null,
+  ): boolean {
+    const expectedSha = typeof bundledManifest?.sha256 === 'string' ? bundledManifest.sha256 : null
+
+    // Dev / test build with no bundled manifest — accept the live engine.
+    if (!expectedSha) return true
+
+    // Authoritative path: only engines that snapshot their identity at
+    // startup expose engine_sha256_at_boot. ``engine_sha256`` on its own is
+    // unreliable because a DMG re-install overwrites the manifest file in
+    // place, and the old running engine will re-read it on the next
+    // /version call and falsely report the new SHA. Forcing the absence
+    // of this marker to "mismatch" causes a one-time reinstall that swaps
+    // the old engine for one that *does* snapshot at boot.
+    if (probe.engineShaAtBoot != null) {
+      return probe.engineShaAtBoot === expectedSha
+    }
+
+    // Engine pre-dates the boot-snapshot fix — its identity reporting
+    // cannot be trusted. Force the reinstall path.
+    return false
   }
 
   private async waitForHealth(port = DEFAULT_PORT, logPath?: string | null): Promise<{ ok: boolean; version: string | null; message: string; error?: string }> {
@@ -575,7 +685,11 @@ export class LocalEngineManager {
         : HEALTH_POLL_SLOW_INTERVAL_MS
       await new Promise((resolve) => setTimeout(resolve, pollInterval))
     }
-    return { ok: false, version: null, ...this.diagnoseBootstrapFailure(await this.readLogTail(logPath), port) }
+    const [logTail, portHolder] = await Promise.all([
+      this.readLogTail(logPath),
+      this.probePortHolder(port),
+    ])
+    return { ok: false, version: null, ...this.diagnoseBootstrapFailure(logTail, port, portHolder) }
   }
 
   private serviceMatchesBundledEngine(
@@ -599,6 +713,33 @@ export class LocalEngineManager {
     return path.normalize(installedPath) === path.normalize(executablePath)
   }
 
+  private async runInstallServiceWithRetry(
+    port: number,
+  ): Promise<EngineCommandResult> {
+    const runOnce = () => (
+      process.platform === 'win32'
+        ? this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
+        : this.installService(port)
+    )
+
+    let attempt = await runOnce()
+    // Race window: when the previous engine has active aiohttp/WebSocket
+    // clients, `launchctl bootout` returns before the old process has
+    // fully exited and the immediate bootstrap returns
+    // `Bootstrap failed: 5: Input/output error`. The engine-side teardown
+    // now polls launchctl to wait the label out, but we keep a UI-level
+    // retry as a belt-and-suspenders for older bundled engines that ship
+    // without that wait.
+    if (
+      !attempt.ok
+      && /Bootstrap failed: 5|Input\/output error/i.test(`${attempt.stderr}\n${attempt.stdout}`)
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, INSTALL_RETRY_DELAY_MS))
+      attempt = await runOnce()
+    }
+    return attempt
+  }
+
   private async reinstallBundledEngineService(
     port: number,
     logPath?: string | null,
@@ -610,10 +751,30 @@ export class LocalEngineManager {
       error: null,
     })
 
-    const install = process.platform === 'win32'
-      ? await this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
-      : await this.installService(port)
+    const install = await this.runInstallServiceWithRetry(port)
     if (!install.ok) {
+      const executablePath = install.executablePath ?? await resolveExecutable()
+      const manifest = await readEngineManifest(executablePath)
+      const status = await this.status()
+      if (
+        status.payload?.running
+        && this.serviceMatchesBundledEngine(status.payload, executablePath, manifest)
+      ) {
+        const health = await this.waitForHealth(port, logPath)
+        if (health.ok) {
+          return this.setState({
+            phase: 'ready',
+            operation: null,
+            message: health.message,
+            executablePath,
+            serviceInstalled: true,
+            serviceRunning: true,
+            version: health.version,
+            healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
+            error: null,
+          })
+        }
+      }
       return this.setState({
         phase: 'error',
         operation: 'update',
@@ -629,40 +790,39 @@ export class LocalEngineManager {
     this.setState({
       phase: 'starting',
       operation: 'update',
-      message: 'Starting updated local engine...',
-      executablePath: install.executablePath,
-      serviceInstalled: true,
-      serviceRunning: false,
-      healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
-    })
-
-    const start = process.platform === 'win32'
-      ? await this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
-      : await this.start()
-    if (!start.ok) {
-      return this.setState({
-        phase: 'error',
-        operation: 'update',
-        message: start.stderr || start.stdout || 'Updated local engine service failed to start.',
-        executablePath: start.executablePath,
-        serviceInstalled: true,
-        serviceRunning: false,
-        healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
-        error: start.stderr || start.stdout || 'start failed',
-      })
-    }
-
-    this.setState({
-      phase: 'starting',
-      operation: 'update',
       message: 'Verifying updated local engine health...',
-      executablePath: start.executablePath,
+      executablePath: install.executablePath,
       serviceInstalled: true,
       serviceRunning: true,
       healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
     })
 
-    const health = await this.waitForHealth(port, logPath)
+    // On macOS/Linux, install-service writes the launchd/systemd unit and
+    // bootstraps it with RunAtLoad=true — the engine is already starting.
+    // Skip the explicit start() (which on macOS does `launchctl kickstart -k`
+    // and would kill+restart the freshly-loaded service) and probe health
+    // directly. Only fall back to start() if the service somehow didn't come
+    // up on its own.
+    let health = await this.waitForHealth(port, logPath)
+    if (!health.ok) {
+      const start = process.platform === 'win32'
+        ? await this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
+        : await this.start()
+      if (!start.ok) {
+        return this.setState({
+          phase: 'error',
+          operation: 'update',
+          message: start.stderr || start.stdout || 'Updated local engine service failed to start.',
+          executablePath: start.executablePath,
+          serviceInstalled: true,
+          serviceRunning: false,
+          healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
+          error: start.stderr || start.stdout || 'start failed',
+        })
+      }
+      health = await this.waitForHealth(port, logPath)
+    }
+
     if (!health.ok) {
       return this.setState({
         phase: 'error',
@@ -799,17 +959,28 @@ export class LocalEngineManager {
 
       const fastHealth = await this.probeHealth(DEFAULT_PORT)
       if (fastHealth.ok) {
-        return this.setState({
-          phase: 'ready',
-          operation: null,
-          message: 'Local engine is ready.',
-          executablePath: fastExecutablePath,
-          serviceInstalled: true,
-          serviceRunning: true,
-          healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
-          version: fastHealth.version,
-          error: null,
-        })
+        if (this.liveEngineMatchesBundle(fastHealth, fastExecutablePath, bundledManifest)) {
+          return this.setState({
+            phase: 'ready',
+            operation: null,
+            message: 'Local engine is ready.',
+            executablePath: fastExecutablePath,
+            serviceInstalled: true,
+            serviceRunning: true,
+            healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+            version: fastHealth.version,
+            error: null,
+          })
+        }
+        // A live engine is responding but its identity does not match the
+        // bundle. Trigger the reinstall directly — the slow status path's
+        // SHA check reads from the engine state file rather than the live
+        // process, so trusting it here would silently skip the swap.
+        const updated = await this.reinstallBundledEngineService(
+          DEFAULT_PORT,
+          null,
+        )
+        if (updated) return updated
       }
 
       const status = await this.status()
