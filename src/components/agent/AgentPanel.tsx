@@ -91,6 +91,7 @@ export function AgentPanel() {
   const isAuto = appMode === 'project' && mode === 'auto'
 
   const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
+  const showThinking = Boolean(sessionId && isStreaming)
 
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -129,7 +130,7 @@ export function AgentPanel() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [logs.length])
+  }, [logs.length, showThinking])
 
   useEffect(() => {
     setCollapsedProgressGroups({})
@@ -170,6 +171,9 @@ export function AgentPanel() {
       type: 'response',
       metadata: { _user: true },
     })
+    if (connected) {
+      useAgentStore.getState().markSessionPending(sessionId)
+    }
 
     const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
@@ -195,6 +199,9 @@ export function AgentPanel() {
       type: 'response',
       metadata: { _user: true },
     })
+    if (connected) {
+      useAgentStore.getState().markSessionPending(sessionId)
+    }
 
     const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
@@ -212,6 +219,7 @@ export function AgentPanel() {
 
   const handleStop = () => {
     if (!sessionId) return
+    useAgentStore.getState().markSessionIdle(sessionId)
 
     wsClient.send({
       type: 'message',
@@ -340,7 +348,20 @@ export function AgentPanel() {
           return <LogEntry key={entry.id} entry={entry} />
         })}
 
-        {logs.length === 0 && (
+        {showThinking && (
+          <div className="px-4 py-2" role="status" aria-live="polite">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+              <span className="flex items-center gap-1" aria-hidden="true">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:120ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:240ms]" />
+              </span>
+              <span>{t('miraThinking', lang)}</span>
+            </div>
+          </div>
+        )}
+
+        {logs.length === 0 && !showThinking && (
           <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] gap-2">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-30">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

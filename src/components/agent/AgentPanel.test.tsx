@@ -64,6 +64,7 @@ describe('AgentPanel keyboard behavior', () => {
       ]),
     )
     expect((textarea as HTMLTextAreaElement).value).toBe('')
+    expect(screen.getByText('Mira is thinking...')).toBeInTheDocument()
   })
 
   it('sends normal chat messages without a selected project', () => {

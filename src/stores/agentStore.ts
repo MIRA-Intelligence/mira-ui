@@ -20,6 +20,8 @@ interface AgentState {
   addLog: (projectId: string, entry: LogEntry) => void
   hydrateLogs: (projectId: string, entries: LogEntry[]) => void
   handleWsMessage: (msg: WsResponse) => void
+  markSessionPending: (sessionId: string) => void
+  markSessionIdle: (sessionId: string) => void
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
   resetWorkspaceState: () => void
@@ -149,12 +151,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const usageUpdate = readUsageFromMetadata(msg.metadata)
 
     set((state) => {
+      const nextIsStreaming =
+        msg.type === 'progress' || msg.type === 'tool_call'
+          ? true
+          : false
       const next: Partial<AgentState> = {
         logsByProject: {
           ...state.logsByProject,
           [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
         },
-        isStreaming: msg.type === 'progress',
+        isStreaming: nextIsStreaming,
       }
       if (usageUpdate) {
         const prev = state.usageBySession[sessionId]
@@ -199,6 +205,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
     }
   },
+
+  markSessionPending: () =>
+    set((state) => (state.isStreaming ? state : { isStreaming: true })),
+
+  markSessionIdle: () =>
+    set((state) => (state.isStreaming ? { isStreaming: false } : state)),
 
   setConnected: (connected) =>
     set((state) => (state.connected === connected ? state : { connected })),
