@@ -140,6 +140,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'
+    const statusOnly = msg.metadata?._activity_ping === true
     const entry: LogEntry = {
       id: `log-${++logIdCounter}`,
       timestamp: new Date().toISOString(),
@@ -156,11 +157,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           ? true
           : false
       const next: Partial<AgentState> = {
-        logsByProject: {
+        isStreaming: nextIsStreaming,
+      }
+      if (!statusOnly) {
+        next.logsByProject = {
           ...state.logsByProject,
           [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
-        },
-        isStreaming: nextIsStreaming,
+        }
       }
       if (usageUpdate) {
         const prev = state.usageBySession[sessionId]
@@ -194,7 +197,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return next as AgentState
     })
 
-    if (msg.type === 'progress') {
+    if (msg.type === 'progress' || msg.type === 'tool_call') {
       clearResponseRefreshTimers(sessionId)
       ensurePlanPolling(sessionId)
     } else if (msg.type === 'response') {

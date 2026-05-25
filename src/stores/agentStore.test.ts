@@ -128,6 +128,19 @@ describe('agentStore session usage tracking', () => {
     expect(useAgentStore.getState().isStreaming).toBe(false)
   })
 
+  it('uses activity pings for liveness without adding chat log entries', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-A',
+      content: 'Mira is working...',
+      metadata: { _activity_ping: true },
+    })
+
+    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().logsByProject['PRJ-A']).toBeUndefined()
+  })
+
   it('overrides earlier usage when a higher cumulative number arrives', () => {
     useAgentStore.getState().handleWsMessage({
       type: 'progress',
