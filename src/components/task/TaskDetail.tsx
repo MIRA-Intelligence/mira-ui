@@ -7,9 +7,22 @@ import { ResultView } from '../stages/ResultView'
 import { t } from '@/i18n'
 
 export function TaskDetail() {
-  const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
+  const { appMode, tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
   const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
+
+  if (appMode === 'normal') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center px-8">
+        <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
+          {t('normalChatTitle', lang)}
+        </h3>
+        <p className="text-xs text-[var(--color-text-muted)] max-w-sm leading-relaxed">
+          {t('normalChatHint', lang)}
+        </p>
+      </div>
+    )
+  }
 
   if (!task) {
     return (

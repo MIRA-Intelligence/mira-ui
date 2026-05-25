@@ -47,7 +47,7 @@ describe('PipelineProgress agent profile switch', () => {
     useSettingsStore.setState(initialSettingsState, true)
     useUiStore.setState(initialUiState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
-      JSON.stringify({ run_mode: 'auto', agent_profile: 'default', contract_version: 1 }),
+      JSON.stringify({ run_mode: 'auto', agent_profile: 'research', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )))
 
@@ -59,7 +59,7 @@ describe('PipelineProgress agent profile switch', () => {
       tasks: [makeTask(false)],
       selectedTaskId: 'PRJ-0001',
       mode: 'auto',
-      agentProfile: 'default',
+      agentProfile: 'research',
       activeStage: 'research',
     })
     useAgentStore.setState({ isStreaming: false })
@@ -77,7 +77,7 @@ describe('PipelineProgress agent profile switch', () => {
       tasks: [makeTask(true)],
       selectedTaskId: 'PRJ-0001',
       mode: 'manual',
-      agentProfile: 'default',
+      agentProfile: 'research',
       activeStage: 'research',
     })
     useAgentStore.setState({ isStreaming: true })
@@ -87,7 +87,7 @@ describe('PipelineProgress agent profile switch', () => {
     const engineer = screen.getByRole('button', { name: 'Engineer' })
     expect(engineer).toBeDisabled()
     fireEvent.click(engineer)
-    expect(useProjectStore.getState().agentProfile).toBe('default')
+    expect(useProjectStore.getState().agentProfile).toBe('research')
   })
 
   it('allows switching contract mode when idle', () => {
@@ -95,7 +95,7 @@ describe('PipelineProgress agent profile switch', () => {
       tasks: [makeTask(false)],
       selectedTaskId: 'PRJ-0001',
       mode: 'auto',
-      agentProfile: 'default',
+      agentProfile: 'research',
       activeStage: 'research',
     })
     useAgentStore.setState({ isStreaming: false })
@@ -107,5 +107,25 @@ describe('PipelineProgress agent profile switch', () => {
     fireEvent.click(strict)
     const updatedTask = useProjectStore.getState().tasks.find((task) => task.id === 'PRJ-0001')
     expect(updatedTask?.contractVersion).toBe(2)
+  })
+
+  it('enters normal mode and collapses the project sidebar', () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      tasks: [makeTask(false)],
+      selectedTaskId: 'PRJ-0001',
+      mode: 'manual',
+      agentProfile: 'research',
+      activeStage: 'research',
+    })
+    useUiStore.setState({ sidebarCollapsed: false })
+
+    render(<PipelineProgress />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Normal' }))
+
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useProjectStore.getState().selectedTaskId).toBeNull()
+    expect(useUiStore.getState().sidebarCollapsed).toBe(true)
   })
 })

@@ -117,7 +117,7 @@ export async function updateProjectRuntimePreferences(
   const data = await resp.json()
   return {
     runMode: (data?.run_mode === 'manual' || data?.run_mode === 'auto') ? data.run_mode : undefined,
-    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'default' || data?.agent_profile === 'research')
+    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'research')
       ? data.agent_profile
       : undefined,
     contractVersion: (data?.contract_version === 1 || data?.contract_version === 2)

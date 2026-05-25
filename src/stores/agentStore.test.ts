@@ -94,6 +94,9 @@ describe('agentStore session usage tracking', () => {
   })
 
   it('parses tokens_used_session and max_tokens from progress metadata', () => {
+    useAgentStore.getState().markSessionPending('PRJ-A')
+    expect(useAgentStore.getState().isStreaming).toBe(true)
+
     useAgentStore.getState().handleWsMessage({
       type: 'progress',
       session_id: 'PRJ-A',
@@ -103,6 +106,39 @@ describe('agentStore session usage tracking', () => {
     const usage = useAgentStore.getState().getSessionUsage('PRJ-A')
     expect(usage).toMatchObject({ tokensUsed: 1500, maxTokens: 50_000 })
     expect(usage?.updatedAt).toBeGreaterThan(0)
+  })
+
+  it('keeps the thinking state until a terminal response arrives', () => {
+    const store = useAgentStore.getState()
+    store.markSessionPending('PRJ-A')
+    expect(useAgentStore.getState().isStreaming).toBe(true)
+
+    store.handleWsMessage({
+      type: 'tool_call',
+      session_id: 'PRJ-A',
+      content: 'read_file',
+    })
+    expect(useAgentStore.getState().isStreaming).toBe(true)
+
+    store.handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-A',
+      content: 'final',
+    })
+    expect(useAgentStore.getState().isStreaming).toBe(false)
+  })
+
+  it('uses activity pings for liveness without adding chat log entries', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-A',
+      content: 'Mira is working...',
+      metadata: { _activity_ping: true },
+    })
+
+    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().logsByProject['PRJ-A']).toBeUndefined()
   })
 
   it('overrides earlier usage when a higher cumulative number arrives', () => {

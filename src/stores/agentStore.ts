@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
+import { NORMAL_CHAT_SESSION_ID } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface SessionUsage {
@@ -19,6 +20,8 @@ interface AgentState {
   addLog: (projectId: string, entry: LogEntry) => void
   hydrateLogs: (projectId: string, entries: LogEntry[]) => void
   handleWsMessage: (msg: WsResponse) => void
+  markSessionPending: (sessionId: string) => void
+  markSessionIdle: (sessionId: string) => void
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
   resetWorkspaceState: () => void
@@ -56,6 +59,7 @@ function logDedupKey(entry: LogEntry): string {
 }
 
 function ensurePlanPolling(sessionId: string) {
+  if (sessionId === NORMAL_CHAT_SESSION_ID) return
   if (_pollTimers[sessionId]) return
   _pollTimers[sessionId] = setInterval(() => {
     useProjectStore.getState().refreshPlan(sessionId)
@@ -80,6 +84,7 @@ function clearResponseRefreshTimers(sessionId: string) {
 }
 
 function scheduleResponseRefreshes(sessionId: string) {
+  if (sessionId === NORMAL_CHAT_SESSION_ID) return
   clearResponseRefreshTimers(sessionId)
   _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
     void useProjectStore.getState().refreshPlan(sessionId)
@@ -135,6 +140,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'
+    const statusOnly = msg.metadata?._activity_ping === true
     const entry: LogEntry = {
       id: `log-${++logIdCounter}`,
       timestamp: new Date().toISOString(),
@@ -146,12 +152,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const usageUpdate = readUsageFromMetadata(msg.metadata)
 
     set((state) => {
+      const nextIsStreaming =
+        msg.type === 'progress' || msg.type === 'tool_call'
+          ? true
+          : false
       const next: Partial<AgentState> = {
-        logsByProject: {
+        isStreaming: nextIsStreaming,
+      }
+      if (!statusOnly) {
+        next.logsByProject = {
           ...state.logsByProject,
           [sessionId]: [...(state.logsByProject[sessionId] ?? []), entry],
-        },
-        isStreaming: msg.type === 'progress',
+        }
       }
       if (usageUpdate) {
         const prev = state.usageBySession[sessionId]
@@ -185,15 +197,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return next as AgentState
     })
 
-    if (msg.type === 'progress') {
+    if (msg.type === 'progress' || msg.type === 'tool_call') {
       clearResponseRefreshTimers(sessionId)
       ensurePlanPolling(sessionId)
     } else if (msg.type === 'response') {
       stopPlanPolling(sessionId)
-      void useProjectStore.getState().refreshPlan(sessionId)
-      scheduleResponseRefreshes(sessionId)
+      if (sessionId !== NORMAL_CHAT_SESSION_ID) {
+        void useProjectStore.getState().refreshPlan(sessionId)
+        scheduleResponseRefreshes(sessionId)
+      }
     }
   },
+
+  markSessionPending: () =>
+    set((state) => (state.isStreaming ? state : { isStreaming: true })),
+
+  markSessionIdle: () =>
+    set((state) => (state.isStreaming ? { isStreaming: false } : state)),
 
   setConnected: (connected) =>
     set((state) => (state.connected === connected ? state : { connected })),
