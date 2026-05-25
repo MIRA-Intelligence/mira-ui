@@ -561,10 +561,16 @@ export class LocalEngineManager {
   }
 
   async start(): Promise<EngineCommandResult> {
+    if (process.platform === 'win32') {
+      return this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
+    }
     return this.runCommand(['start'])
   }
 
   async stop(): Promise<EngineCommandResult> {
+    if (process.platform === 'win32') {
+      return this.runCommandElevated(this.commandWithHome('stop'), { timeoutMs: REPAIR_TIMEOUT_MS })
+    }
     return this.runCommand(['stop'])
   }
 
@@ -587,6 +593,9 @@ export class LocalEngineManager {
   }
 
   async installService(port = DEFAULT_PORT): Promise<EngineCommandResult> {
+    if (process.platform === 'win32') {
+      return this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
+    }
     return this.runCommand(this.installServiceArgs(port))
   }
 
@@ -713,14 +722,14 @@ export class LocalEngineManager {
     return path.normalize(installedPath) === path.normalize(executablePath)
   }
 
+  private requiresWindowsServiceInstall(payload: EngineStatusPayload | null): boolean {
+    return process.platform === 'win32' && payload?.service_mode !== 'windows-service'
+  }
+
   private async runInstallServiceWithRetry(
     port: number,
   ): Promise<EngineCommandResult> {
-    const runOnce = () => (
-      process.platform === 'win32'
-        ? this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
-        : this.installService(port)
-    )
+    const runOnce = () => this.installService(port)
 
     let attempt = await runOnce()
     // Race window: when the previous engine has active aiohttp/WebSocket
@@ -758,6 +767,7 @@ export class LocalEngineManager {
       const status = await this.status()
       if (
         status.payload?.running
+        && !this.requiresWindowsServiceInstall(status.payload)
         && this.serviceMatchesBundledEngine(status.payload, executablePath, manifest)
       ) {
         const health = await this.waitForHealth(port, logPath)
@@ -805,9 +815,7 @@ export class LocalEngineManager {
     // up on its own.
     let health = await this.waitForHealth(port, logPath)
     if (!health.ok) {
-      const start = process.platform === 'win32'
-        ? await this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
-        : await this.start()
+      const start = await this.start()
       if (!start.ok) {
         return this.setState({
           phase: 'error',
@@ -860,9 +868,7 @@ export class LocalEngineManager {
     const port = status.payload?.port ?? DEFAULT_PORT
     const healthUrl = `http://${DEFAULT_HOST}:${port}/health`
 
-    const install = process.platform === 'win32'
-      ? await this.runCommandElevated(this.installServiceArgs(port), { timeoutMs: REPAIR_TIMEOUT_MS })
-      : await this.installService(port)
+    const install = await this.installService(port)
     if (!install.ok) {
       return this.setState({
         phase: 'error',
@@ -876,9 +882,7 @@ export class LocalEngineManager {
       })
     }
 
-    const start = process.platform === 'win32'
-      ? await this.runCommandElevated(this.commandWithHome('start'), { timeoutMs: REPAIR_TIMEOUT_MS })
-      : await this.start()
+    const start = await this.start()
     if (!start.ok) {
       return this.setState({
         phase: 'error',
@@ -957,20 +961,47 @@ export class LocalEngineManager {
       const fastExecutablePath = await resolveExecutable()
       const bundledManifest = await readEngineManifest(fastExecutablePath)
 
+      let cachedStatus: { result: EngineCommandResult; payload: EngineStatusPayload | null } | null = null
       const fastHealth = await this.probeHealth(DEFAULT_PORT)
       if (fastHealth.ok) {
         if (this.liveEngineMatchesBundle(fastHealth, fastExecutablePath, bundledManifest)) {
-          return this.setState({
-            phase: 'ready',
-            operation: null,
-            message: 'Local engine is ready.',
-            executablePath: fastExecutablePath,
-            serviceInstalled: true,
-            serviceRunning: true,
-            healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
-            version: fastHealth.version,
-            error: null,
-          })
+          if (process.platform !== 'win32') {
+            return this.setState({
+              phase: 'ready',
+              operation: null,
+              message: 'Local engine is ready.',
+              executablePath: fastExecutablePath,
+              serviceInstalled: true,
+              serviceRunning: true,
+              healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+              version: fastHealth.version,
+              error: null,
+            })
+          }
+
+          cachedStatus = await this.status()
+          if (
+            !cachedStatus.result.ok
+            || this.requiresWindowsServiceInstall(cachedStatus.payload)
+          ) {
+            const updated = await this.reinstallBundledEngineService(
+              DEFAULT_PORT,
+              cachedStatus.payload?.log_file,
+            )
+            if (updated) return updated
+          } else {
+            return this.setState({
+              phase: 'ready',
+              operation: null,
+              message: 'Local engine is ready.',
+              executablePath: fastExecutablePath,
+              serviceInstalled: true,
+              serviceRunning: true,
+              healthUrl: `http://${DEFAULT_HOST}:${DEFAULT_PORT}/health`,
+              version: fastHealth.version,
+              error: null,
+            })
+          }
         }
         // A live engine is responding but its identity does not match the
         // bundle. Trigger the reinstall directly — the slow status path's
@@ -983,7 +1014,7 @@ export class LocalEngineManager {
         if (updated) return updated
       }
 
-      const status = await this.status()
+      const status = cachedStatus ?? await this.status()
       if (!status.result.ok && !status.result.executablePath) {
         return this.setState({
           phase: 'error',
@@ -1020,7 +1051,10 @@ export class LocalEngineManager {
         healthUrl,
       })
 
-      if (!this.serviceMatchesBundledEngine(status.payload, fastExecutablePath, bundledManifest)) {
+      if (
+        this.requiresWindowsServiceInstall(status.payload)
+        || !this.serviceMatchesBundledEngine(status.payload, fastExecutablePath, bundledManifest)
+      ) {
         const updated = await this.reinstallBundledEngineService(port, status.payload?.log_file)
         if (updated) return updated
       }

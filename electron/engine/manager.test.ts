@@ -17,6 +17,19 @@ vi.mock('electron', () => ({
 
 import { LocalEngineManager } from './manager'
 
+function mockProcessPlatform(platform: NodeJS.Platform): () => void {
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+  Object.defineProperty(process, 'platform', {
+    value: platform,
+    configurable: true,
+  })
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(process, 'platform', descriptor)
+    }
+  }
+}
+
 describe('LocalEngineManager', () => {
   const originalEnginePath = process.env.MIRA_ENGINE_PATH
   let tempDir: string
@@ -170,6 +183,43 @@ describe('LocalEngineManager', () => {
     expect(diagnosis.message).toContain('4242')
   })
 
+  it('uses elevated service lifecycle commands on Windows', async () => {
+    const restorePlatform = mockProcessPlatform('win32')
+    try {
+      const elevatedSpy = vi.spyOn(LocalEngineManager.prototype, 'runCommandElevated').mockResolvedValue({
+        ok: true,
+        code: 0,
+        stdout: '',
+        stderr: '',
+        command: [],
+        executablePath: process.env.MIRA_ENGINE_PATH ?? null,
+      })
+      const runCommandSpy = vi.spyOn(LocalEngineManager.prototype, 'runCommand')
+      const manager = new LocalEngineManager()
+
+      await manager.installService(18790)
+      await manager.start()
+      await manager.stop()
+
+      expect(elevatedSpy).toHaveBeenNthCalledWith(1, [
+        'install-service',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        '18790',
+        '--home',
+        tempDir,
+        '--config',
+        path.join(tempDir, '.mira', 'config.json'),
+      ], { timeoutMs: 180_000 })
+      expect(elevatedSpy).toHaveBeenNthCalledWith(2, ['start', '--home', tempDir], { timeoutMs: 180_000 })
+      expect(elevatedSpy).toHaveBeenNthCalledWith(3, ['stop', '--home', tempDir], { timeoutMs: 180_000 })
+      expect(runCommandSpy).not.toHaveBeenCalled()
+    } finally {
+      restorePlatform()
+    }
+  })
+
   it('takes the fast path when the live engine boot SHA matches the bundled manifest', async () => {
     const executable = process.env.MIRA_ENGINE_PATH as string
     await writeFile(
@@ -198,6 +248,77 @@ describe('LocalEngineManager', () => {
     expect(state.phase).toBe('ready')
     expect(state.version).toBe('0.4.0')
     expect(statusSpy).not.toHaveBeenCalled()
+  })
+
+  it('migrates a healthy legacy Windows background engine to a Windows service', async () => {
+    const restorePlatform = mockProcessPlatform('win32')
+    try {
+      const executable = process.env.MIRA_ENGINE_PATH as string
+      await writeFile(
+        path.join(path.dirname(executable), 'mira-engine.manifest.json'),
+        JSON.stringify({ sha256: 'bundled-sha' }),
+        'utf8',
+      )
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.endsWith('/health')) {
+          return new Response('{"status":"ok"}', { status: 200 })
+        }
+        if (url.endsWith('/version')) {
+          return Response.json({
+            agent_version: '0.4.0',
+            engine_sha256: 'bundled-sha',
+            engine_sha256_at_boot: 'bundled-sha',
+          })
+        }
+        return new Response(null, { status: 404 })
+      })
+      vi.spyOn(LocalEngineManager.prototype, 'status').mockResolvedValue({
+        result: {
+          ok: true,
+          code: 0,
+          stdout: '{}',
+          stderr: '',
+          command: [executable, 'status'],
+          executablePath: executable,
+        },
+        payload: {
+          installed: true,
+          running: true,
+          port: 18790,
+          service_mode: 'windows-background',
+          log_file: path.join(tempDir, '.mira', 'logs', 'agent-service.log'),
+          engine_manifest: { sha256: 'bundled-sha' },
+        },
+      })
+      const reinstallSpy = vi
+        .spyOn(LocalEngineManager.prototype as unknown as {
+          reinstallBundledEngineService: LocalEngineManager['bootstrapLocalEngine']
+        }, 'reinstallBundledEngineService')
+        .mockResolvedValue({
+          phase: 'ready',
+          message: 'migrated',
+          executablePath: executable,
+          healthUrl: '',
+          version: '0.4.0',
+          operation: null,
+          serviceInstalled: true,
+          serviceRunning: true,
+          lastCommand: null,
+          error: null,
+        })
+
+      const state = await new LocalEngineManager().bootstrapLocalEngine()
+
+      expect(reinstallSpy).toHaveBeenCalledWith(
+        18790,
+        path.join(tempDir, '.mira', 'logs', 'agent-service.log'),
+      )
+      expect(state.phase).toBe('ready')
+      expect(state.message).toBe('migrated')
+    } finally {
+      restorePlatform()
+    }
   })
 
   it('retries install-service once when the engine reports Bootstrap failed: 5', async () => {
