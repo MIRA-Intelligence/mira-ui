@@ -19,6 +19,10 @@
 }
 
 /* ── Light theme ─────────────────────────────────── */
+/* Text tokens use black-tone shades (pure → dark → light black) rather
+   than slate grays so body copy reads as black against the white
+   background. The 3-tier hierarchy is preserved via lightness, not hue,
+   and every tier exceeds WCAG AA contrast on #ffffff. */
 [data-theme="light"] {
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f6f8fa;
@@ -28,9 +32,9 @@
   --color-accent: #2563eb;
   --color-success: #16a34a;
   --color-warning: #d97706;
-  --color-text-primary: #1f2328;
-  --color-text-secondary: #656d76;
-  --color-text-muted: #8b949e;
+  --color-text-primary: #000000;
+  --color-text-secondary: #1f2328;
+  --color-text-muted: #4a5159;
   --color-overlay: rgba(0, 0, 0, 0.3);
   --color-input-bg: #ffffff;
 }
