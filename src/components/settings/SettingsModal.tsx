@@ -62,6 +62,7 @@ type SettingsDraft = {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  streamResponses: boolean
   provider: string
   model: string
   reasoningEffort: ReasoningEffort
@@ -96,6 +97,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? true,
+    streamResponses: store.streamResponses ?? true,
     provider: store.runtimeConfig?.runtime?.provider || 'auto',
     model: 'anthropic/claude-sonnet-4-5',
     reasoningEffort: null,
@@ -312,6 +314,7 @@ export function SettingsModal() {
       store.setLanguage(draft.language)
       store.setShowProgressMessages(draft.showProgressMessages)
       store.setShowToolCallHistory(draft.showToolCallHistory)
+      store.setStreamResponses(draft.streamResponses)
 
       if (draft.deploymentMode === 'localBundle') {
         const trimmedModel = draft.model.trim()
@@ -686,6 +689,16 @@ export function SettingsModal() {
                 />
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
                   {t('toolCallHistoryHint', curLang)}
+                </p>
+
+                <ToggleRow
+                  className="mt-4"
+                  label={t('streamResponses', curLang)}
+                  checked={draft.streamResponses}
+                  onToggle={() => setDraft((current) => ({ ...current, streamResponses: !current.streamResponses }))}
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {t('streamResponsesHint', curLang)}
                 </p>
               </Section>
 

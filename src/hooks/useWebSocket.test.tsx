@@ -48,7 +48,7 @@ describe('useWebSocket', () => {
     })
     useAgentStore.setState({
       connected: false,
-      isStreaming: false,
+      streamingBySession: {},
       logsByProject: {},
     })
     vi.mocked(bootstrapLocalEngine).mockResolvedValue({

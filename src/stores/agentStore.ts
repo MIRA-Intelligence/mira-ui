@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
-import { NORMAL_CHAT_SESSION_ID } from '@/lib/sessions'
+import { isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface SessionUsage {
@@ -11,7 +11,10 @@ export interface SessionUsage {
 
 interface AgentState {
   logsByProject: Record<string, LogEntry[]>
-  isStreaming: boolean
+  // Per-session streaming flag. The engine multiplexes many sessions over one
+  // socket, so a single global flag leaks one session's activity into every
+  // panel (e.g. a brand-new chat showing "mira is thinking"). Keyed by session.
+  streamingBySession: Record<string, boolean>
   connected: boolean
   // Cumulative token usage broadcast by the engine via message metadata.
   // Indexed by session id (which the renderer treats as the project id).
@@ -22,6 +25,7 @@ interface AgentState {
   handleWsMessage: (msg: WsResponse) => void
   markSessionPending: (sessionId: string) => void
   markSessionIdle: (sessionId: string) => void
+  isSessionStreaming: (sessionId: string | null) => boolean
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
   resetWorkspaceState: () => void
@@ -59,7 +63,8 @@ function logDedupKey(entry: LogEntry): string {
 }
 
 function ensurePlanPolling(sessionId: string) {
-  if (sessionId === NORMAL_CHAT_SESSION_ID) return
+  // Plans only exist for research projects; chat threads have no task_plan.
+  if (!isProjectSessionId(sessionId)) return
   if (_pollTimers[sessionId]) return
   _pollTimers[sessionId] = setInterval(() => {
     useProjectStore.getState().refreshPlan(sessionId)
@@ -84,16 +89,32 @@ function clearResponseRefreshTimers(sessionId: string) {
 }
 
 function scheduleResponseRefreshes(sessionId: string) {
-  if (sessionId === NORMAL_CHAT_SESSION_ID) return
+  if (!isProjectSessionId(sessionId)) return
   clearResponseRefreshTimers(sessionId)
   _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
     void useProjectStore.getState().refreshPlan(sessionId)
   }, delayMs))
 }
 
+function setSessionStreaming(
+  map: Record<string, boolean>,
+  sessionId: string,
+  streaming: boolean,
+): Record<string, boolean> {
+  const current = map[sessionId] ?? false
+  if (current === streaming) return map
+  if (!streaming) {
+    if (!(sessionId in map)) return map
+    const next = { ...map }
+    delete next[sessionId]
+    return next
+  }
+  return { ...map, [sessionId]: true }
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   logsByProject: {},
-  isStreaming: false,
+  streamingBySession: {},
   connected: false,
   usageBySession: {},
 
@@ -140,6 +161,61 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'
+
+    // Live token streaming: grow a single assistant entry as deltas arrive,
+    // then finalize it on stream end. No final `response` is sent while
+    // streaming, so this entry is the canonical message until reload.
+    if (msg.type === 'stream_delta') {
+      if (!msg.content) return
+      set((state) => {
+        const list = state.logsByProject[sessionId] ?? []
+        const last = list[list.length - 1]
+        let nextList: LogEntry[]
+        if (last && last.type === 'response' && last.metadata?._streaming) {
+          nextList = [...list.slice(0, -1), { ...last, content: last.content + msg.content }]
+        } else {
+          nextList = [
+            ...list,
+            {
+              id: `log-${++logIdCounter}`,
+              timestamp: new Date().toISOString(),
+              content: msg.content,
+              type: 'response',
+              metadata: { _streaming: true },
+            },
+          ]
+        }
+        return {
+          logsByProject: { ...state.logsByProject, [sessionId]: nextList },
+          streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, true),
+        }
+      })
+      return
+    }
+
+    if (msg.type === 'stream_end') {
+      set((state) => {
+        const list = state.logsByProject[sessionId]
+        let nextLogs = state.logsByProject
+        if (list && list.some((e) => e.metadata?._streaming)) {
+          nextLogs = {
+            ...state.logsByProject,
+            [sessionId]: list.map((e) => {
+              if (!e.metadata?._streaming) return e
+              const meta = { ...e.metadata }
+              delete meta._streaming
+              return { ...e, metadata: meta }
+            }),
+          }
+        }
+        return {
+          logsByProject: nextLogs,
+          streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, false),
+        }
+      })
+      return
+    }
+
     const statusOnly = msg.metadata?._activity_ping === true
     const entry: LogEntry = {
       id: `log-${++logIdCounter}`,
@@ -152,12 +228,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const usageUpdate = readUsageFromMetadata(msg.metadata)
 
     set((state) => {
-      const nextIsStreaming =
-        msg.type === 'progress' || msg.type === 'tool_call'
-          ? true
-          : false
+      const streaming = msg.type === 'progress' || msg.type === 'tool_call'
       const next: Partial<AgentState> = {
-        isStreaming: nextIsStreaming,
+        streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, streaming),
       }
       if (!statusOnly) {
         next.logsByProject = {
@@ -202,18 +275,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       ensurePlanPolling(sessionId)
     } else if (msg.type === 'response') {
       stopPlanPolling(sessionId)
-      if (sessionId !== NORMAL_CHAT_SESSION_ID) {
+      if (isProjectSessionId(sessionId)) {
         void useProjectStore.getState().refreshPlan(sessionId)
         scheduleResponseRefreshes(sessionId)
       }
     }
   },
 
-  markSessionPending: () =>
-    set((state) => (state.isStreaming ? state : { isStreaming: true })),
+  markSessionPending: (sessionId) =>
+    set((state) => {
+      const next = setSessionStreaming(state.streamingBySession, sessionId, true)
+      return next === state.streamingBySession ? state : { streamingBySession: next }
+    }),
 
-  markSessionIdle: () =>
-    set((state) => (state.isStreaming ? { isStreaming: false } : state)),
+  markSessionIdle: (sessionId) =>
+    set((state) => {
+      const next = setSessionStreaming(state.streamingBySession, sessionId, false)
+      return next === state.streamingBySession ? state : { streamingBySession: next }
+    }),
+
+  isSessionStreaming: (sessionId) => {
+    if (!sessionId) return false
+    return get().streamingBySession[sessionId] ?? false
+  },
 
   setConnected: (connected) =>
     set((state) => (state.connected === connected ? state : { connected })),
@@ -226,7 +310,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete updated[projectId]
       const usage = { ...state.usageBySession }
       delete usage[projectId]
-      return { logsByProject: updated, isStreaming: false, usageBySession: usage }
+      return {
+        logsByProject: updated,
+        streamingBySession: setSessionStreaming(state.streamingBySession, projectId, false),
+        usageBySession: usage,
+      }
     }),
 
   resetWorkspaceState: () => {
@@ -238,7 +326,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     set({
       logsByProject: {},
-      isStreaming: false,
+      streamingBySession: {},
       usageBySession: {},
     })
   },

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
@@ -218,7 +219,8 @@ type PathCheckState = {
 }
 
 export function NewProjectModal() {
-  const { newProjectOpen, closeNewProject } = useUiStore()
+  const { newProjectOpen, closeNewProject, newProjectPrefill, newProjectFromChatId } = useUiStore()
+  const removeChat = useChatStore((s) => s.removeChat)
   const {
     tasks,
     selectedTaskId,
@@ -231,7 +233,8 @@ export function NewProjectModal() {
     setContractVersion,
   } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
-  const isStreaming = useAgentStore((s) => s.isStreaming)
+  // Block runtime switching while ANY session is mid-stream, not just one.
+  const isStreaming = useAgentStore((s) => Object.values(s.streamingBySession).some(Boolean))
   const { workspacePath, language: lang, deploymentMode } = useSettingsStore()
   const selectedTask = tasks.find((task) => task.id === selectedTaskId)
   const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
@@ -314,6 +317,15 @@ export function NewProjectModal() {
     }
     return () => clearPathCheckTimer()
   }, [])
+
+  // Seed the description when opened with a prefill (e.g. promoting a Quick
+  // Chat into a project). Only fill an empty field so we never clobber edits.
+  useEffect(() => {
+    if (newProjectOpen && newProjectPrefill && !description.trim()) {
+      setDescription(newProjectPrefill)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newProjectOpen, newProjectPrefill])
 
   if (!newProjectOpen) return null
 
@@ -507,11 +519,18 @@ export function NewProjectModal() {
         content: agentMsg,
         session_id: projectId,
         user_id: 'ui_user',
+        loop_mode: 'project',
+        stream: useSettingsStore.getState().streamResponses,
         mode,
         agent_profile: runtimeProfile,
         contract_version: runtimeContractVersion,
         automation_policy: input.automationPolicy,
       })
+
+      // Promoted from a Quick Chat: drop the now-superseded chat thread.
+      if (newProjectFromChatId) {
+        removeChat(newProjectFromChatId)
+      }
 
       // Reset form
       setDescription('')

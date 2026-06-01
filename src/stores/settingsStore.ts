@@ -59,6 +59,8 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  // Stream assistant replies token-by-token. Default on for responsiveness.
+  streamResponses: boolean
   // Opt-in: when true, the auto-update check considers prereleases (rcN /
   // betaN) alongside stable releases. Defaults to false so casual users only
   // see ".0" upgrades.
@@ -84,6 +86,7 @@ interface SettingsState {
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
+  setStreamResponses: (v: boolean) => void
   setReceivePrereleases: (v: boolean) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
@@ -312,6 +315,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.showToolCallHistory === 'boolean') {
       sanitized.showToolCallHistory = parsed.showToolCallHistory
     }
+    if (typeof parsed.streamResponses === 'boolean') {
+      sanitized.streamResponses = parsed.streamResponses
+    }
     if (typeof parsed.receivePrereleases === 'boolean') {
       sanitized.receivePrereleases = parsed.receivePrereleases
     }
@@ -335,6 +341,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    streamResponses,
     receivePrereleases,
   } = state
   const profiles = profilesWithCurrent(state)
@@ -349,6 +356,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    streamResponses,
     receivePrereleases,
   }))
 }
@@ -385,6 +393,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: seededInitialProfile.wsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? true,
+  streamResponses: saved.streamResponses ?? true,
   receivePrereleases: saved.receivePrereleases ?? false,
   settingsOpen: false,
   engineStatus: 'unknown',
@@ -516,6 +525,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
+  setStreamResponses: (v) => { set({ streamResponses: v }); persist(get()) },
   setReceivePrereleases: (v) => { set({ receivePrereleases: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
     const nextVersion = version ?? null
