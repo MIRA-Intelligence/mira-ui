@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore, type DeploymentMode, type Theme, type Language } from '@/stores/settingsStore'
 import {
   bootstrapLocalEngine,
@@ -143,6 +143,34 @@ function resetWorkspaceScopedState() {
   useProjectStore.getState().resetWorkspaceState()
 }
 
+// Runtime fields a background refresh would otherwise clobber. When the user
+// has already edited one (current differs from the seed snapshot taken at
+// open), keep their value instead of overwriting it with the late server read.
+const PRESERVED_DRAFT_FIELDS = [
+  'workspacePath', 'apiUrl', 'wsUrl', 'provider', 'model',
+  'reasoningEffort', 'maxToolIterations', 'restrictToWorkspace', 'apiBase', 'apiKey',
+] as const
+
+function mergePreservingEdits(
+  current: SettingsDraft,
+  seed: SettingsDraft,
+  fresh: SettingsDraft,
+): SettingsDraft {
+  const next: SettingsDraft = { ...current }
+  for (const field of PRESERVED_DRAFT_FIELDS) {
+    const userEdited = current[field] !== seed[field]
+    if (!userEdited) {
+      ;(next as Record<string, unknown>)[field] = fresh[field]
+    }
+  }
+  return next
+}
+
+function localEngineAlreadyUp(): boolean {
+  return useAgentStore.getState().connected
+    && useSettingsStore.getState().localEnginePhase === 'ready'
+}
+
 function workspacePathChanged(previous: string, next: string): boolean {
   return previous.trim() !== next.trim()
 }
@@ -174,20 +202,33 @@ export function SettingsModal() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('connection')
   const [workspaceEdited, setWorkspaceEdited] = useState(false)
 
+  // Snapshot of the draft when the modal opened. A late background refresh
+  // diffs against it so it never overwrites fields the user already changed.
+  const seedRef = useRef<SettingsDraft>(draft)
+  // Monotonic token: only the most recent load is allowed to mutate state, so a
+  // slow response from a previous open/refresh can't clobber a newer one.
+  const loadTokenRef = useRef(0)
+
   const curLang = draft.language
 
   const loadRuntimeConfig = async (
     mode: DeploymentMode,
     apiUrlOverride?: string,
     commitToStore = true,
+    preserveEdits = false,
   ) => {
+    const token = ++loadTokenRef.current
     setRuntimeLoading(true)
     setFeedback(null)
     setFeedbackError(false)
     try {
       const targetApiUrl = mode === 'localBundle' ? LOCAL_API_URL : (apiUrlOverride?.trim() || draft.apiUrl.trim())
 
-      if (mode === 'localBundle') {
+      // Re-bootstrapping re-resolves and re-hashes the bundled engine on every
+      // open, which is the main source of the "Settings is slow" lag. When the
+      // engine is already running and connected we can skip straight to the
+      // (cheap) config fetch.
+      if (mode === 'localBundle' && !localEngineAlreadyUp()) {
         const localState = await bootstrapLocalEngine()
         if (localState) {
           store.setLocalEngineBootstrap({
@@ -204,6 +245,7 @@ export function SettingsModal() {
       }
 
       const payload = await fetchRuntimeConfig(targetApiUrl)
+      if (loadTokenRef.current !== token) return
       if (commitToStore) {
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
@@ -211,14 +253,21 @@ export function SettingsModal() {
       }
       setRuntimeProviders(payload.providers)
       setWorkspaceEdited(false)
-      setDraft((current) => ({
-        ...applyRuntimePayload(current, payload, {
-          apiUrl: targetApiUrl,
-          wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : current.wsUrl,
-        }),
-        deploymentMode: mode,
-      }))
+      const endpoints = {
+        apiUrl: targetApiUrl,
+        wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : (seedRef.current.wsUrl || draft.wsUrl),
+      }
+      setDraft((current) => {
+        // Background "refresh on open" preserves edits the user may have already
+        // typed. Explicit refreshes / mode switches replace the draft outright.
+        if (preserveEdits) {
+          const fresh = { ...applyRuntimePayload(seedRef.current, payload, endpoints), deploymentMode: mode }
+          return mergePreservingEdits(current, seedRef.current, fresh)
+        }
+        return { ...applyRuntimePayload(current, payload, endpoints), deploymentMode: mode }
+      })
     } catch (error) {
+      if (loadTokenRef.current !== token) return
       const message = error instanceof Error ? error.message : String(error)
       if (commitToStore) {
         store.setRuntimeConfigError(message)
@@ -227,13 +276,16 @@ export function SettingsModal() {
       setFeedbackError(true)
       setFeedback(message)
     } finally {
-      setRuntimeLoading(false)
+      if (loadTokenRef.current === token) {
+        setRuntimeLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     if (!settingsOpen) return
     const nextDraft = createDraft(store)
+    seedRef.current = nextDraft
     setDraft(nextDraft)
     setActiveTab('connection')
     setBusy(false)
@@ -242,7 +294,7 @@ export function SettingsModal() {
     setFeedback(null)
     setWorkspaceEdited(false)
     setRuntimeProviders(store.runtimeConfig?.providers ?? {})
-    void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true)
+    void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true, true)
   }, [settingsOpen])
 
   useEffect(() => {
@@ -333,19 +385,23 @@ export function SettingsModal() {
           throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
 
-        const localState = await bootstrapLocalEngine()
-        if (!localState) {
-          throw new Error(t('settingsDesktopBundleUnavailable', curLang))
-        }
-        store.setLocalEngineBootstrap({
-          phase: localState.phase,
-          message: localState.message,
-          executablePath: localState.executablePath,
-          version: localState.version,
-          operation: localState.operation,
-        })
-        if (localState.phase !== 'ready') {
-          throw new Error(localState.message)
+        // Skip the (slow) re-bootstrap when the engine is already running and
+        // connected — we only need it up to accept the POST below.
+        if (!localEngineAlreadyUp()) {
+          const localState = await bootstrapLocalEngine()
+          if (!localState) {
+            throw new Error(t('settingsDesktopBundleUnavailable', curLang))
+          }
+          store.setLocalEngineBootstrap({
+            phase: localState.phase,
+            message: localState.message,
+            executablePath: localState.executablePath,
+            version: localState.version,
+            operation: localState.operation,
+          })
+          if (localState.phase !== 'ready') {
+            throw new Error(localState.message)
+          }
         }
 
         store.setDeploymentMode('localBundle')
@@ -371,7 +427,8 @@ export function SettingsModal() {
           providers: providerUpdates,
         })
 
-        if (workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))) {
+        const localWorkspaceChanged = workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))
+        if (localWorkspaceChanged) {
           resetWorkspaceScopedState()
         }
         store.setRuntimeConfig(payload)
@@ -390,7 +447,11 @@ export function SettingsModal() {
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
         })
-        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        // The project list only changes when the workspace root moves; skip the
+        // expensive per-project plan/contract refetch otherwise.
+        if (localWorkspaceChanged) {
+          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        }
       } else {
         if (!nextApiUrl || !nextWsUrl) {
           throw new Error(t('settingsRemoteRequiresUrls', curLang))
@@ -406,7 +467,8 @@ export function SettingsModal() {
         }
 
         const resolvedWorkspacePath = runtimeWorkspacePath(payload)
-        if (switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)) {
+        const remoteWorkspaceChanged = switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)
+        if (remoteWorkspaceChanged) {
           resetWorkspaceScopedState()
         }
         store.setDeploymentMode('remoteManual')
@@ -427,7 +489,9 @@ export function SettingsModal() {
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
         })
-        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        if (remoteWorkspaceChanged) {
+          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        }
       }
 
       closeSettings()
