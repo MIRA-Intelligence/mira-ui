@@ -1,9 +1,22 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useSettingsStore } from './settingsStore'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 const initialState = useSettingsStore.getState()
+
+function installLocalStorageStub() {
+  const entries = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => entries.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => {
+      entries.set(key, value)
+    }),
+    removeItem: vi.fn((key: string) => {
+      entries.delete(key)
+    }),
+  })
+}
 
 function runtimePayload(workspace: string, configPath: string): RuntimeConfigPayload {
   return {
@@ -25,9 +38,31 @@ function runtimePayload(workspace: string, configPath: string): RuntimeConfigPay
 
 describe('settingsStore', () => {
   beforeEach(() => {
+    installLocalStorageStub()
     localStorage.removeItem?.('mira-ui-settings')
     localStorage.removeItem?.('medpilot-ui-settings')
     useSettingsStore.setState(initialState, true)
+  })
+
+  it('defaults to light theme with quiet optional history and prerelease updates off', () => {
+    const state = useSettingsStore.getState()
+
+    expect(state.theme).toBe('light')
+    expect(state.showToolCallHistory).toBe(false)
+    expect(state.receivePrereleases).toBe(false)
+  })
+
+  it('persists user setting changes to local storage', () => {
+    const store = useSettingsStore.getState()
+
+    store.setTheme('dark')
+    store.setShowToolCallHistory(true)
+    store.setReceivePrereleases(true)
+
+    const persisted = JSON.parse(localStorage.getItem('mira-ui-settings') ?? '{}')
+    expect(persisted.theme).toBe('dark')
+    expect(persisted.showToolCallHistory).toBe(true)
+    expect(persisted.receivePrereleases).toBe(true)
   })
 
   it('switches to local bundle mode with fixed localhost endpoints', () => {

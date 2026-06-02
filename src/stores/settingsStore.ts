@@ -59,6 +59,8 @@ interface SettingsState {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  // Stream assistant replies token-by-token. Default on for responsiveness.
+  streamResponses: boolean
   // Opt-in: when true, the auto-update check considers prereleases (rcN /
   // betaN) alongside stable releases. Defaults to false so casual users only
   // see ".0" upgrades.
@@ -84,6 +86,7 @@ interface SettingsState {
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
+  setStreamResponses: (v: boolean) => void
   setReceivePrereleases: (v: boolean) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
@@ -107,6 +110,8 @@ interface SettingsState {
 
 const STORAGE_KEY = 'mira-ui-settings'
 const LEGACY_STORAGE_KEY = 'medpilot-ui-settings'
+const DEFAULT_THEME: Theme = 'light'
+const DEFAULT_SHOW_TOOL_CALL_HISTORY = false
 
 // One-time migration: copy legacy MedPilot settings into the new MIRA key.
 function migrateLegacyStorageKey(): void {
@@ -312,6 +317,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.showToolCallHistory === 'boolean') {
       sanitized.showToolCallHistory = parsed.showToolCallHistory
     }
+    if (typeof parsed.streamResponses === 'boolean') {
+      sanitized.streamResponses = parsed.streamResponses
+    }
     if (typeof parsed.receivePrereleases === 'boolean') {
       sanitized.receivePrereleases = parsed.receivePrereleases
     }
@@ -335,6 +343,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    streamResponses,
     receivePrereleases,
   } = state
   const profiles = profilesWithCurrent(state)
@@ -349,6 +358,7 @@ function persist(state: SettingsState) {
     wsUrl,
     showProgressMessages,
     showToolCallHistory,
+    streamResponses,
     receivePrereleases,
   }))
 }
@@ -378,13 +388,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     [seededInitialProfile.key]: seededInitialProfile,
   },
   workspacePath: seededInitialProfile.workspacePath,
-  theme: (saved.theme as Theme) ?? 'dark',
+  theme: (saved.theme as Theme) ?? DEFAULT_THEME,
   language: (saved.language as Language) ?? 'en',
   deploymentMode: initialDeploymentMode,
   apiUrl: seededInitialProfile.apiUrl,
   wsUrl: seededInitialProfile.wsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
-  showToolCallHistory: saved.showToolCallHistory ?? true,
+  showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
+  streamResponses: saved.streamResponses ?? true,
   receivePrereleases: saved.receivePrereleases ?? false,
   settingsOpen: false,
   engineStatus: 'unknown',
@@ -516,6 +527,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
+  setStreamResponses: (v) => { set({ streamResponses: v }); persist(get()) },
   setReceivePrereleases: (v) => { set({ receivePrereleases: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version }) => {
     const nextVersion = version ?? null

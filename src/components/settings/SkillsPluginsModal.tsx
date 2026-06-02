@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
-import { useProjectStore } from '@/stores/projectStore'
-import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
+import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { cn } from '@/lib/utils'
@@ -11,7 +10,6 @@ import { t } from '@/i18n'
 
 export function SkillsPluginsModal() {
   const { skillsPluginsOpen, closeSkillsPlugins } = useUiStore()
-  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const lang = useSettingsStore((s) => s.language)
   const {
     plugins,
@@ -19,7 +17,6 @@ export function SkillsPluginsModal() {
     loading,
     error,
     installPath,
-    setScope,
     setInstallPath,
     clearError,
     load,
@@ -31,25 +28,26 @@ export function SkillsPluginsModal() {
   const [zipInputKey, setZipInputKey] = useState(0)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
 
+  // Skills are global; no project selection required.
+  const sessionId = GLOBAL_SKILLS_SESSION_ID
+
   useEffect(() => {
-    if (!skillsPluginsOpen || !selectedTaskId) return
-    load(selectedTaskId)
-  }, [skillsPluginsOpen, selectedTaskId, load])
+    if (!skillsPluginsOpen) return
+    load(sessionId)
+  }, [skillsPluginsOpen, sessionId, load])
 
   if (!skillsPluginsOpen) return null
 
-  const canManagePlugins = !!selectedTaskId
   const builtInPlugin = plugins.find((plugin) => plugin.source.type === 'builtin')
   const customPlugins = plugins.filter((plugin) => plugin.source.type !== 'builtin')
 
   const handleInstallDirectory = async () => {
-    if (!selectedTaskId) return
-    await installFromDirectory(selectedTaskId)
+    await installFromDirectory(sessionId)
   }
 
   const handleZipUpload = async (file: File | null) => {
-    if (!selectedTaskId || !file) return
-    await installFromZip(selectedTaskId, file)
+    if (!file) return
+    await installFromZip(sessionId, file)
     setZipInputKey((v) => v + 1)
   }
 
@@ -70,30 +68,9 @@ export function SkillsPluginsModal() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          <div className="flex items-center justify-between gap-2">
-            <Label text={t('scope', lang)} className="mb-0" />
-            <div className="flex items-center gap-2">
-              <span className={cn('text-xs', scope === 'project' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-                {t('project', lang)}
-              </span>
-              <Switch
-                checked={scope === 'global'}
-                onChange={(checked) => setScope(checked ? 'global' : 'project')}
-                disabled={loading}
-              />
-              <span className={cn('text-xs', scope === 'global' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-                {t('global', lang)}
-              </span>
-            </div>
-          </div>
-          <p className="text-[11px] text-[var(--color-text-muted)]">{t('projectScopeOverridesGlobal', lang)}</p>
+          <p className="text-[11px] text-[var(--color-text-muted)]">{t('skillsGlobalScopeHint', lang)}</p>
 
-          {!canManagePlugins && (
-            <p className="mt-2 text-xs text-[var(--color-text-muted)]">{t('selectProjectToManagePlugins', lang)}</p>
-          )}
-
-          {canManagePlugins && (
-            <div className="space-y-4">
+          <div className="space-y-4">
               <Section title={t('installFromLocalDirectory', lang)}>
                 <div className="flex gap-2">
                   <input
@@ -151,12 +128,10 @@ export function SkillsPluginsModal() {
                         expandedGroups={expandedGroups}
                         setExpandedGroups={setExpandedGroups}
                         onToggle={async (targetType, pluginId, enabled, targetId) => {
-                          if (!selectedTaskId) return
-                          await toggle(selectedTaskId, targetType, pluginId, enabled, targetId)
+                          await toggle(sessionId, targetType, pluginId, enabled, targetId)
                         }}
                         onUninstall={async (pluginId) => {
-                          if (!selectedTaskId) return
-                          await uninstall(selectedTaskId, pluginId)
+                          await uninstall(sessionId, pluginId)
                         }}
                       />
                     ) : (
@@ -183,12 +158,10 @@ export function SkillsPluginsModal() {
                             expandedGroups={expandedGroups}
                             setExpandedGroups={setExpandedGroups}
                             onToggle={async (targetType, pluginId, enabled, targetId) => {
-                              if (!selectedTaskId) return
-                              await toggle(selectedTaskId, targetType, pluginId, enabled, targetId)
+                              await toggle(sessionId, targetType, pluginId, enabled, targetId)
                             }}
                             onUninstall={async (pluginId) => {
-                              if (!selectedTaskId) return
-                              await uninstall(selectedTaskId, pluginId)
+                              await uninstall(sessionId, pluginId)
                             }}
                           />
                         ))}
@@ -198,7 +171,6 @@ export function SkillsPluginsModal() {
                 </div>
               )}
             </div>
-          )}
         </div>
       </div>
     </div>
@@ -407,14 +379,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </legend>
       {children}
     </fieldset>
-  )
-}
-
-function Label({ text, className }: { text: string; className?: string }) {
-  return (
-    <label className={cn('block text-sm text-[var(--color-text-secondary)] mb-1.5', className)}>
-      {text}
-    </label>
   )
 }
 

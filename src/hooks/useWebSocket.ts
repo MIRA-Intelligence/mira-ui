@@ -7,6 +7,7 @@ import { fetchRuntimeConfig } from '@/services/runtimeConfig'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 
@@ -19,6 +20,9 @@ async function syncOnConnect() {
       useAgentStore.getState().resetWorkspaceState()
       useProjectStore.getState().resetWorkspaceState()
     }
+    // Load the Quick Chat thread index for this workspace (no-op if already
+    // loaded for the same workspace, preserving the active chat on reconnect).
+    useChatStore.getState().loadForWorkspace(nextWorkspacePath.trim())
     setRuntimeConfig(payload)
     setRuntimeConfigLoaded(true)
     setRuntimeConfigError(null)

@@ -1,14 +1,29 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
+import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
 import { formatTime } from '@/lib/utils'
-import { NORMAL_CHAT_SESSION_ID } from '@/lib/sessions'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
+
+// Build a project-description seed from a chat's transcript so promoting a
+// conversation into a research project carries the context forward.
+function buildPromotePrefill(logs: AgentLogEntry[]): string {
+  const lines: string[] = []
+  for (const entry of logs) {
+    if (entry.type !== 'response') continue
+    const who = entry.metadata?._user ? 'User' : 'Mira'
+    const text = entry.content.trim()
+    if (!text) continue
+    lines.push(`${who}: ${text}`)
+  }
+  return lines.join('\n\n').slice(0, 4000)
+}
 
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
@@ -78,20 +93,33 @@ function ChatComposer({
 }
 
 export function AgentPanel() {
-  const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
+  const { connected, logsByProject, hydrateLogs, streamingBySession } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
-  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? true)
+  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
   const lang = useSettingsStore((s) => s.language)
   const appMode = useProjectStore((s) => s.appMode)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const mode = useProjectStore((s) => s.mode)
-  const sessionId = appMode === 'normal' ? NORMAL_CHAT_SESSION_ID : selectedTaskId
-  // Auto / manual is a project-mode concept — in normal chat the toggle
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const touchChat = useChatStore((s) => s.touchChat)
+  const openNewProject = useUiStore((s) => s.openNewProject)
+  const isChat = appMode === 'normal'
+  // The active surface is either a research project or a Quick Chat thread.
+  const sessionId = isChat ? activeChatId : selectedTaskId
+  // Auto / manual is a project-mode concept — in chat the toggle
   // is hidden, so the AUTO badge in the header should be hidden too.
   const isAuto = appMode === 'project' && mode === 'auto'
 
   const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
-  const showThinking = Boolean(sessionId && isStreaming)
+  // Streaming is tracked per session so a different session's activity never
+  // lights up this panel (e.g. a freshly created chat).
+  const isStreaming = Boolean(sessionId && streamingBySession[sessionId])
+  // Once tokens are actively streaming into the last entry, the growing bubble
+  // is the activity indicator — drop the separate "thinking" dots so they don't
+  // sit redundantly beneath the live reply.
+  const lastEntry = logs[logs.length - 1]
+  const isStreamingEntryLive = lastEntry?.type === 'response' && lastEntry.metadata?._streaming === true
+  const showThinking = isStreaming && !isStreamingEntryLive
 
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -137,7 +165,7 @@ export function AgentPanel() {
   }, [showProgressMessages, sessionId])
 
   useEffect(() => {
-    if (!sessionId || appMode === 'normal') return
+    if (!sessionId) return
 
     let cancelled = false
     void (async () => {
@@ -149,10 +177,10 @@ export function AgentPanel() {
     return () => {
       cancelled = true
     }
-  }, [appMode, sessionId, hydrateLogs])
+  }, [sessionId, hydrateLogs])
 
   useEffect(() => {
-    if (!connected || !sessionId || appMode === 'normal') return
+    if (!connected || !sessionId) return
     // Re-bind current session after websocket reconnects so progress streaming resumes.
     wsClient.send({
       type: 'bind',
@@ -160,10 +188,11 @@ export function AgentPanel() {
       session_id: sessionId,
       user_id: 'ui_user',
     })
-  }, [appMode, connected, sessionId])
+  }, [connected, sessionId])
 
   const handleSend = (text: string) => {
     if (!sessionId) return
+    if (isChat) touchChat(sessionId, text)
     useAgentStore.getState().addLog(sessionId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -182,6 +211,7 @@ export function AgentPanel() {
       session_id: sessionId,
       user_id: 'ui_user',
       loop_mode: appMode,
+      stream: useSettingsStore.getState().streamResponses,
       ...(appMode === 'project' && {
         mode: currentMode,
         agent_profile: currentAgentProfile,
@@ -210,6 +240,7 @@ export function AgentPanel() {
       session_id: sessionId,
       user_id: 'ui_user',
       loop_mode: appMode,
+      stream: useSettingsStore.getState().streamResponses,
       ...(appMode === 'project' && {
         mode: currentMode,
         agent_profile: currentAgentProfile,
@@ -248,6 +279,19 @@ export function AgentPanel() {
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/15 text-[var(--color-success)] font-medium">
             AUTO
           </span>
+        )}
+        {sessionId && isChat && (
+          <button
+            onClick={() => openNewProject({ prefill: buildPromotePrefill(logs), fromChatId: sessionId })}
+            title={t('promoteToProjectHint', lang)}
+            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+            {t('promoteToProject', lang)}
+          </button>
         )}
         {sessionId && appMode === 'project' && (
           <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
@@ -367,7 +411,7 @@ export function AgentPanel() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             <span className="text-xs">
-              {sessionId ? t(appMode === 'normal' ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang) : t('selectProjectFirst', lang)}
+              {sessionId ? t(isChat ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang) : t('selectProjectFirst', lang)}
             </span>
           </div>
         )}

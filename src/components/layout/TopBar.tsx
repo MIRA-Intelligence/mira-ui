@@ -1,15 +1,25 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { useTimer } from '@/hooks/useTimer'
+import { t } from '@/i18n'
+import { FeedbackButton } from '@/components/feedback/FeedbackButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
   const { appMode, tasks, selectedTaskId, startedAt } = useProjectStore()
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const chats = useChatStore((s) => s.chats)
+  const lang = useSettingsStore((s) => s.language)
   const { formatted } = useTimer(startedAt)
   const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
   const dragStyle = isMacDesktop ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined
 
   const selected = tasks.find((t) => t.id === selectedTaskId)
-  const title = appMode === 'normal' ? 'Mira Normal' : selected?.title ?? 'Mira'
+  const activeChat = chats.find((c) => c.id === activeChatId)
+  const title = appMode === 'normal'
+    ? (activeChat?.title || t('normalChatTitle', lang))
+    : selected?.title ?? 'Mira'
 
   return (
     <header
@@ -23,8 +33,11 @@ export function TopBar() {
         {title}
       </h1>
 
-      <div className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums min-w-[140px] text-right">
-        T+ {formatted}
+      <div className="flex items-center gap-3 min-w-[140px] justify-end">
+        <FeedbackButton />
+        <div className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums">
+          T+ {formatted}
+        </div>
       </div>
     </header>
   )

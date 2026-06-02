@@ -129,3 +129,5 @@ interface UpdateInfo {
   isPrerelease: boolean
   notes: string
 }
+
+declare const __APP_VERSION__: string
