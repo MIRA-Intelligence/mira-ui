@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { getDisplayHandle } from '@/lib/clientId'
-import { getInviteUrl } from '@/services/feedback'
+import { fetchInviteUrl, getInviteUrl } from '@/services/feedback'
 import { t, type I18nKey } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { FeedbackSuccessPanel } from './FeedbackSuccessPanel'
@@ -51,9 +51,9 @@ export function FeedbackDialog() {
   const [body, setBody] = useState('')
   const [contactKind, setContactKind] = useState<FeedbackContactKind>('wechat')
   const [contactValue, setContactValue] = useState('')
+  const [promoUrl, setPromoUrl] = useState(() => getInviteUrl())
 
   const handle = useMemo(() => getDisplayHandle(), [])
-  const promoUrl = useMemo(() => getInviteUrl(), [])
 
   useEffect(() => {
     if (!dialogOpen) {
@@ -63,6 +63,17 @@ export function FeedbackDialog() {
       setBody('')
       setContactKind('wechat')
       setContactValue('')
+    }
+  }, [dialogOpen])
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    let cancelled = false
+    void fetchInviteUrl().then((url) => {
+      if (!cancelled) setPromoUrl(url)
+    })
+    return () => {
+      cancelled = true
     }
   }, [dialogOpen])
 

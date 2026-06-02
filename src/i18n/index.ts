@@ -346,7 +346,7 @@ const dict = {
     feedbackThrottled: 'Too many submissions in a short time. Please wait a minute and try again.',
     feedbackInvalid: 'Subject and description are required.',
     feedbackNotConfigured:
-      'Feedback channel is not configured for this build. Open Settings to set the webhook.',
+      'Feedback channel is not configured in the local engine for this build.',
     feedbackSuccessTitle: 'Thanks for your feedback!',
     feedbackSuccessReceived:
       'We received your report. Our team will review it shortly.',
@@ -715,7 +715,7 @@ const dict = {
     feedbackThrottled: '短时间内提交次数过多，请稍后再试。',
     feedbackInvalid: '请填写标题和描述。',
     feedbackNotConfigured:
-      '当前构建未配置反馈渠道，请在设置中填写 webhook。',
+      '当前构建的本地引擎未配置反馈渠道。',
     feedbackSuccessTitle: '感谢您的反馈！',
     feedbackSuccessReceived: '我们已收到您的反馈，团队会尽快查看。',
     feedbackSuccessJoinGroup: '如需接收回复和进度更新，欢迎加入飞书反馈群：',

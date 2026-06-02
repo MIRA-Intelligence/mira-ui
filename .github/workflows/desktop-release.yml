@@ -195,6 +195,9 @@ jobs:
         if: matrix.os == 'macos-latest'
         env:
           GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
         run: npm run dist:bundle:mac
 
       - name: Rename macOS bundle update manifests
@@ -212,6 +215,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         env:
           GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
         run: npm run dist:bundle:win
 
       - name: Package Windows bundle setup as zip

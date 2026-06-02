@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
@@ -14,6 +14,7 @@ const enginePath = path.resolve(
   process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine',
 )
 const engineManifestPath = path.resolve(engineDir, 'mira-engine.manifest.json')
+const feedbackConfigPath = path.resolve(engineDir, 'mira-engine.feedback.json')
 const winswPath = path.join(engineDir, 'MiraEngineService.exe')
 
 async function localElectronDistPreservesFrameworkSymlinks() {
@@ -171,6 +172,7 @@ function currentPackageVersion() {
 
 async function writeBundledEngineManifest() {
   const stats = await stat(enginePath)
+  const feedbackConfigSha256 = existsSync(feedbackConfigPath) ? await sha256File(feedbackConfigPath) : null
   const manifest = {
     schema: 1,
     kind: 'mira-bundled-engine',
@@ -184,8 +186,29 @@ async function writeBundledEngineManifest() {
     engineReleaseTag: process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || null,
     source: process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
     miraUiGitSha: currentGitSha(process.cwd()),
+    feedbackConfigSha256,
   }
   await writeFile(engineManifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
+async function writeBundledFeedbackConfig() {
+  const webhookUrl = process.env.MIRA_FEISHU_WEBHOOK_URL?.trim()
+  if (!webhookUrl) {
+    await rm(feedbackConfigPath, { force: true })
+    return
+  }
+  const payload = {
+    schema: 1,
+    kind: 'mira-feedback-relay',
+    generatedAt: new Date().toISOString(),
+    feishu: {
+      webhookUrl,
+      secret: process.env.MIRA_FEISHU_WEBHOOK_SECRET?.trim() || '',
+      inviteUrl: process.env.MIRA_FEISHU_GROUP_INVITE_URL?.trim() || '',
+    },
+  }
+  await mkdir(path.dirname(feedbackConfigPath), { recursive: true })
+  await writeFile(feedbackConfigPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
 }
 
 async function downloadWinSwAsset() {
@@ -294,6 +317,7 @@ if (process.platform === 'darwin' && args.includes('--mac') && await localElectr
 }
 
 await ensureBundledEngine()
+await writeBundledFeedbackConfig()
 await writeBundledEngineManifest()
 await ensureWindowsServiceWrapper()
 

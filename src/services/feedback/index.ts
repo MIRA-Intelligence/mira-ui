@@ -1,9 +1,8 @@
 import { getClientId, getDisplayHandle } from '@/lib/clientId'
 import { scrubEnvelope } from '@/lib/scrubPayload'
-import { createFeishuAdapter } from './feishuAdapter'
 import { enqueue, flushQueue, queueLength } from './queue'
+import { fetchFeedbackConfig, submitFeedbackReport } from '@/services/api'
 import type {
-  FeedbackChannelAdapter,
   FeedbackChannelConfig,
   FeedbackChannelId,
   FeedbackContact,
@@ -31,12 +30,6 @@ interface SubmitInput {
   override?: FeedbackChannelConfig | null
 }
 
-const ENV = (key: string): string => {
-  const meta = (import.meta as ImportMeta & { env?: Record<string, string | undefined> })
-  const v = meta?.env?.[key]
-  return typeof v === 'string' ? v : ''
-}
-
 let activeAdapterId: FeedbackChannelId = 'feishu'
 
 export function setActiveChannel(id: FeedbackChannelId): void {
@@ -45,21 +38,6 @@ export function setActiveChannel(id: FeedbackChannelId): void {
 
 export function getActiveChannelId(): FeedbackChannelId {
   return activeAdapterId
-}
-
-export function getAdapter(
-  override?: FeedbackChannelConfig | null,
-): FeedbackChannelAdapter {
-  switch (activeAdapterId) {
-    case 'feishu':
-    default:
-      return createFeishuAdapter({
-        envWebhookUrl: ENV('VITE_FEISHU_WEBHOOK_URL'),
-        envSecret: ENV('VITE_FEISHU_WEBHOOK_SECRET'),
-        envInviteUrl: ENV('VITE_FEISHU_GROUP_INVITE_URL'),
-        override: override ?? null,
-      })
-  }
 }
 
 function getAppVersion(): string {
@@ -114,30 +92,30 @@ export async function submitFeedback(
   input: SubmitInput,
   options: SubmitFeedbackOptions = {},
 ): Promise<FeedbackSubmitOutcome> {
+  void options
   if (input.title.trim().length === 0 || input.body.trim().length === 0) {
     return { ok: false, channel: null, error: 'invalid', queued: false }
   }
-  const adapter = getAdapter(options.override ?? input.override ?? null)
-  if (!adapter.isConfigured()) {
-    return { ok: false, channel: null, error: 'not_configured', queued: false }
-  }
   const payload = buildPayload(input)
   try {
-    await adapter.submit(payload)
-    return { ok: true, channel: adapter.id, inviteUrl: adapter.inviteUrl() }
+    const result = await submitFeedbackReport(payload)
+    return { ok: true, channel: activeAdapterId, inviteUrl: result.inviteUrl }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)
+    if (errorMessage === 'not_configured') {
+      return { ok: false, channel: null, error: 'not_configured', queued: false }
+    }
     enqueue(payload, errorMessage)
-    return { ok: false, channel: adapter.id, error: errorMessage, queued: true }
+    return { ok: false, channel: activeAdapterId, error: errorMessage, queued: true }
   }
 }
 
 export async function flushPendingQueue(
-  override?: FeedbackChannelConfig | null,
+  _override?: FeedbackChannelConfig | null,
 ): Promise<void> {
-  const adapter = getAdapter(override ?? null)
-  if (!adapter.isConfigured()) return
-  await flushQueue((payload) => adapter.submit(payload))
+  const config = await fetchFeedbackConfig()
+  if (!config.configured) return
+  await flushQueue((payload) => submitFeedbackReport(payload).then(() => undefined))
 }
 
 export function pendingQueueLength(): number {
@@ -145,13 +123,19 @@ export function pendingQueueLength(): number {
 }
 
 // Promo / "join our group" link shown at the bottom of the feedback form.
-// Falls back to a placeholder so the promo block always renders even when
-// VITE_FEISHU_GROUP_INVITE_URL is empty in the build.
+// Falls back to a placeholder so the promo block always renders even when the
+// backend relay has no public invite URL configured.
 const DEFAULT_INVITE_PLACEHOLDER =
   'https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=PLACEHOLDER'
 
 export function getInviteUrl(override?: FeedbackChannelConfig | null): string {
-  return getAdapter(override).inviteUrl() ?? DEFAULT_INVITE_PLACEHOLDER
+  void override
+  return DEFAULT_INVITE_PLACEHOLDER
+}
+
+export async function fetchInviteUrl(): Promise<string> {
+  const config = await fetchFeedbackConfig()
+  return config.inviteUrl ?? DEFAULT_INVITE_PLACEHOLDER
 }
 
 export type { FeedbackChannelConfig, FeedbackPayload, FeedbackSubmitOutcome }
