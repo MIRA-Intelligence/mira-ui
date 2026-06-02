@@ -18,6 +18,7 @@ export function FeedbackButton({ className }: { className?: string }) {
       onClick={openDialog}
       aria-label={t('feedbackButtonAria', lang)}
       title={tooltip}
+      data-drag-region="no-drag"
       className={cn(
         'relative w-8 h-8 rounded-full flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors',
         className,
