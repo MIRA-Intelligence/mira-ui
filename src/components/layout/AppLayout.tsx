@@ -10,7 +10,7 @@ import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
-import { useState } from 'react'
+import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -37,40 +37,81 @@ function ChevronRight({ className }: { className?: string }) {
   )
 }
 
-// Draggable splitter. Uses pointer capture so the drag keeps tracking even
-// when the cursor leaves the 4px strip. Reports the raw clientX; the caller
-// converts that into a (clamped) panel width.
-function ResizeHandle({
+const DRAG_START_THRESHOLD_PX = 4
+
+function SplitterToggle({
+  ariaLabel,
+  className,
+  onToggle,
   onMove,
   onStart,
   onEnd,
-  ariaLabel,
+  children,
 }: {
+  ariaLabel: string
+  className?: string
+  onToggle: () => void
   onMove: (clientX: number) => void
   onStart: () => void
   onEnd: () => void
-  ariaLabel: string
+  children: ReactNode
 }) {
+  const dragRef = useRef<{ pointerId: number; startX: number; dragging: boolean } | null>(null)
+  const suppressClickRef = useRef(false)
+
+  const endDrag = (e: PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+    dragRef.current = null
+    if (drag.dragging) {
+      onEnd()
+    }
+  }
+
   return (
-    <div
+    <button
+      type="button"
+      onClick={(e) => {
+        if (suppressClickRef.current) {
+          suppressClickRef.current = false
+          e.preventDefault()
+          e.stopPropagation()
+          return
+        }
+        onToggle()
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        dragRef.current = { pointerId: e.pointerId, startX: e.clientX, dragging: false }
+        suppressClickRef.current = false
+        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      }}
+      onPointerMove={(e) => {
+        const drag = dragRef.current
+        if (!drag || drag.pointerId !== e.pointerId) return
+        if (!drag.dragging && Math.abs(e.clientX - drag.startX) >= DRAG_START_THRESHOLD_PX) {
+          drag.dragging = true
+          suppressClickRef.current = true
+          onStart()
+        }
+        if (drag.dragging) {
+          e.preventDefault()
+          onMove(e.clientX)
+        }
+      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      className={cn(
+        'w-4 shrink-0 flex items-center justify-center bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)] cursor-col-resize select-none',
+        className,
+      )}
       role="separator"
       aria-orientation="vertical"
       aria-label={ariaLabel}
-      onPointerDown={(e) => {
-        e.preventDefault()
-        ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-        onStart()
-      }}
-      onPointerMove={(e) => {
-        if (e.buttons !== 1) return
-        onMove(e.clientX)
-      }}
-      onPointerUp={(e) => {
-        ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
-        onEnd()
-      }}
-      className="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-[var(--color-accent)] active:bg-[var(--color-accent)] transition-colors"
-    />
+    >
+      {children}
+    </button>
   )
 }
 
@@ -84,6 +125,8 @@ export function AppLayout() {
     setSidebarWidth,
     agentPanelWidth,
     setAgentPanelWidth,
+    setSidebarCollapsed,
+    setAgentPanelCollapsed,
   } = useUiStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
@@ -119,24 +162,20 @@ export function AppLayout() {
           </div>
         </div>
 
-        {/* Left sidebar resize handle */}
-        {!sidebarCollapsed && (
-          <ResizeHandle
-            ariaLabel={t('toggleSidebar', lang)}
-            onStart={() => setResizing(true)}
-            onEnd={() => setResizing(false)}
-            onMove={(clientX) => setSidebarWidth(clientX)}
-          />
-        )}
-
         {/* Left sidebar toggle */}
-        <button
-          onClick={toggleSidebar}
-          className="w-5 shrink-0 flex items-center justify-center border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-          aria-label={t('toggleSidebar', lang)}
+        <SplitterToggle
+          onToggle={toggleSidebar}
+          onStart={() => {
+            setSidebarCollapsed(false)
+            setResizing(true)
+          }}
+          onEnd={() => setResizing(false)}
+          onMove={(clientX) => setSidebarWidth(clientX)}
+          className="border-r border-[var(--color-border)]"
+          ariaLabel={t('toggleSidebar', lang)}
         >
           {sidebarCollapsed ? <ChevronRight /> : <ChevronLeft />}
-        </button>
+        </SplitterToggle>
 
         {/* Experiment timeline — visible in the experiment stage (project only) */}
         {!isChat && selectedTaskId && activeStage === 'experiment' && (
@@ -153,23 +192,19 @@ export function AppLayout() {
         {/* Right agent panel — project mode only (in chat mode the chat is centered) */}
         {!isChat && (
           <>
-            <button
-              onClick={toggleAgentPanel}
-              className="w-5 shrink-0 flex items-center justify-center border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-[var(--color-text-muted)]"
-              aria-label={t('toggleAgentPanel', lang)}
+            <SplitterToggle
+              onToggle={toggleAgentPanel}
+              onStart={() => {
+                setAgentPanelCollapsed(false)
+                setResizing(true)
+              }}
+              onEnd={() => setResizing(false)}
+              onMove={(clientX) => setAgentPanelWidth(window.innerWidth - clientX)}
+              className="border-l border-[var(--color-border)]"
+              ariaLabel={t('toggleAgentPanel', lang)}
             >
               {agentPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
-            </button>
-
-            {/* Right panel resize handle */}
-            {!agentPanelCollapsed && (
-              <ResizeHandle
-                ariaLabel={t('toggleAgentPanel', lang)}
-                onStart={() => setResizing(true)}
-                onEnd={() => setResizing(false)}
-                onMove={(clientX) => setAgentPanelWidth(window.innerWidth - clientX)}
-              />
-            )}
+            </SplitterToggle>
 
             <div
               className={cn(

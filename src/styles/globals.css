@@ -1,28 +1,11 @@
 @import "tailwindcss";
 
-/* ── Dark theme (default) ────────────────────────── */
-:root,
-[data-theme="dark"] {
-  --color-bg-primary: #0d1117;
-  --color-bg-secondary: #161b22;
-  --color-bg-tertiary: #1c2333;
-  --color-bg-hover: #1f2937;
-  --color-border: #30363d;
-  --color-accent: #3b82f6;
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-text-primary: #e5e7eb;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
-  --color-overlay: rgba(0, 0, 0, 0.6);
-  --color-input-bg: #0d1117;
-}
-
-/* ── Light theme ─────────────────────────────────── */
+/* ── Light theme (default) ───────────────────────── */
 /* Text tokens use black-tone shades (pure → dark → light black) rather
    than slate grays so body copy reads as black against the white
    background. The 3-tier hierarchy is preserved via lightness, not hue,
    and every tier exceeds WCAG AA contrast on #ffffff. */
+:root,
 [data-theme="light"] {
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f6f8fa;
@@ -37,6 +20,23 @@
   --color-text-muted: #4a5159;
   --color-overlay: rgba(0, 0, 0, 0.3);
   --color-input-bg: #ffffff;
+}
+
+/* ── Dark theme ──────────────────────────────────── */
+[data-theme="dark"] {
+  --color-bg-primary: #0d1117;
+  --color-bg-secondary: #161b22;
+  --color-bg-tertiary: #1c2333;
+  --color-bg-hover: #1f2937;
+  --color-border: #30363d;
+  --color-accent: #3b82f6;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-text-primary: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+  --color-overlay: rgba(0, 0, 0, 0.6);
+  --color-input-bg: #0d1117;
 }
 
 @theme {

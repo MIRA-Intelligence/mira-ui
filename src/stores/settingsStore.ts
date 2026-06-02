@@ -110,6 +110,8 @@ interface SettingsState {
 
 const STORAGE_KEY = 'mira-ui-settings'
 const LEGACY_STORAGE_KEY = 'medpilot-ui-settings'
+const DEFAULT_THEME: Theme = 'light'
+const DEFAULT_SHOW_TOOL_CALL_HISTORY = false
 
 // One-time migration: copy legacy MedPilot settings into the new MIRA key.
 function migrateLegacyStorageKey(): void {
@@ -386,13 +388,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     [seededInitialProfile.key]: seededInitialProfile,
   },
   workspacePath: seededInitialProfile.workspacePath,
-  theme: (saved.theme as Theme) ?? 'dark',
+  theme: (saved.theme as Theme) ?? DEFAULT_THEME,
   language: (saved.language as Language) ?? 'en',
   deploymentMode: initialDeploymentMode,
   apiUrl: seededInitialProfile.apiUrl,
   wsUrl: seededInitialProfile.wsUrl,
   showProgressMessages: saved.showProgressMessages ?? true,
-  showToolCallHistory: saved.showToolCallHistory ?? true,
+  showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
   receivePrereleases: saved.receivePrereleases ?? false,
   settingsOpen: false,

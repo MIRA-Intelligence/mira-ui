@@ -63,6 +63,7 @@ type SettingsDraft = {
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
+  receivePrereleases: boolean
   provider: string
   model: string
   reasoningEffort: ReasoningEffort
@@ -96,8 +97,9 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
-    showToolCallHistory: store.showToolCallHistory ?? true,
+    showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
+    receivePrereleases: store.receivePrereleases ?? false,
     provider: store.runtimeConfig?.runtime?.provider || 'auto',
     model: 'anthropic/claude-sonnet-4-5',
     reasoningEffort: null,
@@ -367,6 +369,7 @@ export function SettingsModal() {
       store.setShowProgressMessages(draft.showProgressMessages)
       store.setShowToolCallHistory(draft.showToolCallHistory)
       store.setStreamResponses(draft.streamResponses)
+      store.setReceivePrereleases(draft.receivePrereleases)
 
       if (draft.deploymentMode === 'localBundle') {
         const trimmedModel = draft.model.trim()
@@ -768,8 +771,8 @@ export function SettingsModal() {
 
               <AppUpdatesSection
                 lang={curLang}
-                receivePrereleases={store.receivePrereleases}
-                setReceivePrereleases={store.setReceivePrereleases}
+                receivePrereleases={draft.receivePrereleases}
+                setReceivePrereleases={(receivePrereleases) => setDraft((current) => ({ ...current, receivePrereleases }))}
               />
 
               {!localMode && (

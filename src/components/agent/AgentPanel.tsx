@@ -95,7 +95,7 @@ function ChatComposer({
 export function AgentPanel() {
   const { connected, logsByProject, hydrateLogs, streamingBySession } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
-  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? true)
+  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
   const lang = useSettingsStore((s) => s.language)
   const appMode = useProjectStore((s) => s.appMode)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
