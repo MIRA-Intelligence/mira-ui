@@ -88,6 +88,40 @@ describe('agentStore hydrateLogs', () => {
   })
 })
 
+describe('agentStore token streaming', () => {
+  beforeEach(() => {
+    useAgentStore.setState(initialAgentState, true)
+  })
+
+  it('accumulates stream deltas into a single growing assistant entry', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'Hel' })
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'lo' })
+
+    const logs = useAgentStore.getState().logsByProject['PRJ-S']
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({ type: 'response', content: 'Hello', metadata: { _streaming: true } })
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-S')).toBe(true)
+  })
+
+  it('finalizes the streamed entry and clears streaming on stream_end', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'done' })
+    store.handleWsMessage({ type: 'stream_end', session_id: 'PRJ-S', content: '' })
+
+    const logs = useAgentStore.getState().logsByProject['PRJ-S']
+    expect(logs).toHaveLength(1)
+    expect(logs[0].content).toBe('done')
+    expect(logs[0].metadata?._streaming).toBeUndefined()
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-S')).toBe(false)
+  })
+
+  it('ignores empty deltas', () => {
+    useAgentStore.getState().handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: '' })
+    expect(useAgentStore.getState().logsByProject['PRJ-S']).toBeUndefined()
+  })
+})
+
 describe('agentStore session usage tracking', () => {
   beforeEach(() => {
     useAgentStore.setState(initialAgentState, true)
@@ -95,7 +129,7 @@ describe('agentStore session usage tracking', () => {
 
   it('parses tokens_used_session and max_tokens from progress metadata', () => {
     useAgentStore.getState().markSessionPending('PRJ-A')
-    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-A')).toBe(true)
 
     useAgentStore.getState().handleWsMessage({
       type: 'progress',
@@ -111,21 +145,21 @@ describe('agentStore session usage tracking', () => {
   it('keeps the thinking state until a terminal response arrives', () => {
     const store = useAgentStore.getState()
     store.markSessionPending('PRJ-A')
-    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-A')).toBe(true)
 
     store.handleWsMessage({
       type: 'tool_call',
       session_id: 'PRJ-A',
       content: 'read_file',
     })
-    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-A')).toBe(true)
 
     store.handleWsMessage({
       type: 'response',
       session_id: 'PRJ-A',
       content: 'final',
     })
-    expect(useAgentStore.getState().isStreaming).toBe(false)
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-A')).toBe(false)
   })
 
   it('uses activity pings for liveness without adding chat log entries', () => {
@@ -137,7 +171,7 @@ describe('agentStore session usage tracking', () => {
       metadata: { _activity_ping: true },
     })
 
-    expect(useAgentStore.getState().isStreaming).toBe(true)
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-A')).toBe(true)
     expect(useAgentStore.getState().logsByProject['PRJ-A']).toBeUndefined()
   })
 
@@ -269,7 +303,7 @@ describe('agentStore session usage tracking', () => {
 
     expect(useAgentStore.getState().logsByProject).toEqual({})
     expect(useAgentStore.getState().usageBySession).toEqual({})
-    expect(useAgentStore.getState().isStreaming).toBe(false)
+    expect(useAgentStore.getState().streamingBySession).toEqual({})
     expect(useAgentStore.getState().connected).toBe(true)
   })
 })

@@ -5,10 +5,12 @@ import { AgentPanel } from './AgentPanel'
 import { wsClient } from '@/services/websocket'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
+const initialChatState = useChatStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 
 describe('AgentPanel keyboard behavior', () => {
@@ -16,6 +18,7 @@ describe('AgentPanel keyboard behavior', () => {
     vi.restoreAllMocks()
     useAgentStore.setState(initialAgentState, true)
     useProjectStore.setState(initialProjectState, true)
+    useChatStore.setState(initialChatState, true)
     useSettingsStore.setState(initialSettingsState, true)
 
     useSettingsStore.setState({ language: 'en' })
@@ -67,8 +70,13 @@ describe('AgentPanel keyboard behavior', () => {
     expect(screen.getByText('Mira is thinking...')).toBeInTheDocument()
   })
 
-  it('sends normal chat messages without a selected project', () => {
+  it('sends quick chat messages on the active chat thread without a project', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useChatStore.setState({
+      chats: [{ id: 'chat-test', title: '', createdAt: 0, updatedAt: 0 }],
+      activeChatId: 'chat-test',
+      workspaceKey: 'ws',
+    })
     useProjectStore.setState({
       appMode: 'normal',
       selectedTaskId: null,
@@ -86,10 +94,13 @@ describe('AgentPanel keyboard behavior', () => {
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'message',
       content: 'general question',
-      session_id: '__normal__',
+      session_id: 'chat-test',
       loop_mode: 'normal',
     }))
-    expect(sendSpy.mock.calls[0]?.[0]).not.toHaveProperty('agent_profile')
+    const messageCall = sendSpy.mock.calls
+      .map((call) => call[0])
+      .find((payload) => payload?.type === 'message')
+    expect(messageCall).not.toHaveProperty('agent_profile')
   })
 
   it('shows the AUTO badge when project mode is on auto', () => {

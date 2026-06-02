@@ -21,6 +21,7 @@ type EngineManifest = {
   arch?: string
   executable?: string
   size?: number
+  feedbackConfigSha256?: string | null
 }
 
 export interface EngineCommandResult {
@@ -609,6 +610,7 @@ export class LocalEngineManager {
     engineSha256: string | null
     engineShaAtBoot: string | null
     engineExecutable: string | null
+    feedbackConfigSha256: string | null
   }> {
     const base = `http://${DEFAULT_HOST}:${port}`
     const fetchWithTimeout = async (url: string) => {
@@ -624,7 +626,7 @@ export class LocalEngineManager {
     try {
       const healthResp = await fetchWithTimeout(`${base}/health`)
       if (!healthResp.ok) {
-        return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
+        return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null, feedbackConfigSha256: null }
       }
 
       try {
@@ -635,6 +637,7 @@ export class LocalEngineManager {
             engine_sha256?: string | null
             engine_sha256_at_boot?: string | null
             engine_executable?: string | null
+            feedback_config_sha256?: string | null
           }
           return {
             ok: true,
@@ -642,24 +645,28 @@ export class LocalEngineManager {
             engineSha256: typeof payload.engine_sha256 === 'string' ? payload.engine_sha256 : null,
             engineShaAtBoot: typeof payload.engine_sha256_at_boot === 'string' ? payload.engine_sha256_at_boot : null,
             engineExecutable: typeof payload.engine_executable === 'string' ? payload.engine_executable : null,
+            feedbackConfigSha256: typeof payload.feedback_config_sha256 === 'string' ? payload.feedback_config_sha256 : null,
           }
         }
       } catch {
         // Ignore version probe failures when health already passed.
       }
 
-      return { ok: true, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
+      return { ok: true, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null, feedbackConfigSha256: null }
     } catch {
-      return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null }
+      return { ok: false, version: null, engineSha256: null, engineShaAtBoot: null, engineExecutable: null, feedbackConfigSha256: null }
     }
   }
 
   private liveEngineMatchesBundle(
-    probe: { engineSha256: string | null; engineShaAtBoot: string | null; engineExecutable: string | null },
+    probe: { engineSha256: string | null; engineShaAtBoot: string | null; engineExecutable: string | null; feedbackConfigSha256: string | null },
     bundledExecutablePath: string | null,
     bundledManifest: EngineManifest | null,
   ): boolean {
     const expectedSha = typeof bundledManifest?.sha256 === 'string' ? bundledManifest.sha256 : null
+    const expectedFeedbackSha = typeof bundledManifest?.feedbackConfigSha256 === 'string'
+      ? bundledManifest.feedbackConfigSha256
+      : null
 
     // Dev / test build with no bundled manifest — accept the live engine.
     if (!expectedSha) return true
@@ -672,7 +679,8 @@ export class LocalEngineManager {
     // of this marker to "mismatch" causes a one-time reinstall that swaps
     // the old engine for one that *does* snapshot at boot.
     if (probe.engineShaAtBoot != null) {
-      return probe.engineShaAtBoot === expectedSha
+      if (probe.engineShaAtBoot !== expectedSha) return false
+      return expectedFeedbackSha == null || probe.feedbackConfigSha256 === expectedFeedbackSha
     }
 
     // Engine pre-dates the boot-snapshot fix — its identity reporting
@@ -713,7 +721,15 @@ export class LocalEngineManager {
       ? payload.engine_manifest.sha256
       : payload.engine_sha256 ?? null
     if (expectedSha) {
-      return installedSha === expectedSha
+      if (installedSha !== expectedSha) return false
+      const expectedFeedbackSha = typeof manifest?.feedbackConfigSha256 === 'string'
+        ? manifest.feedbackConfigSha256
+        : null
+      const installedFeedbackSha = typeof payload.engine_manifest?.feedbackConfigSha256 === 'string'
+        ? payload.engine_manifest.feedbackConfigSha256
+        : null
+      if (expectedFeedbackSha && installedFeedbackSha !== expectedFeedbackSha) return false
+      return true
     }
 
     if (!executablePath) return true

@@ -51,6 +51,66 @@ export async function fetchStatus(): Promise<Record<string, unknown> | null> {
   }
 }
 
+export interface FeedbackPayload {
+  id: string
+  clientId: string
+  clientHandle: string
+  type: 'bug' | 'feature' | 'question' | 'other'
+  severity: 'blocker' | 'critical' | 'normal' | 'minor' | null
+  title: string
+  body: string
+  contact: { kind: 'wechat' | 'phone' | 'email'; value: string } | null
+  appVersion: string
+  os: string
+  route: string
+  locale: string
+  createdAt: string
+}
+
+export interface FeedbackRelayConfig {
+  configured: boolean
+  inviteUrl: string | null
+}
+
+function normalizeFeedbackConfig(data: unknown): FeedbackRelayConfig {
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const invite = record.invite_url ?? record.inviteUrl
+  return {
+    configured: record.configured === true,
+    inviteUrl: typeof invite === 'string' && invite.trim().length > 0 ? invite : null,
+  }
+}
+
+export async function fetchFeedbackConfig(): Promise<FeedbackRelayConfig> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/feedback/config`)
+    if (!resp.ok) return { configured: false, inviteUrl: null }
+    return normalizeFeedbackConfig(await resp.json())
+  } catch {
+    return { configured: false, inviteUrl: null }
+  }
+}
+
+export async function submitFeedbackReport(payload: FeedbackPayload): Promise<{ inviteUrl: string | null }> {
+  const resp = await fetch(`${getApiUrl()}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  let data: unknown = null
+  try {
+    data = await resp.json()
+  } catch {
+    data = null
+  }
+  if (!resp.ok) {
+    const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+    throw new Error(typeof record.error === 'string' && record.error ? record.error : `feedback request failed (${resp.status})`)
+  }
+  const config = normalizeFeedbackConfig(data)
+  return { inviteUrl: config.inviteUrl }
+}
+
 export interface RemoteProject {
   id: string
   display_name?: string

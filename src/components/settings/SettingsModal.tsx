@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore, type DeploymentMode, type Theme, type Language } from '@/stores/settingsStore'
 import {
   bootstrapLocalEngine,
@@ -16,6 +16,7 @@ import {
   type ReasoningEffort,
   type RuntimeConfigPayload,
 } from '@/services/runtimeConfig'
+import { useFeedbackStore } from '@/stores/feedbackStore'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useAgentStore } from '@/stores/agentStore'
@@ -62,6 +63,8 @@ type SettingsDraft = {
   wsUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
+  streamResponses: boolean
+  receivePrereleases: boolean
   provider: string
   model: string
   reasoningEffort: ReasoningEffort
@@ -95,7 +98,9 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
     showProgressMessages: store.showProgressMessages,
-    showToolCallHistory: store.showToolCallHistory ?? true,
+    showToolCallHistory: store.showToolCallHistory ?? false,
+    streamResponses: store.streamResponses ?? true,
+    receivePrereleases: store.receivePrereleases ?? false,
     provider: store.runtimeConfig?.runtime?.provider || 'auto',
     model: 'anthropic/claude-sonnet-4-5',
     reasoningEffort: null,
@@ -141,6 +146,34 @@ function resetWorkspaceScopedState() {
   useProjectStore.getState().resetWorkspaceState()
 }
 
+// Runtime fields a background refresh would otherwise clobber. When the user
+// has already edited one (current differs from the seed snapshot taken at
+// open), keep their value instead of overwriting it with the late server read.
+const PRESERVED_DRAFT_FIELDS = [
+  'workspacePath', 'apiUrl', 'wsUrl', 'provider', 'model',
+  'reasoningEffort', 'maxToolIterations', 'restrictToWorkspace', 'apiBase', 'apiKey',
+] as const
+
+function mergePreservingEdits(
+  current: SettingsDraft,
+  seed: SettingsDraft,
+  fresh: SettingsDraft,
+): SettingsDraft {
+  const next: SettingsDraft = { ...current }
+  for (const field of PRESERVED_DRAFT_FIELDS) {
+    const userEdited = current[field] !== seed[field]
+    if (!userEdited) {
+      ;(next as Record<string, unknown>)[field] = fresh[field]
+    }
+  }
+  return next
+}
+
+function localEngineAlreadyUp(): boolean {
+  return useAgentStore.getState().connected
+    && useSettingsStore.getState().localEnginePhase === 'ready'
+}
+
 function workspacePathChanged(previous: string, next: string): boolean {
   return previous.trim() !== next.trim()
 }
@@ -172,20 +205,33 @@ export function SettingsModal() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('connection')
   const [workspaceEdited, setWorkspaceEdited] = useState(false)
 
+  // Snapshot of the draft when the modal opened. A late background refresh
+  // diffs against it so it never overwrites fields the user already changed.
+  const seedRef = useRef<SettingsDraft>(draft)
+  // Monotonic token: only the most recent load is allowed to mutate state, so a
+  // slow response from a previous open/refresh can't clobber a newer one.
+  const loadTokenRef = useRef(0)
+
   const curLang = draft.language
 
   const loadRuntimeConfig = async (
     mode: DeploymentMode,
     apiUrlOverride?: string,
     commitToStore = true,
+    preserveEdits = false,
   ) => {
+    const token = ++loadTokenRef.current
     setRuntimeLoading(true)
     setFeedback(null)
     setFeedbackError(false)
     try {
       const targetApiUrl = mode === 'localBundle' ? LOCAL_API_URL : (apiUrlOverride?.trim() || draft.apiUrl.trim())
 
-      if (mode === 'localBundle') {
+      // Re-bootstrapping re-resolves and re-hashes the bundled engine on every
+      // open, which is the main source of the "Settings is slow" lag. When the
+      // engine is already running and connected we can skip straight to the
+      // (cheap) config fetch.
+      if (mode === 'localBundle' && !localEngineAlreadyUp()) {
         const localState = await bootstrapLocalEngine()
         if (localState) {
           store.setLocalEngineBootstrap({
@@ -202,6 +248,7 @@ export function SettingsModal() {
       }
 
       const payload = await fetchRuntimeConfig(targetApiUrl)
+      if (loadTokenRef.current !== token) return
       if (commitToStore) {
         store.setRuntimeConfig(payload)
         store.setRuntimeConfigLoaded(true)
@@ -209,14 +256,21 @@ export function SettingsModal() {
       }
       setRuntimeProviders(payload.providers)
       setWorkspaceEdited(false)
-      setDraft((current) => ({
-        ...applyRuntimePayload(current, payload, {
-          apiUrl: targetApiUrl,
-          wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : current.wsUrl,
-        }),
-        deploymentMode: mode,
-      }))
+      const endpoints = {
+        apiUrl: targetApiUrl,
+        wsUrl: mode === 'localBundle' ? LOCAL_WS_URL : (seedRef.current.wsUrl || draft.wsUrl),
+      }
+      setDraft((current) => {
+        // Background "refresh on open" preserves edits the user may have already
+        // typed. Explicit refreshes / mode switches replace the draft outright.
+        if (preserveEdits) {
+          const fresh = { ...applyRuntimePayload(seedRef.current, payload, endpoints), deploymentMode: mode }
+          return mergePreservingEdits(current, seedRef.current, fresh)
+        }
+        return { ...applyRuntimePayload(current, payload, endpoints), deploymentMode: mode }
+      })
     } catch (error) {
+      if (loadTokenRef.current !== token) return
       const message = error instanceof Error ? error.message : String(error)
       if (commitToStore) {
         store.setRuntimeConfigError(message)
@@ -225,13 +279,16 @@ export function SettingsModal() {
       setFeedbackError(true)
       setFeedback(message)
     } finally {
-      setRuntimeLoading(false)
+      if (loadTokenRef.current === token) {
+        setRuntimeLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     if (!settingsOpen) return
     const nextDraft = createDraft(store)
+    seedRef.current = nextDraft
     setDraft(nextDraft)
     setActiveTab('connection')
     setBusy(false)
@@ -240,7 +297,7 @@ export function SettingsModal() {
     setFeedback(null)
     setWorkspaceEdited(false)
     setRuntimeProviders(store.runtimeConfig?.providers ?? {})
-    void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true)
+    void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true, true)
   }, [settingsOpen])
 
   useEffect(() => {
@@ -312,6 +369,8 @@ export function SettingsModal() {
       store.setLanguage(draft.language)
       store.setShowProgressMessages(draft.showProgressMessages)
       store.setShowToolCallHistory(draft.showToolCallHistory)
+      store.setStreamResponses(draft.streamResponses)
+      store.setReceivePrereleases(draft.receivePrereleases)
 
       if (draft.deploymentMode === 'localBundle') {
         const trimmedModel = draft.model.trim()
@@ -330,19 +389,23 @@ export function SettingsModal() {
           throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
 
-        const localState = await bootstrapLocalEngine()
-        if (!localState) {
-          throw new Error(t('settingsDesktopBundleUnavailable', curLang))
-        }
-        store.setLocalEngineBootstrap({
-          phase: localState.phase,
-          message: localState.message,
-          executablePath: localState.executablePath,
-          version: localState.version,
-          operation: localState.operation,
-        })
-        if (localState.phase !== 'ready') {
-          throw new Error(localState.message)
+        // Skip the (slow) re-bootstrap when the engine is already running and
+        // connected — we only need it up to accept the POST below.
+        if (!localEngineAlreadyUp()) {
+          const localState = await bootstrapLocalEngine()
+          if (!localState) {
+            throw new Error(t('settingsDesktopBundleUnavailable', curLang))
+          }
+          store.setLocalEngineBootstrap({
+            phase: localState.phase,
+            message: localState.message,
+            executablePath: localState.executablePath,
+            version: localState.version,
+            operation: localState.operation,
+          })
+          if (localState.phase !== 'ready') {
+            throw new Error(localState.message)
+          }
         }
 
         store.setDeploymentMode('localBundle')
@@ -368,7 +431,8 @@ export function SettingsModal() {
           providers: providerUpdates,
         })
 
-        if (workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))) {
+        const localWorkspaceChanged = workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))
+        if (localWorkspaceChanged) {
           resetWorkspaceScopedState()
         }
         store.setRuntimeConfig(payload)
@@ -387,7 +451,11 @@ export function SettingsModal() {
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
         })
-        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        // The project list only changes when the workspace root moves; skip the
+        // expensive per-project plan/contract refetch otherwise.
+        if (localWorkspaceChanged) {
+          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        }
       } else {
         if (!nextApiUrl || !nextWsUrl) {
           throw new Error(t('settingsRemoteRequiresUrls', curLang))
@@ -403,7 +471,8 @@ export function SettingsModal() {
         }
 
         const resolvedWorkspacePath = runtimeWorkspacePath(payload)
-        if (switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)) {
+        const remoteWorkspaceChanged = switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)
+        if (remoteWorkspaceChanged) {
           resetWorkspaceScopedState()
         }
         store.setDeploymentMode('remoteManual')
@@ -424,7 +493,9 @@ export function SettingsModal() {
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
         })
-        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        if (remoteWorkspaceChanged) {
+          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+        }
       }
 
       closeSettings()
@@ -582,7 +653,7 @@ export function SettingsModal() {
               active={activeTab === 'connection'}
               onClick={() => setActiveTab('connection')}
             />
-            <SettingsTabButton
+              <SettingsTabButton
               label="Local Engine"
               active={activeTab === 'localEngine'}
               disabled={!localMode}
@@ -687,12 +758,22 @@ export function SettingsModal() {
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
                   {t('toolCallHistoryHint', curLang)}
                 </p>
+
+                <ToggleRow
+                  className="mt-4"
+                  label={t('streamResponses', curLang)}
+                  checked={draft.streamResponses}
+                  onToggle={() => setDraft((current) => ({ ...current, streamResponses: !current.streamResponses }))}
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {t('streamResponsesHint', curLang)}
+                </p>
               </Section>
 
               <AppUpdatesSection
                 lang={curLang}
-                receivePrereleases={store.receivePrereleases}
-                setReceivePrereleases={store.setReceivePrereleases}
+                receivePrereleases={draft.receivePrereleases}
+                setReceivePrereleases={(receivePrereleases) => setDraft((current) => ({ ...current, receivePrereleases }))}
               />
 
               {!localMode && (
@@ -880,6 +961,8 @@ export function SettingsModal() {
               {feedback}
             </p>
           )}
+
+          <FeedbackSection lang={curLang} onClose={closeSettings} />
         </div>
 
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
@@ -1136,5 +1219,58 @@ function AppUpdatesSection(
         {t('updateReceivePrereleasesHint', lang)}
       </p>
     </Section>
+  )
+}
+
+function FeedbackSection({ lang, onClose }: { lang: Language; onClose: () => void }) {
+  const openDialog = useFeedbackStore((s) => s.openDialog)
+  const pendingCount = useFeedbackStore((s) => s.pendingCount)
+  const [expanded, setExpanded] = useState(false)
+
+  const handleOpenForm = () => {
+    onClose()
+    window.setTimeout(() => openDialog(), 0)
+  }
+
+  return (
+    <div className="border-t border-[var(--color-border)] pt-4 mt-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="w-full flex items-center justify-between gap-2 group"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)] transition-colors flex items-center gap-2">
+          <span className="inline-block w-3 text-center">{expanded ? '▾' : '▸'}</span>
+          {t('feedbackHelpSection', lang)}
+          {pendingCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] normal-case tracking-normal">
+              {pendingCount}
+            </span>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed flex-1">
+              {t('feedbackHelpHint', lang)}
+            </p>
+            <button
+              type="button"
+              onClick={handleOpenForm}
+              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+            >
+              {t('feedbackOpenForm', lang)}
+            </button>
+          </div>
+          {pendingCount > 0 && (
+            <p className="text-[11px] text-amber-300">
+              {t('feedbackPendingNotice', lang, { count: pendingCount })}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

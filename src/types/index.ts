@@ -302,10 +302,12 @@ export interface WsMessage {
   contract_version?: ContractVersion
   automation_policy?: AutomationPolicy
   allow_result_write?: boolean
+  // Opt-in token streaming for this message (defaults on in the UI).
+  stream?: boolean
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end'
   session_id?: string
   content: string
   media?: string[]

@@ -62,7 +62,7 @@ describe('PipelineProgress agent profile switch', () => {
       agentProfile: 'research',
       activeStage: 'research',
     })
-    useAgentStore.setState({ isStreaming: false })
+    useAgentStore.setState({ streamingBySession: {} })
 
     render(<PipelineProgress />)
 
@@ -80,7 +80,7 @@ describe('PipelineProgress agent profile switch', () => {
       agentProfile: 'research',
       activeStage: 'research',
     })
-    useAgentStore.setState({ isStreaming: true })
+    useAgentStore.setState({ streamingBySession: { 'PRJ-0001': true } })
 
     render(<PipelineProgress />)
 
@@ -98,7 +98,7 @@ describe('PipelineProgress agent profile switch', () => {
       agentProfile: 'research',
       activeStage: 'research',
     })
-    useAgentStore.setState({ isStreaming: false })
+    useAgentStore.setState({ streamingBySession: {} })
 
     render(<PipelineProgress />)
 
@@ -109,23 +109,22 @@ describe('PipelineProgress agent profile switch', () => {
     expect(updatedTask?.contractVersion).toBe(2)
   })
 
-  it('enters normal mode and collapses the project sidebar', () => {
+  it('renders a minimal toolbar in chat mode without the project profile switch', () => {
+    // The global "Normal" mode pill was removed in favour of per-thread Quick
+    // Chat entries in the queue; chat mode now shows a stripped-down toolbar.
     useProjectStore.setState({
-      appMode: 'project',
-      tasks: [makeTask(false)],
-      selectedTaskId: 'PRJ-0001',
+      appMode: 'normal',
+      tasks: [],
+      selectedTaskId: null,
       mode: 'manual',
       agentProfile: 'research',
       activeStage: 'research',
     })
-    useUiStore.setState({ sidebarCollapsed: false })
 
     render(<PipelineProgress />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Normal' }))
-
-    expect(useProjectStore.getState().appMode).toBe('normal')
-    expect(useProjectStore.getState().selectedTaskId).toBeNull()
-    expect(useUiStore.getState().sidebarCollapsed).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Engineer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Research' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Normal' })).not.toBeInTheDocument()
   })
 })

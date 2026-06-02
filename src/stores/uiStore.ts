@@ -17,10 +17,51 @@ interface PushSystemMessageOptions {
 const DEFAULT_SYSTEM_MESSAGE_TTL_MS = 4000
 const MAX_SYSTEM_MESSAGES = 16
 
+// Resizable panel bounds (px). Widths persist per browser via localStorage.
+export const SIDEBAR_WIDTH = { min: 160, max: 400, default: 220 } as const
+export const AGENT_PANEL_WIDTH = { min: 360, max: 960, default: 560 } as const
+
+const SIDEBAR_WIDTH_KEY = 'mira:ui:sidebarWidth'
+const AGENT_PANEL_WIDTH_KEY = 'mira:ui:agentPanelWidth'
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min
+  return Math.min(max, Math.max(min, Math.round(value)))
+}
+
+function loadWidth(key: string, bounds: { min: number; max: number; default: number }): number {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw == null) return bounds.default
+    return clamp(Number(raw), bounds.min, bounds.max)
+  } catch {
+    return bounds.default
+  }
+}
+
+function saveWidth(key: string, value: number) {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // Ignore — non-persisted width is acceptable (e.g. private mode).
+  }
+}
+
+export interface OpenNewProjectOptions {
+  // Seed the description field (e.g. when promoting a Quick Chat into a project).
+  prefill?: string
+  // When set, the originating chat thread is removed once the project is created.
+  fromChatId?: string
+}
+
 interface UiState {
   sidebarCollapsed: boolean
   agentPanelCollapsed: boolean
+  sidebarWidth: number
+  agentPanelWidth: number
   newProjectOpen: boolean
+  newProjectPrefill: string | null
+  newProjectFromChatId: string | null
   skillsPluginsOpen: boolean
   // Set by useUpdateCheck when the main process detects a newer GitHub
   // release. Cleared by "Skip this version" / "Later". Transient — never
@@ -32,9 +73,11 @@ interface UiState {
   systemMessages: SystemMessage[]
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
+  setSidebarWidth: (px: number) => void
   toggleAgentPanel: () => void
   setAgentPanelCollapsed: (v: boolean) => void
-  openNewProject: () => void
+  setAgentPanelWidth: (px: number) => void
+  openNewProject: (options?: OpenNewProjectOptions) => void
   closeNewProject: () => void
   openSkillsPlugins: () => void
   closeSkillsPlugins: () => void
@@ -55,17 +98,37 @@ function nextSystemMessageId(): string {
 export const useUiStore = create<UiState>((set) => ({
   sidebarCollapsed: false,
   agentPanelCollapsed: false,
+  sidebarWidth: loadWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH),
+  agentPanelWidth: loadWidth(AGENT_PANEL_WIDTH_KEY, AGENT_PANEL_WIDTH),
   newProjectOpen: false,
+  newProjectPrefill: null,
+  newProjectFromChatId: null,
   skillsPluginsOpen: false,
   availableUpdate: null,
   updateBannerDismissed: false,
   systemMessages: [],
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+  setSidebarWidth: (px) => {
+    const w = clamp(px, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max)
+    saveWidth(SIDEBAR_WIDTH_KEY, w)
+    set({ sidebarWidth: w })
+  },
   toggleAgentPanel: () => set((s) => ({ agentPanelCollapsed: !s.agentPanelCollapsed })),
   setAgentPanelCollapsed: (v) => set({ agentPanelCollapsed: v }),
-  openNewProject: () => set({ newProjectOpen: true }),
-  closeNewProject: () => set({ newProjectOpen: false }),
+  setAgentPanelWidth: (px) => {
+    const w = clamp(px, AGENT_PANEL_WIDTH.min, AGENT_PANEL_WIDTH.max)
+    saveWidth(AGENT_PANEL_WIDTH_KEY, w)
+    set({ agentPanelWidth: w })
+  },
+  openNewProject: (options) =>
+    set({
+      newProjectOpen: true,
+      newProjectPrefill: options?.prefill ?? null,
+      newProjectFromChatId: options?.fromChatId ?? null,
+    }),
+  closeNewProject: () =>
+    set({ newProjectOpen: false, newProjectPrefill: null, newProjectFromChatId: null }),
   openSkillsPlugins: () => set({ skillsPluginsOpen: true }),
   closeSkillsPlugins: () => set({ skillsPluginsOpen: false }),
   setAvailableUpdate: (info) => set({ availableUpdate: info, updateBannerDismissed: false }),
