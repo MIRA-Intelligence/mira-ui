@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 import { TopBar } from './TopBar'
 import { useProjectStore } from '@/stores/projectStore'
@@ -37,6 +37,14 @@ describe('TopBar', () => {
 
     expect(header?.getAttribute('data-drag-region')).toBe('drag')
     expect(container.textContent).toContain('Desktop Drag Test')
+  })
+
+  it('keeps feedback button clickable inside macOS drag region', () => {
+    window.electronAPI = { platform: 'darwin' }
+    render(<TopBar />)
+
+    const button = screen.getByRole('button', { name: /feedback|提交反馈/i })
+    expect(button.getAttribute('data-drag-region')).toBe('no-drag')
   })
 
   it('does not enable drag region on non-mac platforms', () => {
