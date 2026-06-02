@@ -16,6 +16,7 @@ import {
   type ReasoningEffort,
   type RuntimeConfigPayload,
 } from '@/services/runtimeConfig'
+import { useFeedbackStore } from '@/stores/feedbackStore'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useAgentStore } from '@/stores/agentStore'
@@ -652,7 +653,7 @@ export function SettingsModal() {
               active={activeTab === 'connection'}
               onClick={() => setActiveTab('connection')}
             />
-            <SettingsTabButton
+              <SettingsTabButton
               label="Local Engine"
               active={activeTab === 'localEngine'}
               disabled={!localMode}
@@ -960,6 +961,8 @@ export function SettingsModal() {
               {feedback}
             </p>
           )}
+
+          <FeedbackSection lang={curLang} onClose={closeSettings} />
         </div>
 
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
@@ -1216,5 +1219,58 @@ function AppUpdatesSection(
         {t('updateReceivePrereleasesHint', lang)}
       </p>
     </Section>
+  )
+}
+
+function FeedbackSection({ lang, onClose }: { lang: Language; onClose: () => void }) {
+  const openDialog = useFeedbackStore((s) => s.openDialog)
+  const pendingCount = useFeedbackStore((s) => s.pendingCount)
+  const [expanded, setExpanded] = useState(false)
+
+  const handleOpenForm = () => {
+    onClose()
+    window.setTimeout(() => openDialog(), 0)
+  }
+
+  return (
+    <div className="border-t border-[var(--color-border)] pt-4 mt-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        className="w-full flex items-center justify-between gap-2 group"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] group-hover:text-[var(--color-text-secondary)] transition-colors flex items-center gap-2">
+          <span className="inline-block w-3 text-center">{expanded ? '▾' : '▸'}</span>
+          {t('feedbackHelpSection', lang)}
+          {pendingCount > 0 && (
+            <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] normal-case tracking-normal">
+              {pendingCount}
+            </span>
+          )}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed flex-1">
+              {t('feedbackHelpHint', lang)}
+            </p>
+            <button
+              type="button"
+              onClick={handleOpenForm}
+              className="px-3 py-1.5 text-xs rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+            >
+              {t('feedbackOpenForm', lang)}
+            </button>
+          </div>
+          {pendingCount > 0 && (
+            <p className="text-[11px] text-amber-300">
+              {t('feedbackPendingNotice', lang, { count: pendingCount })}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

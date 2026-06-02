@@ -3,6 +3,9 @@
 interface ImportMetaEnv {
   readonly VITE_WS_URL: string
   readonly VITE_API_URL: string
+  readonly VITE_FEISHU_WEBHOOK_URL?: string
+  readonly VITE_FEISHU_WEBHOOK_SECRET?: string
+  readonly VITE_FEISHU_GROUP_INVITE_URL?: string
 }
 
 interface ImportMeta {
@@ -129,3 +132,5 @@ interface UpdateInfo {
   isPrerelease: boolean
   notes: string
 }
+
+declare const __APP_VERSION__: string

@@ -3,6 +3,7 @@ import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTimer } from '@/hooks/useTimer'
 import { t } from '@/i18n'
+import { FeedbackButton } from '@/components/feedback/FeedbackButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
@@ -32,8 +33,11 @@ export function TopBar() {
         {title}
       </h1>
 
-      <div className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums min-w-[140px] text-right">
-        T+ {formatted}
+      <div className="flex items-center gap-3 min-w-[140px] justify-end">
+        <FeedbackButton />
+        <div className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums">
+          T+ {formatted}
+        </div>
       </div>
     </header>
   )

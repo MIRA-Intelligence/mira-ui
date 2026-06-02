@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
 import { PipelineProgress } from '@/components/pipeline/PipelineProgress'
@@ -10,9 +11,10 @@ import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
-import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { cn } from '@/lib/utils'
@@ -139,8 +141,13 @@ export function AppLayout() {
   // Suppress width transitions while actively dragging a splitter so the panel
   // tracks the cursor 1:1 instead of easing behind it.
   const [resizing, setResizing] = useState(false)
+  const flushPendingFeedback = useFeedbackStore((s) => s.flushPending)
   useWebSocket()
   useUpdateCheck()
+
+  useEffect(() => {
+    void flushPendingFeedback()
+  }, [flushPendingFeedback])
 
   return (
     <div className="h-screen flex flex-col">
@@ -226,6 +233,7 @@ export function AppLayout() {
       <LocalEngineUpdateModal />
       <SkillsPluginsModal />
       <NewProjectModal />
+      <FeedbackDialog />
     </div>
   )
 }
