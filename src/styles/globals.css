@@ -62,6 +62,10 @@ html, body, #root {
   transition: background-color 0.2s, color 0.2s;
 }
 
+[data-drag-region="no-drag"] {
+  -webkit-app-region: no-drag;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

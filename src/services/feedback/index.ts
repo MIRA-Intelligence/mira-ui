@@ -96,8 +96,13 @@ export async function submitFeedback(
   if (input.title.trim().length === 0 || input.body.trim().length === 0) {
     return { ok: false, channel: null, error: 'invalid', queued: false }
   }
-  const payload = buildPayload(input)
+  let payload: FeedbackPayload | null = null
   try {
+    const config = await fetchFeedbackConfig()
+    if (!config.configured) {
+      return { ok: false, channel: null, error: 'not_configured', queued: false }
+    }
+    payload = buildPayload(input)
     const result = await submitFeedbackReport(payload)
     return { ok: true, channel: activeAdapterId, inviteUrl: result.inviteUrl }
   } catch (err) {
@@ -105,7 +110,7 @@ export async function submitFeedback(
     if (errorMessage === 'not_configured') {
       return { ok: false, channel: null, error: 'not_configured', queued: false }
     }
-    enqueue(payload, errorMessage)
+    if (payload) enqueue(payload, errorMessage)
     return { ok: false, channel: activeAdapterId, error: errorMessage, queued: true }
   }
 }
