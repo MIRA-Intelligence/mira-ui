@@ -198,6 +198,8 @@ jobs:
           MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
           MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
           MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
         run: npm run dist:bundle:mac
 
       - name: Rename macOS bundle update manifests
@@ -218,6 +220,8 @@ jobs:
           MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
           MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
           MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
         run: npm run dist:bundle:win
 
       - name: Package Windows bundle setup as zip
