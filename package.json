@@ -36,6 +36,7 @@
       "package.json"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "identity": null,
       "target": [
         "dmg",
@@ -64,6 +65,7 @@
       }
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]

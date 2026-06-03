@@ -22,6 +22,7 @@ module.exports = {
     },
   ],
   mac: {
+    icon: "build/icon.icns",
     identity: null,
     target: [
       'dmg',
@@ -41,6 +42,7 @@ module.exports = {
     },
   },
   win: {
+    icon: 'build/icon.ico',
     target: [
       'nsis',
     ],
