@@ -205,6 +205,8 @@ async function writeBundledFeedbackConfig() {
       webhookUrl,
       secret: process.env.MIRA_FEISHU_WEBHOOK_SECRET?.trim() || '',
       inviteUrl: process.env.MIRA_FEISHU_GROUP_INVITE_URL?.trim() || '',
+      mentionOpenId: process.env.MIRA_FEISHU_MENTION_OPEN_ID?.trim() || '',
+      mentionName: process.env.MIRA_FEISHU_MENTION_NAME?.trim() || 'MIRAI',
     },
   }
   await mkdir(path.dirname(feedbackConfigPath), { recursive: true })
