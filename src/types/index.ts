@@ -1,6 +1,9 @@
 /* ── Pipeline stages ───────────────────────────── */
 
 export type PipelineStage = 'research' | 'experiment' | 'result'
+export type AppMode = 'normal' | 'project'
+export type AgentProfile = 'engineer' | 'research'
+export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
 
@@ -23,6 +26,45 @@ export interface ExperimentProgress {
   current_value?: number | string
 }
 
+export interface ExperimentIsolationTest {
+  control?: string
+  treatment?: string
+  isolated_variable?: string
+  result?: string
+}
+
+export interface ExperimentPostMortem {
+  residual_analysis?: string
+  implementation_fidelity?: string
+  five_whys?: string[]
+}
+
+export interface ExperimentEvidenceRef {
+  ref_id?: string
+  relevance?: string
+  metric_key?: string
+  artifact?: string
+  [key: string]: unknown
+}
+
+export interface ExperimentSnapshot {
+  title?: string
+  question?: string
+  hypothesis?: string
+  prediction?: string
+  method?: string
+  results?: ExperimentResult
+  conclusion?: string
+  next?: string
+  commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
+  capturedAt?: string
+  source?: string
+}
+
 /* ── Single experiment ─────────────────────────── */
 
 export interface Experiment {
@@ -37,8 +79,13 @@ export interface Experiment {
   conclusion?: string
   next?: string
   commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
   progress?: ExperimentProgress
   parent?: string
+  snapshot?: ExperimentSnapshot
 }
 
 /* ── Research data (literature & references) ───── */
@@ -82,6 +129,9 @@ export interface ProjectTask {
   status: 'in_progress' | 'completed' | 'pending'
   title: string
   coreQuestion?: string
+  runMode?: 'manual' | 'auto'
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
   currentExperiment?: string
   experiments: Experiment[]
   knowledge: string[]
@@ -152,6 +202,10 @@ export interface TaskPlanExperiment {
   conclusion?: string
   next?: string
   commit?: string
+  theoretical_proof?: string
+  isolation_test?: ExperimentIsolationTest
+  post_mortem?: ExperimentPostMortem
+  evidence_refs?: Array<ExperimentEvidenceRef | string>
   progress?: {
     epoch?: number
     total_epochs?: number
@@ -159,33 +213,101 @@ export interface TaskPlanExperiment {
     current_value?: number | string
   }
   parent?: string
+  snapshot?: {
+    title?: string
+    question?: string
+    hypothesis?: string
+    prediction?: string
+    method?: string
+    results?: {
+      metrics?: Record<string, unknown>
+      findings?: string
+      artifacts?: string[]
+    }
+    conclusion?: string
+    next?: string
+    commit?: string
+    theoretical_proof?: string
+    isolation_test?: ExperimentIsolationTest
+    post_mortem?: ExperimentPostMortem
+    evidence_refs?: Array<ExperimentEvidenceRef | string>
+    captured_at?: string
+    source?: string
+  }
+}
+
+export interface TaskPlanContract {
+  profile: AgentProfile
+  contract_version: ContractVersion
+  required_completed_fields: string[]
+  required_falsify_fields: string[]
+  falsify_keywords: string[]
 }
 
 /* ── New Project creation ────────────────────────── */
 
-export type OutputGoal = 'paper' | 'report' | 'analysis' | 'code'
+export type AutomationGoalOperator = '>' | '>=' | '<' | '<=' | '=='
+export type AutomationGoalLogic = 'AND' | 'OR'
+
+export interface AutomationGoal {
+  metric: string
+  operator: AutomationGoalOperator
+  value: number
+}
+
+export interface AutomationPolicy {
+  logic: AutomationGoalLogic
+  goals: AutomationGoal[]
+  maxExperiments?: number
+  maxTokens?: number
+}
+
+export type LiteratureSource =
+  | 'pubmed'
+  | 'google_scholar'
+  | 'arxiv'
+  | 'semantic_scholar'
+  | 'crossref'
+  | 'europe_pmc'
+
+export interface LiteratureReviewOptions {
+  enabled: boolean
+  sources: LiteratureSource[]
+}
 
 export interface NewProjectInput {
   description: string
   title?: string
   domain?: string
+  dataPath?: string
   references?: string
   computeBudget?: string
-  outputGoal: OutputGoal
+  literatureReview?: LiteratureReviewOptions
+  automationPolicy?: AutomationPolicy
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
 }
 
 /* ── WebSocket protocol ─────────────────────────── */
 
 export interface WsMessage {
-  type: 'message' | 'command'
+  type: 'message' | 'command' | 'set_mode' | 'bind'
   content: string
   session_id: string
   user_id?: string
   media?: string[]
+  loop_mode?: AppMode
+  mode?: 'manual' | 'auto'
+  agent_profile?: AgentProfile
+  contract_version?: ContractVersion
+  automation_policy?: AutomationPolicy
+  allow_result_write?: boolean
+  // Opt-in token streaming for this message (defaults on in the UI).
+  stream?: boolean
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end'
   session_id?: string
   content: string
   media?: string[]

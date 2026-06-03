@@ -1,4 +1,4 @@
-# MedPilotUI
+# MiraUI
 
 AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tailwind CSS, and Electron.
 
@@ -10,6 +10,11 @@ AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tai
 - Real-time communication setup ready for WebSocket/REST API backends
 - Zustand state management and lightweight component architecture
 - Responsive layouts and shared design tokens for easy UI iterations
+
+## Contributing / CLA
+
+All external contributions require acceptance of the Contributor License Agreement.
+See `CLA.md` for details. By submitting a PR, you confirm acceptance of this CLA.
 
 ## Prerequisites
 
@@ -28,7 +33,7 @@ npm install
 
 ## 2) Backend assumptions
 
-This UI is designed to connect to the [MedPilot](https://github.com/Project-MedPilot/MedPilot) gateway through:
+This UI is designed to connect to the [Mira](https://github.com/MIRA-Intelligence/Mira) gateway through:
 
 - WebSocket endpoint: `/ws`
 - REST API endpoint: `/api`
@@ -112,11 +117,96 @@ Target specific desktop platforms:
 # macOS artifacts (dmg + zip)
 npm run dist:mac
 
-# Windows artifacts (nsis + portable)
+# Windows artifacts (nsis setup + portable)
 npm run dist:win
 
 # Build both (best used in CI)
 npm run dist:all
+```
+
+### Bundle packaging
+
+`MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, installs the local engine service from the desktop installer, and exposes the local runtime config inside the UI.
+
+By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. Windows bundle builds also download a WinSW service wrapper so the engine runs as `MiraEngine` without a foreground console window. You can override the sources with:
+
+```bash
+# Use a specific mira release asset
+export MIRA_ENGINE_RELEASE_TAG=v0.2.0rc8
+
+# Or inject a locally built binary
+export MIRA_ENGINE_LOCAL_BINARY=/absolute/path/to/mira-engine
+
+# Windows only: inject a local WinSW wrapper
+export MIRA_WINSW_LOCAL_BINARY=/absolute/path/to/WinSW-x64.exe
+```
+
+Then build with:
+
+```bash
+# macOS bundle artifacts
+npm run dist:bundle:mac
+
+# Windows bundle artifacts
+npm run dist:bundle:win
+```
+
+Bundle artifacts are written to `release-bundle/` and use the `MIRA-bundle-*` naming convention. Windows bundle builds publish the NSIS setup artifact only; the portable bundle is intentionally not produced because the engine is registered as a Windows Service.
+
+For a local Windows ARM64 test machine, such as Windows on Apple Silicon via Parallels, use the helper script from an ARM64 PowerShell session:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1
+```
+
+The script builds an ARM64 `mira-engine.exe`, downloads the .NET Framework `WinSW-net461.exe` wrapper, and emits a `win-arm64` setup executable. This is for ARM64 functional testing only; run the normal x64 bundle path before publishing for x64 Windows users. The repo `package.json` intentionally remains `0.1.0`, so pass bundle version metadata explicitly when producing a named test build:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -BundleVersion 0.4.0-rc.3.dev2 `
+  -BundleArtifactVersion v0.4.0rc3.dev2
+```
+
+The helper forwards those values to `electron-builder` through `MIRA_UI_BUNDLE_VERSION` and `MIRA_UI_BUNDLE_ARTIFACT_VERSION`, so direct bundle builds can use the same environment variables.
+
+Native ARM64 Python dependency builds require VS 2022 C++ Build Tools and ARM64 Rust:
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.ARM64 --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended"
+
+curl.exe -L -o "$env:TEMP\rustup-init-aarch64.exe" "https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe"
+& "$env:TEMP\rustup-init-aarch64.exe" -y --default-toolchain stable
+```
+
+`cryptography` also needs ARM64 OpenSSL development libraries when pip builds it from source:
+
+```powershell
+cd C:\Users\$env:USERNAME\Code
+git clone https://github.com/microsoft/vcpkg.git
+cd vcpkg
+.\bootstrap-vcpkg.bat -disableMetrics
+.\vcpkg.exe install openssl:arm64-windows
+```
+
+After installing these prerequisites, close and reopen ARM64 PowerShell before running the bundle script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows
+```
+
+If GitHub release downloads are unstable in the VM, download the ARM64 assets in a browser and pass them to the script:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 `
+  -OpenSslDir C:\Users\$env:USERNAME\Code\vcpkg\installed\arm64-windows `
+  -UvArchive C:\Users\$env:USERNAME\Downloads\uv-aarch64-pc-windows-msvc.zip `
+  -WinSwLocalBinary C:\Users\$env:USERNAME\Downloads\WinSW-net461.exe
+```
+
+If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install ARM64 Python 3.11 and pass it explicitly:
+
+```powershell
+.\scripts\build-win-arm64-bundle.ps1 -PythonExe C:\Path\To\ARM64\python.exe -RecreateVenv
 ```
 
 ## 6) Script reference
@@ -130,9 +220,11 @@ npm run dist:all
 - `npm run pack` → generate unpacked desktop app into `release/`
 - `npm run dist` → generate installers for the current OS into `release/`
 - `npm run dist:mac` → generate macOS `dmg` and `zip` packages
-- `npm run dist:win` → generate Windows `nsis` and `portable` packages
+- `npm run dist:win` → generate Windows setup/portable executables (CI wraps each into zip before release upload)
 - `npm run dist:all` → attempt both macOS and Windows packaging in one run
 - `npm run dist:mac` uses local Electron distribution and unsigned packaging (`mac.identity=null`) for local release preparation
+- `npm run dist:bundle:mac` → generate the `MIRA-bundle` macOS installers into `release-bundle/`
+- `npm run dist:bundle:win` → generate the `MIRA-bundle` Windows installers into `release-bundle/`
 
 ## 7) Project structure
 
@@ -190,6 +282,7 @@ npm run dist:all
 - Run from repo root to avoid path resolution issues.
 
 ### Desktop release artifacts
-- CI workflow: `.github/workflows/desktop-release.yml`
-- Trigger with GitHub Actions `workflow_dispatch` or push/PR to `deploy`
-- Generated installers are uploaded as workflow artifacts and also written to local `release/` when run locally
+- Primary release workflow: `.github/workflows/desktop-release.yml`
+- A single `v*` tag now publishes both `MIRA-standalone-*` and `MIRA-bundle-*` assets into the same GitHub Release
+- Manual bundle rebuild workflow: `.github/workflows/desktop-release-bundle.yml`
+- Generated installers are uploaded as workflow artifacts and also written to local `release/` or `release-bundle/` when run locally

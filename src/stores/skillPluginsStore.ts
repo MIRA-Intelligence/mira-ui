@@ -13,6 +13,11 @@ import type {
   SkillPluginTargetType,
 } from '@/types'
 
+// Skills are managed at a single, project-independent scope. This sentinel
+// session id tells the engine to operate on the global workspace rather than
+// a specific project directory.
+export const GLOBAL_SKILLS_SESSION_ID = '__global__'
+
 interface SkillPluginsState {
   plugins: SkillPlugin[]
   scope: SkillPluginScope
@@ -42,7 +47,7 @@ function parseError(err: unknown): string {
 
 export const useSkillPluginsStore = create<SkillPluginsState>((set, get) => ({
   plugins: [],
-  scope: 'project',
+  scope: 'global',
   loading: false,
   error: null,
   installPath: '',

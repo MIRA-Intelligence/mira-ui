@@ -1,0 +1,174 @@
+name: Desktop Bundle Release Rebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing desktop release tag (vX.Y.Z or vX.Y.ZrcN)'
+        required: true
+      engine_tag:
+        description: 'Override mira engine release tag (defaults to latest published release)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      ENGINE_TAG_INPUT: ${{ inputs.engine_tag || '' }}
+      MIRA_ENGINE_REPO: MIRA-Intelligence/mira
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Resolve bundle and engine versions
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs')
+          const tag = process.env.RELEASE_TAG || ''
+          const match = /^v(\d+\.\d+\.\d+)(?:rc(\d+))?$/.exec(tag)
+          if (!match) {
+            console.error(`Unsupported release tag format: "${tag}". Expected vX.Y.Z or vX.Y.ZrcN.`)
+            process.exit(1)
+          }
+
+          const version = match[2] ? `${match[1]}-rc.${match[2]}` : match[1]
+          const engineTag = (process.env.ENGINE_TAG_INPUT || '').trim()
+          const pkgPath = 'package.json'
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `DESKTOP_VERSION=${version}\n`)
+            if (engineTag) {
+              fs.appendFileSync(process.env.GITHUB_ENV, `ENGINE_RELEASE_TAG=${engineTag}\n`)
+              fs.appendFileSync(process.env.GITHUB_ENV, `MIRA_ENGINE_RELEASE_TAG=${engineTag}\n`)
+            }
+          }
+
+          console.log(
+            `Resolved desktop version ${version} from ${tag}; ` +
+              (engineTag ? `using explicit engine tag ${engineTag}` : 'using latest published mira engine release')
+          )
+          EOF
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Show resolved bundle version
+        shell: bash
+        run: |
+          if [ -n "${ENGINE_RELEASE_TAG:-}" ]; then
+            echo "Bundle version = ${DESKTOP_VERSION} using engine ${ENGINE_RELEASE_TAG}"
+          else
+            echo "Bundle version = ${DESKTOP_VERSION} using latest published mira engine release"
+          fi
+
+      - name: Build macOS bundle artifacts
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
+        run: npm run dist:bundle:mac
+
+      - name: Rename macOS bundle update manifests
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          if [ -f release-bundle/latest-mac.yml ]; then
+            mv release-bundle/latest-mac.yml release-bundle/latest-mac-bundle.yml
+          fi
+          if [ -f release-bundle/app-update.yml ]; then
+            mv release-bundle/app-update.yml release-bundle/app-update-bundle.yml
+          fi
+
+      - name: Build Windows bundle artifacts
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
+        run: npm run dist:bundle:win
+
+      - name: Package Windows bundle executables as zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem -Path release-bundle -Filter "MIRA-bundle-*-win-*-setup.exe" | Select-Object -First 1
+          if (-not $setupExe) {
+            Write-Error "Bundle setup executable not found in release-bundle/"
+            exit 1
+          }
+          $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
+          Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
+
+      - name: Upload macOS bundle release assets
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-release-bundle-macos
+          path: |
+            release-bundle/MIRA-bundle-*-mac-*.dmg
+            release-bundle/MIRA-bundle-*-mac-*.dmg.blockmap
+            release-bundle/MIRA-bundle-*-mac-*.zip
+            release-bundle/MIRA-bundle-*-mac-*.zip.blockmap
+            release-bundle/latest-mac-bundle.yml
+            release-bundle/app-update-bundle.yml
+
+      - name: Upload Windows bundle release assets
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-release-bundle-windows
+          path: |
+            release-bundle/MIRA-bundle-*-win-*-setup.zip
+
+  publish-bundle-release:
+    needs: build-bundle
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+
+    steps:
+      - name: Download packaged bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: miraui-release-bundle-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish GitHub bundle release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            release-assets/MIRA-bundle-*.dmg
+            release-assets/MIRA-bundle-*.dmg.blockmap
+            release-assets/MIRA-bundle-*.zip
+            release-assets/MIRA-bundle-*.zip.blockmap
+            release-assets/latest-mac-bundle.yml
+            release-assets/app-update-bundle.yml

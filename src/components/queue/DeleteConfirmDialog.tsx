@@ -11,11 +11,8 @@ export function DeleteConfirmDialog({ projectId, projectLabel, onConfirm, onCanc
   const [deleteFiles, setDeleteFiles] = useState(false)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onCancel}>
-      <div
-        className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-lg shadow-xl w-[360px] p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-lg shadow-xl w-[360px] p-5">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
           Delete Project
         </h3>
