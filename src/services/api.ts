@@ -246,7 +246,8 @@ export async function uploadProjectFiles(
 
   const formData = new FormData()
   for (const file of files) {
-    formData.append('files', file, file.name)
+    const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
+    formData.append('files', file, relativePath || file.name)
   }
 
   const sid = encodeURIComponent(sessionId)

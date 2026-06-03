@@ -354,7 +354,22 @@ export function NewProjectModal() {
     setSelectedReferenceFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const useNativePathPicker = deploymentMode === 'localBundle' && Boolean(window.electronAPI?.selectDataPath)
+
+  const applySelectedServerPath = (path: string) => {
+    setServerDataPath(path)
+    setSelectedFiles([])
+    setUploadError('')
+    void runPathValidation(path)
+  }
+
   const handleDataBrowse = () => {
+    if (useNativePathPicker) {
+      void window.electronAPI?.selectDataPath?.('file').then((path) => {
+        if (path) applySelectedServerPath(path)
+      })
+      return
+    }
     dataFileInputRef.current?.click()
   }
 
@@ -363,6 +378,12 @@ export function NewProjectModal() {
   }
 
   const handleBrowseFolder = () => {
+    if (useNativePathPicker) {
+      void window.electronAPI?.selectDataPath?.('directory').then((path) => {
+        if (path) applySelectedServerPath(path)
+      })
+      return
+    }
     folderInputRef.current?.click()
   }
 
@@ -732,19 +753,19 @@ export function NewProjectModal() {
                   onClick={handleDataBrowse}
                   className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
                 >
-                  {t('browse', lang)}
+                  {useNativePathPicker ? t('browseFilePath', lang) : t('browseUploadFiles', lang)}
                 </button>
                 <button
                   type="button"
                   onClick={handleBrowseFolder}
                   className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
                 >
-                  {t('browseFolder', lang)}
+                  {useNativePathPicker ? t('browseFolderPath', lang) : t('browseUploadFolder', lang)}
                 </button>
               </div>
               {selectedFiles.length > 0 && (
                 <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  {t('filesSelected', lang, { count: selectedFiles.length })}
+                  {serverDataPath ? serverDataPath : t('filesSelected', lang, { count: selectedFiles.length })}
                 </p>
               )}
               {selectedFiles.length > 0 && (
