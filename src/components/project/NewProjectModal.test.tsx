@@ -149,6 +149,46 @@ describe('NewProjectModal', () => {
     expect(screen.queryByRole('button', { name: 'Upload Folder' })).not.toBeInTheDocument()
   })
 
+  it('shows the first uploaded file selection before clearing the file input', () => {
+    useSettingsStore.setState({ deploymentMode: 'remoteManual' })
+
+    const { container } = render(
+      <StrictMode>
+        <NewProjectModal />
+      </StrictMode>,
+    )
+
+    act(() => {
+      useUiStore.setState({ newProjectOpen: true })
+    })
+
+    const dataInputs = container.querySelectorAll('input[type="file"]')
+    const dataFileInput = dataInputs[0] as HTMLInputElement
+    const file = new File(['a,b\n'], 'a.csv', { type: 'text/csv' })
+    let inputCleared = false
+    const fileList = {
+      0: file,
+      get length() {
+        return inputCleared ? 0 : 1
+      },
+      item(index: number) {
+        return index === 0 && !inputCleared ? file : null
+      },
+    } as unknown as FileList
+    Object.defineProperty(dataFileInput, 'value', {
+      configurable: true,
+      get: () => (inputCleared ? '' : 'C:\\fakepath\\a.csv'),
+      set: (value: string) => {
+        if (value === '') inputCleared = true
+      },
+    })
+
+    fireEvent.change(dataFileInput, { target: { files: fileList } })
+
+    expect(screen.getByText('1 file(s) selected, will upload into data/')).toBeInTheDocument()
+    expect(screen.getByText('a.csv')).toBeInTheDocument()
+  })
+
   it('shows local upload controls and clears uploads when a remote path is entered', () => {
     useSettingsStore.setState({ deploymentMode: 'remoteManual' })
 
