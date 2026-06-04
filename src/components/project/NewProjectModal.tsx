@@ -340,9 +340,10 @@ export function NewProjectModal() {
   if (!newProjectOpen) return null
 
   const handleDataFilesAdded = (files: FileList | File[]) => {
-    if (files.length === 0) return
+    const incomingFiles = Array.from(files)
+    if (incomingFiles.length === 0) return
     setDataSourceMode('upload')
-    setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
+    setSelectedFiles((prev) => mergeSelectedFiles(prev, incomingFiles))
     setServerDataPath('')
     clearPathCheckTimer()
     setPathCheck({ status: 'idle', message: '' })
