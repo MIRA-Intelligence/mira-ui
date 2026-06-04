@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -218,6 +218,13 @@ type PathCheckState = {
   message: string
 }
 
+type DataSourceMode = 'serverPath' | 'upload'
+
+function getFileDisplayPath(file: File): string {
+  const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
+  return relativePath || file.name
+}
+
 export function NewProjectModal() {
   const { newProjectOpen, closeNewProject, newProjectPrefill, newProjectFromChatId } = useUiStore()
   const removeChat = useChatStore((s) => s.removeChat)
@@ -249,6 +256,7 @@ export function NewProjectModal() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [selectedReferenceFiles, setSelectedReferenceFiles] = useState<File[]>([])
   const [serverDataPath, setServerDataPath] = useState('')
+  const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>('serverPath')
   const [pathCheck, setPathCheck] = useState<PathCheckState>({ status: 'idle', message: '' })
   const [creating, setCreating] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -310,12 +318,14 @@ export function NewProjectModal() {
   }
 
   useEffect(() => {
-    const folderInput = folderInputRef.current
-    if (folderInput) {
-      folderInput.setAttribute('webkitdirectory', '')
-      folderInput.setAttribute('directory', '')
-    }
     return () => clearPathCheckTimer()
+  }, [])
+
+  const setFolderInputRef = useCallback((node: HTMLInputElement | null) => {
+    folderInputRef.current = node
+    if (!node) return
+    node.setAttribute('webkitdirectory', '')
+    node.setAttribute('directory', '')
   }, [])
 
   // Seed the description when opened with a prefill (e.g. promoting a Quick
@@ -330,7 +340,12 @@ export function NewProjectModal() {
   if (!newProjectOpen) return null
 
   const handleDataFilesAdded = (files: FileList | File[]) => {
+    if (files.length === 0) return
+    setDataSourceMode('upload')
     setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
+    setServerDataPath('')
+    clearPathCheckTimer()
+    setPathCheck({ status: 'idle', message: '' })
     setUploadError('')
   }
 
@@ -355,8 +370,13 @@ export function NewProjectModal() {
   }
 
   const useNativePathPicker = deploymentMode === 'localBundle' && Boolean(window.electronAPI?.selectDataPath)
+  const allowDataUpload = deploymentMode === 'remoteManual'
+  const dataPathPlaceholderKey = deploymentMode === 'localBundle'
+    ? 'localDataPathPlaceholder'
+    : 'remoteDataPathPlaceholder'
 
   const applySelectedServerPath = (path: string) => {
+    setDataSourceMode('serverPath')
     setServerDataPath(path)
     setSelectedFiles([])
     setUploadError('')
@@ -370,6 +390,7 @@ export function NewProjectModal() {
       })
       return
     }
+    if (!allowDataUpload) return
     dataFileInputRef.current?.click()
   }
 
@@ -384,12 +405,13 @@ export function NewProjectModal() {
       })
       return
     }
+    if (!allowDataUpload) return
     folderInputRef.current?.click()
   }
 
   const handleDataDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    if (e.dataTransfer.files?.length) {
+    if (allowDataUpload && e.dataTransfer.files?.length) {
       handleDataFilesAdded(e.dataTransfer.files)
     }
   }
@@ -558,6 +580,7 @@ export function NewProjectModal() {
       setSelectedFiles([])
       setSelectedReferenceFiles([])
       setServerDataPath('')
+      setDataSourceMode('serverPath')
       setPathCheck({ status: 'idle', message: '' })
       setTitle('')
       setReferences('')
@@ -689,7 +712,9 @@ export function NewProjectModal() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('dataSourceFiles', lang)}</label>
             <div
-              onDragOver={(e) => e.preventDefault()}
+              onDragOver={(e) => {
+                if (allowDataUpload) e.preventDefault()
+              }}
               onDrop={handleDataDrop}
               className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
             >
@@ -704,7 +729,7 @@ export function NewProjectModal() {
                 }}
               />
               <input
-                ref={folderInputRef}
+                ref={setFolderInputRef}
                 type="file"
                 multiple
                 className="hidden"
@@ -717,6 +742,9 @@ export function NewProjectModal() {
                 <input
                   value={serverDataPath}
                   onChange={(e) => {
+                    setDataSourceMode('serverPath')
+                    if (selectedFiles.length > 0) setSelectedFiles([])
+                    setUploadError('')
                     setServerDataPath(e.target.value)
                     schedulePathValidation(e.target.value)
                   }}
@@ -727,7 +755,7 @@ export function NewProjectModal() {
                       void runPathValidation(serverDataPath)
                     }
                   }}
-                  placeholder={t('dataPathPlaceholder', lang)}
+                  placeholder={t(dataPathPlaceholderKey, lang)}
                   className="flex-1 min-w-0 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
                 />
                 <span
@@ -748,31 +776,40 @@ export function NewProjectModal() {
                     pathCheck.status === 'idle' && 'bg-[var(--color-text-muted)]/60 shadow-[0_0_4px_rgba(148,163,184,0.35)]',
                   )}
                 />
-                <button
-                  type="button"
-                  onClick={handleDataBrowse}
-                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
-                >
-                  {useNativePathPicker ? t('browseFilePath', lang) : t('browseUploadFiles', lang)}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleBrowseFolder}
-                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
-                >
-                  {useNativePathPicker ? t('browseFolderPath', lang) : t('browseUploadFolder', lang)}
-                </button>
+                {(useNativePathPicker || allowDataUpload) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleDataBrowse}
+                      className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                    >
+                      {useNativePathPicker ? t('browseFilePath', lang) : t('browseUploadFiles', lang)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBrowseFolder}
+                      className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                    >
+                      {useNativePathPicker ? t('browseFolderPath', lang) : t('browseUploadFolder', lang)}
+                    </button>
+                  </>
+                )}
               </div>
-              {selectedFiles.length > 0 && (
-                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  {serverDataPath ? serverDataPath : t('filesSelected', lang, { count: selectedFiles.length })}
+              {allowDataUpload && (
+                <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                  {t('remoteDataSourceHint', lang)}
                 </p>
               )}
-              {selectedFiles.length > 0 && (
+              {selectedFiles.length > 0 && dataSourceMode === 'upload' && (
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  {t('filesSelectedForUpload', lang, { count: selectedFiles.length })}
+                </p>
+              )}
+              {selectedFiles.length > 0 && dataSourceMode === 'upload' && (
                 <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
                   {selectedFiles.map((file, idx) => (
-                    <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-                      <span className="truncate">{file.name}</span>
+                    <div key={`${getFileDisplayPath(file)}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                      <span className="truncate">{getFileDisplayPath(file)}</span>
                       <button
                         type="button"
                         onClick={() => removeSelectedDataFile(idx)}

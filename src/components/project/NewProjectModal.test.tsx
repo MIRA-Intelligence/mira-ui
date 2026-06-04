@@ -16,6 +16,10 @@ const initialAgentState = useAgentStore.getState()
 describe('NewProjectModal', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    Object.defineProperty(window, 'electronAPI', {
+      value: undefined,
+      configurable: true,
+    })
     useUiStore.setState(initialUiState, true)
     useProjectStore.setState(initialProjectState, true)
     useSettingsStore.setState(initialSettingsState, true)
@@ -119,5 +123,74 @@ describe('NewProjectModal', () => {
 
     expect(screen.getByRole('checkbox', { name: 'PubMed' })).toBeDisabled()
     expect(screen.getByText('External literature search will be skipped. The agent will move directly to planning and experiments.')).toBeInTheDocument()
+  })
+
+  it('shows path browsing controls in local bundle mode', () => {
+    useSettingsStore.setState({ deploymentMode: 'localBundle' })
+    Object.defineProperty(window, 'electronAPI', {
+      value: { selectDataPath: vi.fn() },
+      configurable: true,
+    })
+
+    render(
+      <StrictMode>
+        <NewProjectModal />
+      </StrictMode>,
+    )
+
+    act(() => {
+      useUiStore.setState({ newProjectOpen: true })
+    })
+
+    expect(screen.getByPlaceholderText('Select or enter a data path visible to the local agent')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Browse File Path' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Browse Folder Path' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Upload Files' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Upload Folder' })).not.toBeInTheDocument()
+  })
+
+  it('shows local upload controls and clears uploads when a remote path is entered', () => {
+    useSettingsStore.setState({ deploymentMode: 'remoteManual' })
+
+    const { container } = render(
+      <StrictMode>
+        <NewProjectModal />
+      </StrictMode>,
+    )
+
+    act(() => {
+      useUiStore.setState({ newProjectOpen: true })
+    })
+
+    expect(screen.getByPlaceholderText('Enter a remote agent-visible path, or upload local files')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload Files' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload Folder' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Browse File Path' })).not.toBeInTheDocument()
+    const dataInputs = container.querySelectorAll('input[type="file"]')
+    expect(dataInputs[1]).toHaveAttribute('webkitdirectory')
+    expect(dataInputs[1]).toHaveAttribute('directory')
+    const folderClick = vi.spyOn(dataInputs[1] as HTMLInputElement, 'click')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upload Folder' }))
+    expect(folderClick).toHaveBeenCalled()
+
+    const file = new File(['a,b\n'], 'a.csv', { type: 'text/csv' })
+    Object.defineProperty(file, 'webkitRelativePath', {
+      value: 'dataset/tables/a.csv',
+      configurable: true,
+    })
+    const dataFileInput = dataInputs[0] as HTMLInputElement
+
+    fireEvent.change(dataFileInput, { target: { files: [file] } })
+
+    expect(screen.getByText('1 file(s) selected, will upload into data/')).toBeInTheDocument()
+    expect(screen.getByText('dataset/tables/a.csv')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('Enter a remote agent-visible path, or upload local files'), {
+      target: { value: 'datasets/remote' },
+    })
+
+    expect(screen.queryByText('1 file(s) selected, will upload into data/')).not.toBeInTheDocument()
+    expect(screen.queryByText('dataset/tables/a.csv')).not.toBeInTheDocument()
   })
 })
