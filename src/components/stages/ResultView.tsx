@@ -1,10 +1,50 @@
 import type { ResultData, ProjectTask } from '@/types'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useProjectStore } from '@/stores/projectStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { wsClient } from '@/services/websocket'
+import { getProjectArtifactUrl } from '@/services/api'
 import { t } from '@/i18n'
+import { buildExportMessage, type ExportFormat } from '@/lib/exportRequests'
 
 export function ResultView({ data, task }: { data: ResultData; task: ProjectTask }) {
   const lang = useSettingsStore((s) => s.language)
+  const mode = useProjectStore((s) => s.mode)
+  const agentProfile = useProjectStore((s) => s.agentProfile)
   const hasContent = data.summary || (data.sections?.length ?? 0) > 0
+
+  const handleDownload = () => {
+    if (!data.outputPath || !task.id) return
+    const href = getProjectArtifactUrl(task.id, data.outputPath)
+    const filename = data.outputPath.split('/').filter(Boolean).pop() || 'export'
+    const link = document.createElement('a')
+    link.href = href
+    link.download = filename
+    link.rel = 'noopener noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  const handleExport = (format: ExportFormat) => {
+    const content = buildExportMessage(task, format)
+    useAgentStore.getState().addLog(task.id, {
+      id: `user-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      content,
+      type: 'response',
+      metadata: { _user: true },
+    })
+    wsClient.send({
+      type: 'message',
+      content,
+      session_id: task.id,
+      user_id: 'ui_user',
+      mode: task.runMode ?? mode,
+      agent_profile: task.agentProfile ?? agentProfile,
+      allow_result_write: true,
+    })
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -15,6 +55,45 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
         <p className="text-xs text-[var(--color-text-muted)] mb-5">
           {t('resultSubtitle', lang)}
         </p>
+
+        <div className="mb-5 p-3 rounded-lg bg-[var(--color-bg-secondary)] border border-[var(--color-border)]">
+          <h3 className="text-[11px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold mb-1.5">
+            {t('exportResultsLabel', lang)}
+          </h3>
+          <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
+            {t('exportResultsHint', lang)}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleExport('experiment_report')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatReport', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('paper_article')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatPaper', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('presentation')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatPresentation', lang)}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExport('metadata')}
+              className="px-3 py-2 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            >
+              {t('exportFormatMetadata', lang)}
+            </button>
+          </div>
+        </div>
 
         {!hasContent && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -40,6 +119,14 @@ export function ResultView({ data, task }: { data: ResultData; task: ProjectTask
                 {data.outputPath}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="shrink-0 px-2.5 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+              title={t('downloadResultHint', lang)}
+            >
+              {t('downloadResult', lang)}
+            </button>
           </div>
         )}
 

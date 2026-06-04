@@ -1,37 +1,61 @@
 import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
-  NewProjectInput, Stats, TaskPlan, ResearchData, ResultData,
+  NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AppMode, AgentProfile, ContractVersion,
 } from '@/types'
-import { fetchPlan, fetchProjects, deleteProjectFiles } from '@/services/api'
+import {
+  deleteProjectFiles,
+  fetchPlan,
+  fetchPlanContract,
+  fetchProjects,
+  updateProjectDisplayName,
+  updateProjectRuntimePreferences,
+} from '@/services/api'
+
+async function clearAgentLogs(projectId: string): Promise<void> {
+  try {
+    const { useAgentStore } = await import('@/stores/agentStore')
+    useAgentStore.getState().clearLogs(projectId)
+  } catch {
+    // Ignore optional log cleanup failures.
+  }
+}
 
 interface ProjectState {
   tasks: ProjectTask[]
+  appMode: AppMode
   selectedTaskId: string | null
   selectedExpId: string | null
   activeStage: PipelineStage
+  agentProfile: AgentProfile
+  contractVersion: ContractVersion
   mode: 'manual' | 'auto'
   stats: Stats
   startedAt: number
   projectsLoaded: boolean
+  contractsByTask: Record<string, TaskPlanContract>
 
+  setAppMode: (mode: AppMode) => void
   selectTask: (id: string) => void
   selectExperiment: (id: string | null) => void
   setActiveStage: (stage: PipelineStage) => void
+  setAgentProfile: (profile: AgentProfile) => void
   setMode: (mode: 'manual' | 'auto') => void
+  setContractVersion: (version: ContractVersion) => void
   refreshPlan: (projectId: string) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
   duplicateTask: (id: string) => void
-  createProject: (input: NewProjectInput) => string
-  loadProjects: () => Promise<void>
+  createProject: (input: NewProjectInput) => Promise<string>
+  loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
   nextProjectId: () => string
+  resetWorkspaceState: () => void
 }
 
 let dupCounter = 0
-let projectCounter = 0
 
 const PRJ_RE = /^PRJ-(\d+)$/
+const PROJECT_FOLDER_PREFIX = 'PRJ'
 const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'pending',
   'running',
@@ -39,6 +63,27 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'failed',
   'skipped',
 ])
+const MODE_SET = new Set(['manual', 'auto'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'research'] as const)
+const CONTRACT_VERSION_SET = new Set([1, 2] as const)
+
+function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
+  return typeof value === 'string' && MODE_SET.has(value as 'manual' | 'auto')
+    ? value as 'manual' | 'auto'
+    : fallback
+}
+
+function normalizeAgentProfile(value: unknown, fallback: AgentProfile = 'research'): AgentProfile {
+  return typeof value === 'string' && AGENT_PROFILE_SET.has(value as AgentProfile)
+    ? value as AgentProfile
+    : fallback
+}
+
+function normalizeContractVersion(value: unknown, fallback: ContractVersion = 1): ContractVersion {
+  return typeof value === 'number' && CONTRACT_VERSION_SET.has(value as ContractVersion)
+    ? value as ContractVersion
+    : fallback
+}
 
 function safeClone<T>(value: T): T {
   if (value == null) return value
@@ -56,14 +101,48 @@ function normalizeExperimentStatus(value: unknown): ExperimentStatus {
   return 'pending'
 }
 
-function syncCounterFromTasks(tasks: ProjectTask[]) {
-  for (const t of tasks) {
-    const m = PRJ_RE.exec(t.id)
-    if (m) projectCounter = Math.max(projectCounter, parseInt(m[1], 10))
+function collectProjectNumbers(ids: Iterable<string>): Set<number> {
+  const numbers = new Set<number>()
+  for (const id of ids) {
+    const match = PRJ_RE.exec(id)
+    if (!match) continue
+    numbers.add(parseInt(match[1], 10))
   }
+  return numbers
+}
+
+function findFirstMissingProjectNumber(used: Set<number>): number {
+  let n = 1
+  while (used.has(n)) n += 1
+  return n
+}
+
+function isProjectFolderId(id: string): boolean {
+  return id.startsWith(PROJECT_FOLDER_PREFIX)
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function parseExperimentSnapshot(raw: any): Experiment['snapshot'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  return {
+    title: raw.title as string | undefined,
+    question: raw.question as string | undefined,
+    hypothesis: raw.hypothesis as string | undefined,
+    prediction: raw.prediction as string | undefined,
+    method: raw.method as string | undefined,
+    results: raw.results ? safeClone(raw.results) : undefined,
+    conclusion: raw.conclusion as string | undefined,
+    next: raw.next as string | undefined,
+    commit: raw.commit as string | undefined,
+    theoretical_proof: raw.theoretical_proof as string | undefined,
+    isolation_test: raw.isolation_test ? safeClone(raw.isolation_test) : undefined,
+    post_mortem: raw.post_mortem ? safeClone(raw.post_mortem) : undefined,
+    evidence_refs: Array.isArray(raw.evidence_refs) ? safeClone(raw.evidence_refs) : undefined,
+    capturedAt: raw.captured_at as string | undefined,
+    source: raw.source as string | undefined,
+  }
+}
+
 function parseExperiment(raw: any, fallbackIdx: number): Experiment {
   return {
     id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
@@ -77,8 +156,13 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     conclusion: raw.conclusion as string | undefined,
     next: raw.next as string | undefined,
     commit: raw.commit as string | undefined,
+    theoretical_proof: raw.theoretical_proof as string | undefined,
+    isolation_test: raw.isolation_test ? safeClone(raw.isolation_test) : undefined,
+    post_mortem: raw.post_mortem ? safeClone(raw.post_mortem) : undefined,
+    evidence_refs: Array.isArray(raw.evidence_refs) ? safeClone(raw.evidence_refs) : undefined,
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
+    snapshot: parseExperimentSnapshot(raw.snapshot),
   }
 }
 
@@ -111,9 +195,20 @@ function parseResult(raw: any): ResultData {
   }
 }
 
-function deriveTaskStatus(rawStatus: unknown, experiments: Experiment[]): ProjectTask['status'] {
-  const hasActiveOrPending = experiments.some((e) => e.status === 'running' || e.status === 'pending')
-  if (hasActiveOrPending) return 'in_progress'
+function hasFinalResultOutput(result: ResultData): boolean {
+  const hasOutputPath = typeof result.outputPath === 'string' && result.outputPath.trim().length > 0
+  const hasOutputType = typeof result.outputType === 'string' && result.outputType.trim().length > 0
+  const hasSummary = typeof result.summary === 'string' && result.summary.trim().length > 0
+  const hasSections = Array.isArray(result.sections)
+    && result.sections.some((section) => (
+      (typeof section.title === 'string' && section.title.trim().length > 0)
+      || (typeof section.content === 'string' && section.content.trim().length > 0)
+    ))
+  return hasOutputPath || hasOutputType || hasSummary || hasSections
+}
+
+function deriveTaskStatus(rawStatus: unknown, result: ResultData): ProjectTask['status'] {
+  if (hasFinalResultOutput(result)) return 'completed'
   if (rawStatus === 'completed') return 'completed'
   return 'in_progress'
 }
@@ -122,10 +217,11 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
   const parsedExperiments = exps.map((e, i) => parseExperiment(e, i))
   const knowledge: string[] = Array.isArray(raw.knowledge) ? raw.knowledge : task.knowledge
+  const parsedResult = parseResult(raw.result)
 
   return {
     ...task,
-    status: deriveTaskStatus(raw.status, parsedExperiments),
+    status: deriveTaskStatus(raw.status, parsedResult),
     title: raw.title ?? task.title,
     coreQuestion: raw.core_question ?? task.coreQuestion,
     currentExperiment: raw.current_experiment ?? task.currentExperiment,
@@ -133,7 +229,7 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
     experiments: parsedExperiments,
     knowledge,
     research: parseResearch(raw.research),
-    result: parseResult(raw.result),
+    result: parsedResult,
   }
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -181,21 +277,43 @@ function resolveSelectedExperimentId(task: ProjectTask | undefined, selectedExpI
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   tasks: [],
+  appMode: 'project',
   selectedTaskId: null,
   selectedExpId: null,
   activeStage: 'research',
+  agentProfile: 'research',
+  contractVersion: 1,
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
   startedAt: Date.now(),
   projectsLoaded: false,
+  contractsByTask: {},
+
+  setAppMode: (appMode) => {
+    if (appMode === 'normal') {
+      set({
+        appMode,
+        selectedTaskId: null,
+        selectedExpId: null,
+        activeStage: 'research',
+        startedAt: Date.now(),
+      })
+      return
+    }
+    set({ appMode })
+  },
 
   selectTask: (id) => {
     const task = get().tasks.find((t) => t.id === id)
     const activeExp = pickActiveExperimentId(task)
     set({
+      appMode: 'project',
       selectedTaskId: id,
       selectedExpId: activeExp,
       activeStage: 'research',
+      mode: normalizeRunMode(task?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(task?.contractVersion, get().contractVersion),
       startedAt: task?.startedAt
         ? new Date(task.startedAt).getTime()
         : get().startedAt,
@@ -204,25 +322,93 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   selectExperiment: (id) => set({ selectedExpId: id, activeStage: 'experiment' }),
   setActiveStage: (stage) => set({ activeStage: stage }),
-  setMode: (mode) => set({ mode }),
+  setAgentProfile: (agentProfile) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      agentProfile,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, agentProfile } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { agentProfile })
+  },
+  setMode: (mode) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      mode,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, runMode: mode } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { runMode: mode })
+  },
+  setContractVersion: (contractVersion) => {
+    const selectedId = get().selectedTaskId
+    set((state) => ({
+      contractVersion,
+      tasks: selectedId
+        ? state.tasks.map((task) => (
+            task.id === selectedId ? { ...task, contractVersion } : task
+          ))
+        : state.tasks,
+    }))
+    if (!selectedId) return
+    void updateProjectRuntimePreferences(selectedId, { contractVersion })
+  },
 
   renameTask: (id, label) => {
+    const nextLabel = label.trim()
+    if (!nextLabel) return
+    const previousLabel = get().tasks.find((task) => task.id === id)?.label ?? id
+
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? { ...t, label } : t)),
+      tasks: state.tasks.map((t) => (t.id === id ? { ...t, label: nextLabel } : t)),
     }))
+
+    void updateProjectDisplayName(id, nextLabel)
+      .then((savedLabel) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === id ? { ...task, label: savedLabel } : task
+          )),
+        }))
+      })
+      .catch(() => {
+        set((state) => ({
+          tasks: state.tasks.map((task) => (
+            task.id === id ? { ...task, label: previousLabel } : task
+          )),
+        }))
+      })
   },
 
   deleteTask: async (id, deleteFiles = false) => {
     if (deleteFiles) {
       await deleteProjectFiles(id)
     }
+    await clearAgentLogs(id)
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
+    const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
+    const nextSelectedTask = filtered.find((t) => t.id === nextSelectedTaskId)
     set({
       tasks: filtered,
+      appMode: nextSelectedTaskId ? 'project' : get().appMode,
       stats: computeStats(filtered),
-      selectedTaskId: selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId,
+      selectedTaskId: nextSelectedTaskId,
       selectedExpId: selectedTaskId === id ? null : get().selectedExpId,
+      contractsByTask: Object.fromEntries(
+        Object.entries(get().contractsByTask).filter(([taskId]) => taskId !== id),
+      ),
+      mode: normalizeRunMode(nextSelectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(nextSelectedTask?.contractVersion, get().contractVersion),
     })
   },
 
@@ -245,55 +431,102 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   nextProjectId: () => {
-    syncCounterFromTasks(get().tasks)
-    return `PRJ-${String(projectCounter + 1).padStart(4, '0')}`
+    const used = collectProjectNumbers(get().tasks.map((t) => t.id))
+    return `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
   },
 
-  createProject: (input) => {
-    syncCounterFromTasks(get().tasks)
-    const id = `PRJ-${String(++projectCounter).padStart(4, '0')}`
+  resetWorkspaceState: () => {
+    set({
+      tasks: [],
+      selectedTaskId: null,
+      selectedExpId: null,
+      activeStage: 'research',
+      stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
+      startedAt: Date.now(),
+      projectsLoaded: false,
+      contractsByTask: {},
+    })
+  },
+
+  createProject: async (input) => {
+    const current = get()
+    const mode = normalizeRunMode(current.mode, 'auto')
+    const agentProfile = normalizeAgentProfile(
+      input.agentProfile ?? current.agentProfile,
+      current.agentProfile,
+    )
+    const contractVersion = normalizeContractVersion(
+      input.contractVersion ?? current.contractVersion,
+      current.contractVersion,
+    )
+    const remotes = await fetchProjects()
+    const used = collectProjectNumbers([
+      ...(remotes ?? []).map((r) => r.id),
+      ...get().tasks.map((t) => t.id),
+    ])
+    const id = `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
     const task: ProjectTask = {
       id,
       label: id,
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
+      runMode: mode,
+      agentProfile,
+      contractVersion,
       experiments: [],
       knowledge: [],
       research: { references: [], notes: [] },
       result: {},
       startedAt: new Date().toISOString(),
     }
+    await clearAgentLogs(id)
     set((state) => ({
       tasks: [task, ...state.tasks],
+      appMode: 'project',
       selectedTaskId: id,
       selectedExpId: null,
+      mode,
+      agentProfile,
+      contractVersion,
       startedAt: Date.now(),
     }))
     return id
   },
 
-  loadProjects: async () => {
+  loadProjects: async (options) => {
     const remotes = await fetchProjects()
+    if (!remotes) return
 
-    const { tasks } = get()
-    const existingIds = new Set(tasks.map((t) => t.id))
+    const { appMode, tasks, selectedTaskId } = get()
+    const remoteProjectIds = new Set(
+      remotes
+        .filter((remote) => isProjectFolderId(remote.id))
+        .map((remote) => remote.id),
+    )
+    const keptTasks = tasks.filter((task) => (
+      isProjectFolderId(task.id) && (!options?.replaceMissing || remoteProjectIds.has(task.id))
+    ))
+    const removedTaskIds = options?.replaceMissing
+      ? tasks
+          .filter((task) => isProjectFolderId(task.id) && !remoteProjectIds.has(task.id))
+          .map((task) => task.id)
+      : []
+    const existingIds = new Set(keptTasks.map((t) => t.id))
     const newTasks: ProjectTask[] = []
 
-    const SKIP_DIRS = new Set(['skills', 'memory', 'sessions', 'media', 'cron', 'logs'])
-
     for (const r of remotes) {
-      if (SKIP_DIRS.has(r.id)) continue
-      const m = PRJ_RE.exec(r.id)
-      if (m) projectCounter = Math.max(projectCounter, parseInt(m[1], 10))
-
+      if (!isProjectFolderId(r.id)) continue
       if (existingIds.has(r.id)) continue
       newTasks.push({
         id: r.id,
-        label: r.id,
+        label: (r.display_name && r.display_name.trim()) || r.id,
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
+        runMode: normalizeRunMode(r.run_mode, 'auto'),
+        agentProfile: normalizeAgentProfile(r.agent_profile, 'research'),
+        contractVersion: normalizeContractVersion(r.contract_version, 1),
         experiments: [],
         knowledge: [],
         research: { references: [], notes: [] },
@@ -302,24 +535,96 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       })
     }
 
-    // Also sync counter from existing in-memory tasks
-    syncCounterFromTasks(tasks)
+    const refreshedTasks = keptTasks.map((task) => {
+      const remote = remotes.find((item) => item.id === task.id)
+      if (!remote) return task
+      const displayName = (remote.display_name && remote.display_name.trim()) || task.id
+      const status: ProjectTask['status'] = remote.status === 'completed' ? 'completed' : 'in_progress'
+      const runMode = normalizeRunMode(remote.run_mode, task.runMode ?? 'auto')
+      const agentProfile = normalizeAgentProfile(remote.agent_profile, task.agentProfile ?? 'research')
+      const contractVersion = normalizeContractVersion(remote.contract_version, task.contractVersion ?? 1)
+      const title = remote.title || task.title
+      const coreQuestion = remote.core_question ?? task.coreQuestion
+      const startedAt = remote.started_at || task.startedAt
+      if (
+        task.label === displayName
+        && task.status === status
+        && task.title === title
+        && task.coreQuestion === coreQuestion
+        && task.startedAt === startedAt
+        && task.runMode === runMode
+        && task.agentProfile === agentProfile
+        && task.contractVersion === contractVersion
+      ) {
+        return task
+      }
+      return {
+        ...task,
+        label: displayName,
+        status,
+        title,
+        coreQuestion,
+        startedAt,
+        runMode,
+        agentProfile,
+        contractVersion,
+      }
+    })
 
-    const merged = newTasks.length > 0 ? [...tasks, ...newTasks] : tasks
-    set({ tasks: merged, stats: computeStats(merged), projectsLoaded: true })
+    const merged = newTasks.length > 0 ? [...refreshedTasks, ...newTasks] : refreshedTasks
+    const mergedTaskIds = new Set(merged.map((task) => task.id))
+    const nextContractsByTask = Object.fromEntries(
+      Object.entries(get().contractsByTask).filter(([taskId]) => mergedTaskIds.has(taskId)),
+    )
+    const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
+    const nextSelectedTaskId = appMode === 'normal'
+      ? null
+      : hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
+    const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
+    set({
+      tasks: merged,
+      contractsByTask: nextContractsByTask,
+      stats: computeStats(merged),
+      projectsLoaded: true,
+      appMode,
+      selectedTaskId: nextSelectedTaskId,
+      selectedExpId: hasSelected ? get().selectedExpId : null,
+      mode: normalizeRunMode(selectedTask?.runMode, get().mode),
+      agentProfile: normalizeAgentProfile(selectedTask?.agentProfile, get().agentProfile),
+      contractVersion: normalizeContractVersion(selectedTask?.contractVersion, get().contractVersion),
+    })
 
-    for (const t of newTasks) {
-      get().refreshPlan(t.id)
-    }
+    const tasksToRefresh = options?.refreshAll ? merged : newTasks
+    await Promise.all(tasksToRefresh.map(async (task) => {
+      await get().refreshPlan(task.id)
+    }))
+    await Promise.all(removedTaskIds.map(async (projectId) => {
+      await clearAgentLogs(projectId)
+    }))
   },
 
   refreshPlan: async (projectId: string) => {
-    const plan = await fetchPlan(projectId) as TaskPlan | null
-    if (!plan) return
+    const [plan, contract] = await Promise.all([
+      fetchPlan(projectId) as Promise<TaskPlan | null>,
+      fetchPlanContract(projectId),
+    ])
+    if (!plan && !contract) return
 
-    const { tasks, selectedTaskId } = get()
+    const { tasks, selectedTaskId, contractsByTask } = get()
     const idx = tasks.findIndex((t) => t.id === projectId)
-    if (idx < 0) return
+    const nextContracts = contract ? { ...contractsByTask, [projectId]: contract } : contractsByTask
+    if (!plan) {
+      if (contract) {
+        set({ contractsByTask: nextContracts })
+      }
+      return
+    }
+    if (idx < 0) {
+      if (contract) {
+        set({ contractsByTask: nextContracts })
+      }
+      return
+    }
 
     const updated = [...tasks]
     updated[idx] = applyPlanToTask(tasks[idx], plan)
@@ -329,6 +634,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       tasks: updated,
       stats: computeStats(updated),
+      contractsByTask: nextContracts,
       ...(isSelected && {
         selectedExpId: resolveSelectedExperimentId(applied, get().selectedExpId),
         startedAt: applied.startedAt

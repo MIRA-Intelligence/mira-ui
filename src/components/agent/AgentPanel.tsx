@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
+import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useAutoContinue } from '@/hooks/useAutoContinue'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
@@ -10,21 +11,116 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 
-const AUTO_DELAY_MS = 4000
+// Build a project-description seed from a chat's transcript so promoting a
+// conversation into a research project carries the context forward.
+function buildPromotePrefill(logs: AgentLogEntry[]): string {
+  const lines: string[] = []
+  for (const entry of logs) {
+    if (entry.type !== 'response') continue
+    const who = entry.metadata?._user ? 'User' : 'Mira'
+    const text = entry.content.trim()
+    if (!text) continue
+    lines.push(`${who}: ${text}`)
+  }
+  return lines.join('\n\n').slice(0, 4000)
+}
+
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
 
-export function AgentPanel() {
-  const { connected, logsByProject, hydrateLogs, isStreaming } = useAgentStore()
-  const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
-  const lang = useSettingsStore((s) => s.language)
-  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
-  const { countdown, cancel: cancelAuto, isAuto } = useAutoContinue()
-
-  const logs = selectedTaskId ? (logsByProject[selectedTaskId] ?? []) : []
-
+function ChatComposer({
+  sessionId,
+  isStreaming,
+  lang,
+  onSend,
+  onStop,
+}: {
+  sessionId: string | null
+  isStreaming: boolean
+  lang: ReturnType<typeof useSettingsStore.getState>['language']
+  onSend: (text: string) => void
+  onStop: () => void
+}) {
   const [input, setInput] = useState('')
+
+  useEffect(() => {
+    setInput('')
+  }, [sessionId])
+
+  const sendCurrent = () => {
+    const text = input.trim()
+    if (!text || !sessionId) return
+    onSend(text)
+    setInput('')
+  }
+
+  return (
+    <div className="p-3 border-t border-[var(--color-border)] shrink-0">
+      <div className="flex gap-2">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.shiftKey) {
+              e.preventDefault()
+              sendCurrent()
+            }
+          }}
+          placeholder={sessionId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
+          disabled={!sessionId}
+          rows={1}
+          className="flex-1 h-9 overflow-y-auto bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
+        />
+        <button
+          onClick={sendCurrent}
+          disabled={!sessionId}
+          className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
+        >
+          {t('send', lang)}
+        </button>
+        <button
+          onClick={onStop}
+          disabled={!sessionId}
+          title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
+          className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
+        >
+          {t('stop', lang)}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function AgentPanel() {
+  const { connected, logsByProject, hydrateLogs, streamingBySession } = useAgentStore()
+  const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
+  const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
+  const lang = useSettingsStore((s) => s.language)
+  const appMode = useProjectStore((s) => s.appMode)
+  const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const mode = useProjectStore((s) => s.mode)
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const touchChat = useChatStore((s) => s.touchChat)
+  const openNewProject = useUiStore((s) => s.openNewProject)
+  const isChat = appMode === 'normal'
+  // The active surface is either a research project or a Quick Chat thread.
+  const sessionId = isChat ? activeChatId : selectedTaskId
+  // Auto / manual is a project-mode concept — in chat the toggle
+  // is hidden, so the AUTO badge in the header should be hidden too.
+  const isAuto = appMode === 'project' && mode === 'auto'
+
+  const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
+  // Streaming is tracked per session so a different session's activity never
+  // lights up this panel (e.g. a freshly created chat).
+  const isStreaming = Boolean(sessionId && streamingBySession[sessionId])
+  // Once tokens are actively streaming into the last entry, the growing bubble
+  // is the activity indicator — drop the separate "thinking" dots so they don't
+  // sit redundantly beneath the live reply.
+  const lastEntry = logs[logs.length - 1]
+  const isStreamingEntryLive = lastEntry?.type === 'response' && lastEntry.metadata?._streaming === true
+  const showThinking = isStreaming && !isStreamingEntryLive
+
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -44,6 +140,9 @@ export function AgentPanel() {
     }
 
     for (const entry of logs) {
+      if (entry.type === 'tool_call' && !showToolCallHistory) {
+        continue
+      }
       if (entry.type === 'progress' || entry.type === 'tool_call') {
         activityBuffer.push(entry)
         continue
@@ -53,92 +152,114 @@ export function AgentPanel() {
     }
     flushActivity()
     return items
-  }, [logs])
+  }, [logs, showToolCallHistory])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [logs.length])
+  }, [logs.length, showThinking])
 
   useEffect(() => {
     setCollapsedProgressGroups({})
-  }, [showProgressMessages, selectedTaskId])
+  }, [showProgressMessages, sessionId])
 
   useEffect(() => {
-    if (!selectedTaskId) return
-    if ((logsByProject[selectedTaskId] ?? []).length > 0) return
+    if (!sessionId) return
 
     let cancelled = false
     void (async () => {
-      const history = await fetchSessionHistory(selectedTaskId)
+      const history = await fetchSessionHistory(sessionId)
       if (cancelled || history.length === 0) return
-      hydrateLogs(selectedTaskId, history)
+      hydrateLogs(sessionId, history)
     })()
 
     return () => {
       cancelled = true
     }
-  }, [selectedTaskId, logsByProject, hydrateLogs])
+  }, [sessionId, hydrateLogs])
 
-  const handleSend = () => {
-    const text = input.trim()
-    if (!text || !selectedTaskId) return
+  useEffect(() => {
+    if (!connected || !sessionId) return
+    // Re-bind current session after websocket reconnects so progress streaming resumes.
+    wsClient.send({
+      type: 'bind',
+      content: '',
+      session_id: sessionId,
+      user_id: 'ui_user',
+    })
+  }, [connected, sessionId])
 
-    cancelAuto()
-
-    useAgentStore.getState().addLog(selectedTaskId, {
+  const handleSend = (text: string) => {
+    if (!sessionId) return
+    if (isChat) touchChat(sessionId, text)
+    useAgentStore.getState().addLog(sessionId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content: text,
       type: 'response',
       metadata: { _user: true },
     })
+    if (connected) {
+      useAgentStore.getState().markSessionPending(sessionId)
+    }
 
+    const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
       type: 'message',
       content: text,
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
+      loop_mode: appMode,
+      stream: useSettingsStore.getState().streamResponses,
+      ...(appMode === 'project' && {
+        mode: currentMode,
+        agent_profile: currentAgentProfile,
+      }),
     })
-    setInput('')
   }
 
   const handleResend = (content: string) => {
-    if (!selectedTaskId) return
-    cancelAuto()
+    if (!sessionId) return
 
-    useAgentStore.getState().addLog(selectedTaskId, {
+    useAgentStore.getState().addLog(sessionId, {
       id: `user-${Date.now()}`,
       timestamp: new Date().toISOString(),
       content,
       type: 'response',
       metadata: { _user: true },
     })
+    if (connected) {
+      useAgentStore.getState().markSessionPending(sessionId)
+    }
 
+    const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     wsClient.send({
       type: 'message',
       content,
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
+      loop_mode: appMode,
+      stream: useSettingsStore.getState().streamResponses,
+      ...(appMode === 'project' && {
+        mode: currentMode,
+        agent_profile: currentAgentProfile,
+      }),
     })
   }
 
   const handleStop = () => {
-    if (!selectedTaskId) return
+    if (!sessionId) return
+    useAgentStore.getState().markSessionIdle(sessionId)
 
-    cancelAuto()
     wsClient.send({
       type: 'message',
       content: '/stop',
-      session_id: selectedTaskId,
+      session_id: sessionId,
       user_id: 'ui_user',
+      loop_mode: appMode,
     })
   }
-
-  const countdownProgress = countdown !== null
-    ? Math.max(0, countdown / AUTO_DELAY_MS)
-    : null
 
   return (
     <div className="flex flex-col h-full">
@@ -159,9 +280,22 @@ export function AgentPanel() {
             AUTO
           </span>
         )}
-        {selectedTaskId && (
+        {sessionId && isChat && (
+          <button
+            onClick={() => openNewProject({ prefill: buildPromotePrefill(logs), fromChatId: sessionId })}
+            title={t('promoteToProjectHint', lang)}
+            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+            {t('promoteToProject', lang)}
+          </button>
+        )}
+        {sessionId && appMode === 'project' && (
           <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
-            {selectedTaskId}
+            {sessionId}
           </span>
         )}
       </div>
@@ -258,73 +392,38 @@ export function AgentPanel() {
           return <LogEntry key={entry.id} entry={entry} />
         })}
 
-        {logs.length === 0 && (
+        {showThinking && (
+          <div className="px-4 py-2" role="status" aria-live="polite">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+              <span className="flex items-center gap-1" aria-hidden="true">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:120ms]" />
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:240ms]" />
+              </span>
+              <span>{t('miraThinking', lang)}</span>
+            </div>
+          </div>
+        )}
+
+        {logs.length === 0 && !showThinking && (
           <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] gap-2">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-30">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             <span className="text-xs">
-              {selectedTaskId ? t('sendMessageToStart', lang) : t('selectProjectFirst', lang)}
+              {sessionId ? t(isChat ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang) : t('selectProjectFirst', lang)}
             </span>
           </div>
         )}
       </div>
 
-      {/* Auto-continue countdown */}
-      {countdownProgress !== null && (
-        <div className="px-3 shrink-0">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-success)]/8 border border-[var(--color-success)]/20">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-[var(--color-success)] font-medium">
-                  {t('autoContinuingIn', lang, { seconds: Math.ceil((countdown ?? 0) / 1000) })}
-                </span>
-                <button
-                  onClick={cancelAuto}
-                  className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors font-medium"
-                >
-                  {t('cancel', lang)}
-                </button>
-              </div>
-              <div className="h-1 bg-[var(--color-bg-tertiary)] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-[var(--color-success)] rounded-full transition-all duration-75 ease-linear"
-                  style={{ width: `${(1 - countdownProgress) * 100}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Input */}
-      <div className="p-3 border-t border-[var(--color-border)] shrink-0">
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder={selectedTaskId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
-            disabled={!selectedTaskId}
-            className="flex-1 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50"
-          />
-          <button
-            onClick={handleSend}
-            disabled={!selectedTaskId}
-            className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
-          >
-            {t('send', lang)}
-          </button>
-          <button
-            onClick={handleStop}
-            disabled={!selectedTaskId}
-            title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
-            className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
-          >
-            {t('stop', lang)}
-          </button>
-        </div>
-      </div>
+      <ChatComposer
+        sessionId={sessionId}
+        isStreaming={isStreaming}
+        lang={lang}
+        onSend={handleSend}
+        onStop={handleStop}
+      />
     </div>
   )
 }

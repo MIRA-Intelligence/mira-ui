@@ -9,13 +9,39 @@ permissions:
   contents: write
 
 jobs:
-  build-desktop:
+  verify-compatibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate compatibility.json schema
+        run: node scripts/validate-compatibility.mjs --file compatibility.json
+
+      - name: Tag must match compatibility.json#ui
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          node scripts/validate-compatibility.mjs \
+            --file compatibility.json \
+            --require-ui "$TAG"
+
+  build-standalone:
+    needs: verify-compatibility
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
 
     steps:
       - name: Checkout
@@ -30,35 +56,233 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build macOS artifacts
+      - name: Align package version with release tag
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs')
+
+          const tag = process.env.RELEASE_TAG || ''
+          const match = /^v(\d+\.\d+\.\d+)(?:rc(\d+))?$/.exec(tag)
+          if (!match) {
+            console.error(`Unsupported tag format: "${tag}". Expected vX.Y.Z or vX.Y.ZrcN.`)
+            process.exit(1)
+          }
+
+          const version = match[2] ? `${match[1]}-rc.${match[2]}` : match[1]
+          const pkgPath = 'package.json'
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `DESKTOP_VERSION=${version}\n`)
+          }
+
+          console.log(`Set ${pkgPath} version to ${version} from tag ${tag}`)
+          EOF
+
+      - name: Show resolved standalone version
+        run: echo "Standalone version = ${{ env.DESKTOP_VERSION }}"
+
+      - name: Build macOS standalone artifacts
         if: matrix.os == 'macos-latest'
         run: npm run dist:mac
 
-      - name: Build Windows artifacts
+      - name: Rename macOS standalone update manifests
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          if [ -f release/latest-mac.yml ]; then
+            mv release/latest-mac.yml release/latest-mac-standalone.yml
+          fi
+          if [ -f release/app-update.yml ]; then
+            mv release/app-update.yml release/app-update-standalone.yml
+          fi
+
+      - name: Build Windows standalone artifacts
         if: matrix.os == 'windows-latest'
         run: npm run dist:win
 
-      - name: Upload desktop artifacts
+      - name: Package Windows standalone setup as zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem -Path release -Filter "MIRA-standalone-*-win-*-setup.exe" | Select-Object -First 1
+          if (-not $setupExe) {
+            Write-Error "Standalone setup executable not found in release/"
+            exit 1
+          }
+          $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
+          Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
+
+      - name: Upload macOS standalone release assets
+        if: matrix.os == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: medpilotui-${{ matrix.os }}
-          path: release/**
+          name: miraui-release-standalone-macos
+          path: |
+            release/MIRA-standalone-*-mac-*.dmg
+            release/MIRA-standalone-*-mac-*.dmg.blockmap
+            release/MIRA-standalone-*-mac-*.zip
+            release/MIRA-standalone-*-mac-*.zip.blockmap
+            release/latest-mac-standalone.yml
+            release/app-update-standalone.yml
 
-  publish-release:
-    needs: build-desktop
-    runs-on: ubuntu-latest
+      - name: Upload Windows standalone release assets
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-release-standalone-windows
+          path: |
+            release/MIRA-standalone-*-win-*-setup.zip
+
+  build-bundle:
+    needs: verify-compatibility
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      MIRA_ENGINE_REPO: MIRA-Intelligence/mira
 
     steps:
-      - name: Download packaged artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Align bundle version with release tag
+        shell: bash
+        run: |
+          node <<'EOF'
+          const fs = require('fs')
+
+          const tag = process.env.RELEASE_TAG || ''
+          const match = /^v(\d+\.\d+\.\d+)(?:rc(\d+))?$/.exec(tag)
+          if (!match) {
+            console.error(`Unsupported tag format: "${tag}". Expected vX.Y.Z or vX.Y.ZrcN.`)
+            process.exit(1)
+          }
+
+          const version = match[2] ? `${match[1]}-rc.${match[2]}` : match[1]
+          const pkgPath = 'package.json'
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'))
+          pkg.version = version
+          fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+
+          if (process.env.GITHUB_ENV) {
+            fs.appendFileSync(process.env.GITHUB_ENV, `DESKTOP_VERSION=${version}\n`)
+          }
+
+          console.log(`Set ${pkgPath} version to ${version} from tag ${tag}`)
+          EOF
+
+      - name: Show resolved bundle version
+        run: echo "Bundle version = ${{ env.DESKTOP_VERSION }} using latest published mira engine release"
+
+      - name: Build macOS bundle artifacts
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
+        run: npm run dist:bundle:mac
+
+      - name: Rename macOS bundle update manifests
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          if [ -f release-bundle/latest-mac.yml ]; then
+            mv release-bundle/latest-mac.yml release-bundle/latest-mac-bundle.yml
+          fi
+          if [ -f release-bundle/app-update.yml ]; then
+            mv release-bundle/app-update.yml release-bundle/app-update-bundle.yml
+          fi
+
+      - name: Build Windows bundle artifacts
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRA_FEISHU_WEBHOOK_URL: ${{ secrets.MIRA_FEISHU_WEBHOOK_URL }}
+          MIRA_FEISHU_WEBHOOK_SECRET: ${{ secrets.MIRA_FEISHU_WEBHOOK_SECRET }}
+          MIRA_FEISHU_GROUP_INVITE_URL: ${{ secrets.MIRA_FEISHU_GROUP_INVITE_URL }}
+          MIRA_FEISHU_MENTION_OPEN_ID: ${{ secrets.MIRA_FEISHU_MENTION_OPEN_ID }}
+          MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
+        run: npm run dist:bundle:win
+
+      - name: Package Windows bundle setup as zip
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem -Path release-bundle -Filter "MIRA-bundle-*-win-*-setup.exe" | Select-Object -First 1
+          if (-not $setupExe) {
+            Write-Error "Bundle setup executable not found in release-bundle/"
+            exit 1
+          }
+          $setupZip = [System.IO.Path]::ChangeExtension($setupExe.FullName, ".zip")
+          Compress-Archive -Path $setupExe.FullName -DestinationPath $setupZip -Force
+
+      - name: Upload macOS bundle release assets
+        if: matrix.os == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-release-bundle-macos
+          path: |
+            release-bundle/MIRA-bundle-*-mac-*.dmg
+            release-bundle/MIRA-bundle-*-mac-*.dmg.blockmap
+            release-bundle/MIRA-bundle-*-mac-*.zip
+            release-bundle/MIRA-bundle-*-mac-*.zip.blockmap
+            release-bundle/latest-mac-bundle.yml
+            release-bundle/app-update-bundle.yml
+
+      - name: Upload Windows bundle release assets
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: miraui-release-bundle-windows
+          path: |
+            release-bundle/MIRA-bundle-*-win-*-setup.zip
+
+  publish-release:
+    needs:
+      - build-standalone
+      - build-bundle
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+
+    steps:
+      - name: Download packaged desktop artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: medpilotui-*
+          pattern: miraui-release-*
           path: release-assets
           merge-multiple: true
 
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: MIRA ${{ env.RELEASE_TAG }}
           generate_release_notes: true
-          files: release-assets/**
+          files: |
+            release-assets/*.dmg
+            release-assets/*.dmg.blockmap
+            release-assets/*.zip
+            release-assets/*.zip.blockmap
+            release-assets/latest-mac-*.yml
+            release-assets/app-update-*.yml
