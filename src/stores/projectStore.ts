@@ -296,7 +296,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedTaskId: null,
         selectedExpId: null,
         activeStage: 'research',
-        startedAt: Date.now(),
       })
       return
     }

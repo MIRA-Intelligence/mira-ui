@@ -119,6 +119,17 @@ describe('projectStore runtime preferences', () => {
     expect(task?.status).toBe('completed')
   })
 
+  it('keeps the top-bar timer stable when switching into chats', () => {
+    const projectStartedAt = new Date('2026-05-06T00:00:00.000Z').getTime()
+    useProjectStore.setState({ startedAt: projectStartedAt })
+
+    useProjectStore.getState().setAppMode('normal')
+
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useProjectStore.getState().selectedTaskId).toBeNull()
+    expect(useProjectStore.getState().startedAt).toBe(projectStartedAt)
+  })
+
   it('keeps normal mode unbound from projects when project list syncs', async () => {
     useProjectStore.getState().setAppMode('normal')
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
