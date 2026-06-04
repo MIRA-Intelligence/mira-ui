@@ -7,11 +7,12 @@ import { FeedbackButton } from '@/components/feedback/FeedbackButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
-  const { appMode, tasks, selectedTaskId, startedAt } = useProjectStore()
+  const { appMode, tasks, selectedTaskId } = useProjectStore()
   const activeChatId = useChatStore((s) => s.activeChatId)
   const chats = useChatStore((s) => s.chats)
   const lang = useSettingsStore((s) => s.language)
-  const { formatted } = useTimer(startedAt)
+  const engineStartedAt = useSettingsStore((s) => s.engineStartedAt)
+  const { formatted } = useTimer(engineStartedAt)
   const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
   const dragStyle = isMacDesktop ? ({ WebkitAppRegion: 'drag' } as CSSProperties) : undefined
 
@@ -35,7 +36,10 @@ export function TopBar() {
 
       <div className="flex items-center gap-3 min-w-[140px] justify-end">
         <FeedbackButton />
-        <div className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums">
+        <div
+          className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums"
+          title={t('engineUptimeTooltip', lang)}
+        >
           T+ {formatted}
         </div>
       </div>

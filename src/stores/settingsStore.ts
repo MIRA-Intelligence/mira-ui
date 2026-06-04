@@ -69,6 +69,10 @@ interface SettingsState {
   engineStatus: EngineStatus
   engineMessage: string | null
   engineVersion: string | null
+  // Wall-clock timestamp (ms) the current engine process booted, derived from
+  // the engine's reported uptime. null when no engine is reachable or the
+  // engine does not report uptime. Single source of truth for the top-bar timer.
+  engineStartedAt: number | null
   connectionMessage: string | null
   localEnginePhase: LocalEnginePhase
   localEngineOperation: LocalEngineOperation
@@ -92,6 +96,7 @@ interface SettingsState {
     status: EngineStatus
     message: string | null
     version?: string | null
+    uptimeSeconds?: number | null
   }) => void
   setConnectionMessage: (message: string | null) => void
   setLocalEngineBootstrap: (payload: {
@@ -261,6 +266,24 @@ function latestProfileForMode(
   return latest
 }
 
+// Re-anchoring the engine boot timestamp on every probe would make the
+// top-bar timer wobble by a second or two due to clock jitter. Only re-anchor
+// when we have no anchor yet or when the reported uptime implies a genuinely
+// different engine run (e.g. the engine restarted).
+const ENGINE_UPTIME_DRIFT_TOLERANCE_MS = 5000
+
+function resolveEngineStartedAt(
+  current: number | null,
+  status: EngineStatus,
+  uptimeSeconds: number | null | undefined,
+): number | null {
+  if (status === 'unreachable') return null
+  if (typeof uptimeSeconds !== 'number' || !Number.isFinite(uptimeSeconds)) return current
+  const anchor = Date.now() - uptimeSeconds * 1000
+  if (current === null) return anchor
+  return Math.abs(anchor - current) > ENGINE_UPTIME_DRIFT_TOLERANCE_MS ? anchor : current
+}
+
 function loadPersisted(): Partial<SettingsState> {
   try {
     if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') {
@@ -401,6 +424,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   engineStatus: 'unknown',
   engineMessage: null,
   engineVersion: null,
+  engineStartedAt: null,
   connectionMessage: null,
   localEnginePhase: 'idle',
   localEngineOperation: null,
@@ -529,21 +553,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
   setStreamResponses: (v) => { set({ streamResponses: v }); persist(get()) },
   setReceivePrereleases: (v) => { set({ receivePrereleases: v }); persist(get()) },
-  setEngineBootstrap: ({ status, message, version }) => {
+  setEngineBootstrap: ({ status, message, version, uptimeSeconds }) => {
     const nextVersion = version ?? null
     set((state) => {
+      const nextStartedAt = resolveEngineStartedAt(state.engineStartedAt, status, uptimeSeconds)
       if (
         state.engineStatus === status &&
         state.engineMessage === message &&
-        state.engineVersion === nextVersion
+        state.engineVersion === nextVersion &&
+        state.engineStartedAt === nextStartedAt
       ) {
         return state
       }
-      const nextState = { ...state, engineStatus: status, engineMessage: message, engineVersion: nextVersion }
+      const nextState = {
+        ...state,
+        engineStatus: status,
+        engineMessage: message,
+        engineVersion: nextVersion,
+        engineStartedAt: nextStartedAt,
+      }
       return {
         engineStatus: status,
         engineMessage: message,
         engineVersion: nextVersion,
+        engineStartedAt: nextStartedAt,
         engineProfiles: profilesWithCurrent(nextState),
       }
     })

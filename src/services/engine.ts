@@ -9,6 +9,9 @@ export interface EngineProbeResult {
   status: EngineProbeStatus
   message: string
   version: string | null
+  // Seconds the engine process has been running, as reported by /version.
+  // null when unreachable or when the engine predates the uptime field.
+  uptimeSeconds: number | null
 }
 
 // Sourced from the repo-root compatibility.json (single source of truth shared
@@ -21,6 +24,11 @@ const COMPATIBILITY = {
 interface VersionPayload {
   agent_version?: string
   api_contract?: string
+  uptime_seconds?: number
+}
+
+function parseUptimeSeconds(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
 function currentLanguage() {
@@ -96,6 +104,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
         status: 'unreachable',
         message: t('engineHealthCheckFailed', lang, { status: healthResp.status }),
         version: null,
+        uptimeSeconds: null,
       }
     }
 
@@ -105,18 +114,21 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
         status: 'unreachable',
         message: t('engineVersionCheckFailed', lang, { status: versionResp.status }),
         version: null,
+        uptimeSeconds: null,
       }
     }
 
     const payload = (await versionResp.json()) as VersionPayload
     const version = payload.agent_version ?? null
     const contract = payload.api_contract ?? ''
+    const uptimeSeconds = parseUptimeSeconds(payload.uptime_seconds)
 
     if (!version) {
       return {
         status: 'incompatible',
         message: t('engineMissingVersion', lang),
         version: null,
+        uptimeSeconds,
       }
     }
 
@@ -128,6 +140,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
           actual: contract || 'unknown',
         }),
         version,
+        uptimeSeconds,
       }
     }
 
@@ -139,6 +152,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
           minimum: COMPATIBILITY.minAgentForUi,
         }),
         version,
+        uptimeSeconds,
       }
     }
 
@@ -150,6 +164,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
           ? t('engineRuntimeConfigUnavailable', lang)
           : t('engineConfigCheckFailed', lang, { status: configResp.status }),
         version,
+        uptimeSeconds,
       }
     }
 
@@ -160,15 +175,17 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
         status: 'setup_required',
         message: setupMessage,
         version,
+        uptimeSeconds,
       }
     }
 
-    return { status: 'compatible', message: t('engineCompatible', lang), version }
+    return { status: 'compatible', message: t('engineCompatible', lang), version, uptimeSeconds }
   } catch {
     return {
       status: 'unreachable',
       message: t('engineUnreachable', lang),
       version: null,
+      uptimeSeconds: null,
     }
   }
 }

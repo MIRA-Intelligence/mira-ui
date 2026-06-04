@@ -84,6 +84,7 @@ describe('SettingsModal remote runtime config', () => {
       status: 'compatible',
       message: 'Engine is compatible.',
       version: '0.3.0',
+      uptimeSeconds: null,
     })
   })
 
