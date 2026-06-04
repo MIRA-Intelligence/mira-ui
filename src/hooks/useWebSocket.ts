@@ -128,6 +128,7 @@ export function useWebSocket() {
           status: probe.status,
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
+          uptimeSeconds: probe.uptimeSeconds,
         })
 
         if (probe.status !== 'compatible') {

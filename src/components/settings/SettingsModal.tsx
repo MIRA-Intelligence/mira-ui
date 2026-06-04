@@ -450,6 +450,7 @@ export function SettingsModal() {
           status: probe.status,
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
+          uptimeSeconds: probe.uptimeSeconds,
         })
         // The project list only changes when the workspace root moves; skip the
         // expensive per-project plan/contract refetch otherwise.
@@ -492,6 +493,7 @@ export function SettingsModal() {
           status: probe.status,
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
+          uptimeSeconds: probe.uptimeSeconds,
         })
         if (remoteWorkspaceChanged) {
           await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
@@ -529,6 +531,7 @@ export function SettingsModal() {
         status: probe.status,
         message: probe.status === 'compatible' ? null : probe.message,
         version: probe.version,
+        uptimeSeconds: probe.uptimeSeconds,
       })
       setFeedback(probe.status === 'compatible' ? 'Local engine restarted and verified.' : probe.message)
       setFeedbackError(probe.status !== 'compatible')
@@ -561,6 +564,7 @@ export function SettingsModal() {
         status: probe.status,
         message: probe.status === 'compatible' ? null : probe.message,
         version: probe.version,
+        uptimeSeconds: probe.uptimeSeconds,
       })
       setFeedback(probe.status === 'compatible' ? 'Local engine service repaired and verified.' : probe.message)
       setFeedbackError(probe.status !== 'compatible')
@@ -614,6 +618,7 @@ export function SettingsModal() {
         status: probe.status,
         message: probe.status === 'compatible' ? null : probe.message,
         version: probe.version,
+        uptimeSeconds: probe.uptimeSeconds,
       })
       if (probe.status !== 'compatible') {
         throw new Error(probe.message)

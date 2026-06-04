@@ -101,6 +101,70 @@ describe('settingsStore', () => {
     expect(state.engineMessage).toBe('Local engine is ready.')
   })
 
+  it('anchors engine start time from the reported uptime and keeps it stable across probes', () => {
+    const before = Date.now()
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'compatible',
+      message: null,
+      version: '0.3.0',
+      uptimeSeconds: 120,
+    })
+
+    const anchored = useSettingsStore.getState().engineStartedAt
+    expect(anchored).not.toBeNull()
+    // ~120s ago, allowing for execution time.
+    expect(anchored!).toBeLessThanOrEqual(before - 120_000 + 1000)
+    expect(anchored!).toBeGreaterThanOrEqual(before - 120_000 - 1000)
+
+    // A subsequent probe with a consistent (slightly later) uptime must not
+    // re-anchor, so the top-bar timer stays stable.
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'compatible',
+      message: null,
+      version: '0.3.0',
+      uptimeSeconds: 121,
+    })
+    expect(useSettingsStore.getState().engineStartedAt).toBe(anchored)
+  })
+
+  it('clears engine start time when the engine becomes unreachable', () => {
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'compatible',
+      message: null,
+      version: '0.3.0',
+      uptimeSeconds: 30,
+    })
+    expect(useSettingsStore.getState().engineStartedAt).not.toBeNull()
+
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'unreachable',
+      message: 'gone',
+      version: null,
+    })
+    expect(useSettingsStore.getState().engineStartedAt).toBeNull()
+  })
+
+  it('re-anchors engine start time after a restart resets uptime', () => {
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'compatible',
+      message: null,
+      version: '0.3.0',
+      uptimeSeconds: 3600,
+    })
+    const firstAnchor = useSettingsStore.getState().engineStartedAt
+
+    useSettingsStore.getState().setEngineBootstrap({
+      status: 'compatible',
+      message: null,
+      version: '0.3.0',
+      uptimeSeconds: 2,
+    })
+    const secondAnchor = useSettingsStore.getState().engineStartedAt
+
+    expect(secondAnchor).not.toBe(firstAnchor)
+    expect(secondAnchor!).toBeGreaterThan(firstAnchor!)
+  })
+
   it('keeps workspace paths scoped to each engine profile', () => {
     useSettingsStore.getState().setDeploymentMode('localBundle')
     useSettingsStore.getState().setRuntimeConfig(runtimePayload('/local/workspace', '/local/config.json'))

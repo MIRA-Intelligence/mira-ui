@@ -31,7 +31,6 @@ interface ProjectState {
   contractVersion: ContractVersion
   mode: 'manual' | 'auto'
   stats: Stats
-  startedAt: number
   projectsLoaded: boolean
   contractsByTask: Record<string, TaskPlanContract>
 
@@ -285,7 +284,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   contractVersion: 1,
   mode: 'auto',
   stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
-  startedAt: Date.now(),
   projectsLoaded: false,
   contractsByTask: {},
 
@@ -296,7 +294,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedTaskId: null,
         selectedExpId: null,
         activeStage: 'research',
-        startedAt: Date.now(),
       })
       return
     }
@@ -314,9 +311,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       mode: normalizeRunMode(task?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
       contractVersion: normalizeContractVersion(task?.contractVersion, get().contractVersion),
-      startedAt: task?.startedAt
-        ? new Date(task.startedAt).getTime()
-        : get().startedAt,
     })
   },
 
@@ -442,7 +436,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedExpId: null,
       activeStage: 'research',
       stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
-      startedAt: Date.now(),
       projectsLoaded: false,
       contractsByTask: {},
     })
@@ -489,7 +482,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       mode,
       agentProfile,
       contractVersion,
-      startedAt: Date.now(),
     }))
     return id
   },
@@ -637,9 +629,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       contractsByTask: nextContracts,
       ...(isSelected && {
         selectedExpId: resolveSelectedExperimentId(applied, get().selectedExpId),
-        startedAt: applied.startedAt
-          ? new Date(applied.startedAt).getTime()
-          : get().startedAt,
       }),
     })
   },

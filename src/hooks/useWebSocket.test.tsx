@@ -82,6 +82,7 @@ describe('useWebSocket', () => {
       status: 'setup_required',
       message: 'Local engine is running, but model access is still unconfigured.',
       version: '0.2.0',
+      uptimeSeconds: null,
     })
 
     render(<HookHarness />)
