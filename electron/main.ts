@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import type { OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
@@ -50,6 +51,17 @@ app.whenReady().then(() => {
   ipcMain.handle('engine:repair-service', async () => engineManager.repairLocalEngineService())
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
     return engineManager.upgrade(packageName || 'mira-engine')
+  })
+  ipcMain.handle('dialog:select-data-path', async (_event, kind: 'file' | 'directory') => {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const options: OpenDialogOptions = {
+      properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
   })
   registerUpdateCheck(() => mainWindow)
   void engineManager.bootstrapLocalEngine().catch(() => {})
