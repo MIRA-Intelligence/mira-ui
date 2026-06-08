@@ -122,7 +122,7 @@ describe('NewProjectModal', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: /Research & Literature/ }))
 
     expect(screen.getByRole('checkbox', { name: 'PubMed' })).toBeDisabled()
-    expect(screen.getByText('External literature search will be skipped. The agent will move directly to planning and experiments.')).toBeInTheDocument()
+    expect(screen.getByText('External literature search will be skipped. The agent will move directly to interactive planning.')).toBeInTheDocument()
   })
 
   it('shows path browsing controls in local bundle mode', () => {

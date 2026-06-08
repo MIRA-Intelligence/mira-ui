@@ -4,6 +4,7 @@ import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
 import { ResearchView } from '../stages/ResearchView'
 import { ResultView } from '../stages/ResultView'
+import { PlanView } from '../stages/PlanView'
 import { t } from '@/i18n'
 
 export function TaskDetail() {
@@ -21,6 +22,10 @@ export function TaskDetail() {
 
   if (activeStage === 'research') {
     return <ResearchView data={task.research} coreQuestion={task.coreQuestion} />
+  }
+
+  if (activeStage === 'plan') {
+    return <PlanView task={task} />
   }
 
   if (activeStage === 'result') {

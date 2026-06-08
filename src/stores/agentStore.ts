@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
-import { isProjectSessionId } from '@/lib/sessions'
+import { isChatSessionId, isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface SessionUsage {
@@ -49,6 +49,26 @@ function readUsageFromMetadata(meta: Record<string, unknown> | undefined):
   return { tokensUsed, maxTokens }
 }
 
+function shouldEnterPlanFromMetadata(meta: Record<string, unknown> | undefined): boolean {
+  const phase = meta?._plan_phase
+  return phase === 'questions' || phase === 'draft'
+}
+
+function readMetadataString(meta: Record<string, unknown> | undefined, key: string): string | null {
+  const value = meta?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function resolveProjectRefreshId(msg: WsResponse, sessionId: string): string | null {
+  const metadataProjectId = readMetadataString(msg.metadata, 'project_id')
+  if (metadataProjectId) return metadataProjectId
+  if (isProjectSessionId(sessionId)) return sessionId
+  if (sessionId === '_unknown' || isChatSessionId(sessionId)) return null
+  if (readMetadataString(msg.metadata, 'project_dir')) return sessionId
+  if (shouldEnterPlanFromMetadata(msg.metadata)) return sessionId
+  return null
+}
+
 let logIdCounter = 0
 
 const PLAN_POLL_INTERVAL = 3000
@@ -62,37 +82,41 @@ function logDedupKey(entry: LogEntry): string {
   return `${entry.timestamp}|${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
 }
 
-function ensurePlanPolling(sessionId: string) {
-  // Plans only exist for research projects; chat threads have no task_plan.
-  if (!isProjectSessionId(sessionId)) return
-  if (_pollTimers[sessionId]) return
-  _pollTimers[sessionId] = setInterval(() => {
-    useProjectStore.getState().refreshPlan(sessionId)
+function ensurePlanPolling(projectId: string | null) {
+  if (!projectId) return
+  if (_pollTimers[projectId]) return
+  _pollTimers[projectId] = setInterval(() => {
+    useProjectStore.getState().refreshPlan(projectId)
   }, PLAN_POLL_INTERVAL)
 }
 
-function stopPlanPolling(sessionId: string) {
-  const timer = _pollTimers[sessionId]
+function stopPlanPolling(projectId: string | null) {
+  if (!projectId) return
+  const timer = _pollTimers[projectId]
   if (timer) {
     clearInterval(timer)
-    delete _pollTimers[sessionId]
+    delete _pollTimers[projectId]
   }
 }
 
-function clearResponseRefreshTimers(sessionId: string) {
-  const timers = _responseRefreshTimers[sessionId]
+function clearResponseRefreshTimers(projectId: string | null) {
+  if (!projectId) return
+  const timers = _responseRefreshTimers[projectId]
   if (!timers || timers.length === 0) return
   for (const timer of timers) {
     clearTimeout(timer)
   }
-  delete _responseRefreshTimers[sessionId]
+  delete _responseRefreshTimers[projectId]
 }
 
-function scheduleResponseRefreshes(sessionId: string) {
-  if (!isProjectSessionId(sessionId)) return
-  clearResponseRefreshTimers(sessionId)
-  _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
-    void useProjectStore.getState().refreshPlan(sessionId)
+function scheduleResponseRefreshes(projectId: string | null, enterPlan: boolean) {
+  if (!projectId) return
+  clearResponseRefreshTimers(projectId)
+  _responseRefreshTimers[projectId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
+    void useProjectStore.getState().refreshPlan(
+      projectId,
+      enterPlan ? { enterPlan: true } : undefined,
+    )
   }, delayMs))
 }
 
@@ -226,6 +250,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     const usageUpdate = readUsageFromMetadata(msg.metadata)
+    const enterPlan = shouldEnterPlanFromMetadata(msg.metadata)
+    const projectRefreshId = resolveProjectRefreshId(msg, sessionId)
 
     set((state) => {
       const streaming = msg.type === 'progress' || msg.type === 'tool_call'
@@ -271,13 +297,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     })
 
     if (msg.type === 'progress' || msg.type === 'tool_call') {
-      clearResponseRefreshTimers(sessionId)
-      ensurePlanPolling(sessionId)
+      clearResponseRefreshTimers(projectRefreshId)
+      ensurePlanPolling(projectRefreshId)
+      if (enterPlan && projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(projectRefreshId, { enterPlan: true })
+      }
     } else if (msg.type === 'response') {
-      stopPlanPolling(sessionId)
-      if (isProjectSessionId(sessionId)) {
-        void useProjectStore.getState().refreshPlan(sessionId)
-        scheduleResponseRefreshes(sessionId)
+      stopPlanPolling(projectRefreshId)
+      if (projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(
+          projectRefreshId,
+          enterPlan ? { enterPlan: true } : undefined,
+        )
+        scheduleResponseRefreshes(projectRefreshId, enterPlan)
       }
     }
   },

@@ -311,6 +311,70 @@ describe('projectStore runtime preferences', () => {
     expect(useProjectStore.getState().contractsByTask).toEqual({})
   })
 
+  it('keeps an experiment view on background plan refreshes', async () => {
+    useProjectStore.setState({ activeStage: 'experiment' })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
+            plan: {
+              phase: 'questions',
+              questions: [{ id: 'q1', prompt: 'Choose next goal', kind: 'single', options: ['A'] }],
+            },
+            result: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001')
+
+    const state = useProjectStore.getState()
+    expect(state.tasks[0]?.plan?.phase).toBe('questions')
+    expect(state.activeStage).toBe('experiment')
+  })
+
+  it('enters plan view when a refresh is triggered by an explicit plan event', async () => {
+    useProjectStore.setState({ activeStage: 'experiment' })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/plan/contract?session_id=PRJ-0001')) {
+        return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/plan?session_id=PRJ-0001')) {
+        return new Response(
+          JSON.stringify({
+            title: 'Demo',
+            status: 'in_progress',
+            experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
+            plan: {
+              phase: 'questions',
+              questions: [{ id: 'q1', prompt: 'Choose next goal', kind: 'single', options: ['A'] }],
+            },
+            result: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await useProjectStore.getState().refreshPlan('PRJ-0001', { enterPlan: true })
+
+    const state = useProjectStore.getState()
+    expect(state.tasks[0]?.plan?.questions[0]?.prompt).toBe('Choose next goal')
+    expect(state.activeStage).toBe('plan')
+  })
+
   it('marks task completed when refreshed plan has phase3 result output', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)

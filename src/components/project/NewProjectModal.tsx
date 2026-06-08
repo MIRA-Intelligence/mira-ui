@@ -173,8 +173,8 @@ function buildAgentMessage(
   }
 
   const modeInstruction = runMode === 'manual'
-    ? 'After completing the research survey, STOP and report your findings.'
-    : 'After completing the research survey, continue automatically into the next pending experiment until stop conditions are met.'
+    ? 'After completing the research survey, enter interactive Plan mode: call set_plan with phase="questions", then STOP and wait for the user before creating or running experiments.'
+    : 'After completing the research survey, enter interactive Plan mode: call set_plan with phase="questions", then STOP and wait for the user; after the plan is approved, continue automatically through the approved experiments until stop conditions are met.'
 
   const literatureReview = input.literatureReview ?? {
     enabled: true,
@@ -214,7 +214,7 @@ function buildAgentMessage(
     lines.push(
       'Enabled: no',
       'Skip external literature search. Keep task_plan.json research.references empty unless user-provided references or uploaded PDFs/ZIPs are used.',
-      'Move directly to project planning and experiments after creating task_plan.json.',
+      'Move directly to interactive project planning after creating task_plan.json.',
     )
   }
 
@@ -222,7 +222,7 @@ function buildAgentMessage(
     '',
     literatureReview.enabled
       ? `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`
-      : `Please begin by creating a task_plan.json. ${referenceInstruction} Do not perform a Research & Literature survey unless explicitly requested later. ${runMode === 'manual' ? 'After planning the first actionable experiment, STOP and report the plan.' : 'Continue automatically into the first pending experiment until stop conditions are met.'} ${languageInstruction}`,
+      : `Please begin by creating a task_plan.json. ${referenceInstruction} Do not perform a Research & Literature survey unless explicitly requested later. Enter interactive Plan mode immediately: call set_plan with phase="questions", then STOP and wait for the user before creating or running experiments. ${runMode === 'auto' ? 'After the plan is approved, continue automatically through the approved experiments until stop conditions are met.' : 'After the plan is approved, follow manual mode and wait for user confirmation before executing experiments.'} ${languageInstruction}`,
   )
 
   return lines.join('\n')
