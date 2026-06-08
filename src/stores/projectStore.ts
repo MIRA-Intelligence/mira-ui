@@ -248,6 +248,7 @@ function parsePlan(raw: any): PlanData | undefined {
     answers,
     draft,
     feedback: typeof raw.feedback === 'string' ? raw.feedback : undefined,
+    updatedAt: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
   }
 }
 

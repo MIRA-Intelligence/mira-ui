@@ -137,6 +137,7 @@ export interface PlanData {
   answers: Record<string, string | string[]>
   draft?: PlanDraft
   feedback?: string
+  updatedAt?: string
 }
 
 /* ── Final result / deliverable ────────────────── */
@@ -214,6 +215,7 @@ export interface TaskPlan {
   }
   plan?: {
     phase?: PlanPhase
+    updated_at?: string
     questions?: Array<{
       id: string; prompt: string; kind: PlanQuestionKind
       options?: string[]; rationale?: string

@@ -326,6 +326,7 @@ describe('projectStore runtime preferences', () => {
             experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
             plan: {
               phase: 'questions',
+              updated_at: '2026-06-08T12:00:00Z',
               questions: [{ id: 'q1', prompt: 'Choose next goal', kind: 'single', options: ['A'] }],
             },
             result: {},
@@ -358,6 +359,7 @@ describe('projectStore runtime preferences', () => {
             experiments: [{ id: 'Exp001', title: 'exp', status: 'pending' }],
             plan: {
               phase: 'questions',
+              updated_at: '2026-06-08T12:00:00Z',
               questions: [{ id: 'q1', prompt: 'Choose next goal', kind: 'single', options: ['A'] }],
             },
             result: {},
@@ -372,6 +374,7 @@ describe('projectStore runtime preferences', () => {
 
     const state = useProjectStore.getState()
     expect(state.tasks[0]?.plan?.questions[0]?.prompt).toBe('Choose next goal')
+    expect(state.tasks[0]?.plan?.updatedAt).toBe('2026-06-08T12:00:00Z')
     expect(state.activeStage).toBe('plan')
   })
 

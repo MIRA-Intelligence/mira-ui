@@ -24,20 +24,37 @@ export function PlanView({ task }: { task: ProjectTask }) {
 
   const plan = task.plan
   const phase = plan?.phase
+  const planSignature = useMemo(() => {
+    if (!plan) return 'none'
+    return JSON.stringify({
+      phase: plan.phase,
+      updatedAt: plan.updatedAt,
+      questions: plan.questions.map((q) => ({
+        id: q.id,
+        prompt: q.prompt,
+        kind: q.kind,
+        options: q.options ?? [],
+        rationale: q.rationale ?? '',
+      })),
+      answers: plan.answers,
+      draft: plan.draft,
+      feedback: plan.feedback ?? '',
+    })
+  }, [plan])
 
   const [answers, setAnswers] = useState<AnswerMap>({})
   const [feedback, setFeedback] = useState('')
   const [showFeedback, setShowFeedback] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  // Sync local answers with the latest plan and reset transient state when the
-  // phase changes (e.g. questions -> draft after a submission).
+  // Sync local answers with the latest plan and reset transient state whenever
+  // the plan content changes, including a new questions round that reuses q1-q5.
   useEffect(() => {
     setAnswers(plan?.answers ?? {})
     setShowFeedback(false)
     setFeedback('')
     setBusy(false)
-  }, [task.id, phase, plan?.questions?.length])
+  }, [task.id, planSignature])
 
   const questions = plan?.questions ?? []
   const allAnswered = useMemo(
