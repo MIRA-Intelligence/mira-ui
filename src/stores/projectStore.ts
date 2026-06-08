@@ -2,8 +2,10 @@ import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
   NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AppMode, AgentProfile, ContractVersion,
+  PlanData, PlanPhase, PlanQuestion, PlanQuestionKind, PlanDraft, PlanDraftExperiment,
 } from '@/types'
 import {
+  createRemoteProject,
   deleteProjectFiles,
   fetchPlan,
   fetchPlanContract,
@@ -11,6 +13,7 @@ import {
   updateProjectDisplayName,
   updateProjectRuntimePreferences,
 } from '@/services/api'
+import { wsClient } from '@/services/websocket'
 
 async function clearAgentLogs(projectId: string): Promise<void> {
   try {
@@ -18,6 +21,20 @@ async function clearAgentLogs(projectId: string): Promise<void> {
     useAgentStore.getState().clearLogs(projectId)
   } catch {
     // Ignore optional log cleanup failures.
+  }
+}
+
+// Show the streaming/pending indicator for a session after a plan submission,
+// so the UI reflects that the agent is working on the answer/decision.
+async function markSessionPendingSafe(sessionId: string): Promise<void> {
+  try {
+    const { useAgentStore } = await import('@/stores/agentStore')
+    const agent = useAgentStore.getState()
+    if (agent.connected) {
+      agent.markSessionPending(sessionId)
+    }
+  } catch {
+    // Ignore optional pending-state failures.
   }
 }
 
@@ -41,20 +58,23 @@ interface ProjectState {
   setAgentProfile: (profile: AgentProfile) => void
   setMode: (mode: 'manual' | 'auto') => void
   setContractVersion: (version: ContractVersion) => void
-  refreshPlan: (projectId: string) => Promise<void>
+  submitPlanAnswers: (answers: Record<string, string | string[]>) => void
+  submitPlanDecision: (decision: 'approve' | 'revise', feedback?: string) => void
+  refreshPlan: (projectId: string, options?: RefreshPlanOptions) => Promise<void>
   renameTask: (id: string, label: string) => void
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
   duplicateTask: (id: string) => void
   createProject: (input: NewProjectInput) => Promise<string>
   loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
-  nextProjectId: () => string
   resetWorkspaceState: () => void
+}
+
+interface RefreshPlanOptions {
+  enterPlan?: boolean
 }
 
 let dupCounter = 0
 
-const PRJ_RE = /^PRJ-(\d+)$/
-const PROJECT_FOLDER_PREFIX = 'PRJ'
 const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'pending',
   'running',
@@ -100,24 +120,8 @@ function normalizeExperimentStatus(value: unknown): ExperimentStatus {
   return 'pending'
 }
 
-function collectProjectNumbers(ids: Iterable<string>): Set<number> {
-  const numbers = new Set<number>()
-  for (const id of ids) {
-    const match = PRJ_RE.exec(id)
-    if (!match) continue
-    numbers.add(parseInt(match[1], 10))
-  }
-  return numbers
-}
-
-function findFirstMissingProjectNumber(used: Set<number>): number {
-  let n = 1
-  while (used.has(n)) n += 1
-  return n
-}
-
 function isProjectFolderId(id: string): boolean {
-  return id.startsWith(PROJECT_FOLDER_PREFIX)
+  return id.trim().length > 0
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -194,6 +198,76 @@ function parseResult(raw: any): ResultData {
   }
 }
 
+function parsePlan(raw: any): PlanData | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const phaseRaw = raw.phase
+  const phase: PlanPhase =
+    phaseRaw === 'draft' || phaseRaw === 'approved' || phaseRaw === 'questions'
+      ? phaseRaw
+      : 'questions'
+  const questions: PlanQuestion[] = Array.isArray(raw.questions)
+    ? raw.questions
+        .map((q: any, i: number): PlanQuestion => {
+          const kindRaw = q?.kind
+          const kind: PlanQuestionKind =
+            kindRaw === 'single' || kindRaw === 'multi' || kindRaw === 'text' ? kindRaw : 'text'
+          return {
+            id: typeof q?.id === 'string' && q.id.trim() ? q.id : `q${i + 1}`,
+            prompt: typeof q?.prompt === 'string' ? q.prompt : '',
+            kind,
+            options: Array.isArray(q?.options) ? q.options.map((o: any) => String(o)) : undefined,
+            rationale: typeof q?.rationale === 'string' ? q.rationale : undefined,
+          }
+        })
+        .filter((q: PlanQuestion) => q.prompt.trim().length > 0)
+    : []
+  const rawAnswers: Record<string, unknown> =
+    raw.answers && typeof raw.answers === 'object' ? raw.answers : {}
+  const answers: Record<string, string | string[]> = {}
+  for (const question of questions) {
+    const value = rawAnswers[question.id]
+    if (question.kind === 'multi') {
+      const options = new Set(question.options ?? [])
+      const selected = Array.isArray(value)
+        ? value.map((item) => String(item)).filter((item) => options.has(item))
+        : []
+      if (selected.length > 0) answers[question.id] = selected
+    } else if (typeof value === 'string' && value.trim().length > 0) {
+      const trimmed = value.trim()
+      if (question.kind !== 'single' || !question.options || question.options.includes(trimmed)) {
+        answers[question.id] = trimmed
+      }
+    }
+  }
+  let draft: PlanDraft | undefined
+  if (raw.draft && typeof raw.draft === 'object') {
+    const experiments: PlanDraftExperiment[] = Array.isArray(raw.draft.experiments)
+      ? raw.draft.experiments
+          .map((e: any): PlanDraftExperiment => ({
+            title: typeof e?.title === 'string' ? e.title : '',
+            hypothesis: typeof e?.hypothesis === 'string' ? e.hypothesis : undefined,
+            method: typeof e?.method === 'string' ? e.method : undefined,
+          }))
+          .filter((e: PlanDraftExperiment) => e.title.trim().length > 0)
+      : []
+    draft = {
+      summary: typeof raw.draft.summary === 'string' ? raw.draft.summary : undefined,
+      experiments,
+    }
+  }
+  const hasContent =
+    Boolean(phaseRaw) || questions.length > 0 || Boolean(draft) || Object.keys(answers).length > 0
+  if (!hasContent) return undefined
+  return {
+    phase,
+    questions,
+    answers,
+    draft,
+    feedback: typeof raw.feedback === 'string' ? raw.feedback : undefined,
+    updatedAt: typeof raw.updated_at === 'string' ? raw.updated_at : undefined,
+  }
+}
+
 function hasFinalResultOutput(result: ResultData): boolean {
   const hasOutputPath = typeof result.outputPath === 'string' && result.outputPath.trim().length > 0
   const hasOutputType = typeof result.outputType === 'string' && result.outputType.trim().length > 0
@@ -228,6 +302,7 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
     experiments: parsedExperiments,
     knowledge,
     research: parseResearch(raw.research),
+    plan: parsePlan(raw.plan) ?? task.plan,
     result: parsedResult,
   }
 }
@@ -424,11 +499,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ tasks: updated, selectedTaskId: newId })
   },
 
-  nextProjectId: () => {
-    const used = collectProjectNumbers(get().tasks.map((t) => t.id))
-    return `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
-  },
-
   resetWorkspaceState: () => {
     set({
       tasks: [],
@@ -452,15 +522,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       input.contractVersion ?? current.contractVersion,
       current.contractVersion,
     )
-    const remotes = await fetchProjects()
-    const used = collectProjectNumbers([
-      ...(remotes ?? []).map((r) => r.id),
-      ...get().tasks.map((t) => t.id),
-    ])
-    const id = `PRJ-${String(findFirstMissingProjectNumber(used)).padStart(4, '0')}`
+    const remote = await createRemoteProject({
+      projectId: input.projectId,
+      displayName: input.displayName ?? input.title,
+      projectParentDir: input.projectParentDir,
+      projectDir: input.projectDir,
+      runMode: mode,
+      agentProfile,
+      contractVersion,
+      automationPolicy: input.automationPolicy,
+    })
+    const id = remote.id
+    if (!id) {
+      throw new Error('Project creation response did not include an id')
+    }
+    const label = (remote.display_name && remote.display_name.trim())
+      || input.displayName
+      || input.title
+      || id
     const task: ProjectTask = {
       id,
-      label: id,
+      label,
+      projectDir: remote.project_dir,
       status: 'in_progress',
       title: input.description.slice(0, 120),
       coreQuestion: input.description,
@@ -513,6 +596,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       newTasks.push({
         id: r.id,
         label: (r.display_name && r.display_name.trim()) || r.id,
+        projectDir: r.project_dir,
         status: r.status === 'completed' ? 'completed' : 'in_progress',
         title: r.title || r.id,
         coreQuestion: r.core_question,
@@ -538,12 +622,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const title = remote.title || task.title
       const coreQuestion = remote.core_question ?? task.coreQuestion
       const startedAt = remote.started_at || task.startedAt
+      const projectDir = remote.project_dir ?? task.projectDir
       if (
         task.label === displayName
         && task.status === status
         && task.title === title
         && task.coreQuestion === coreQuestion
         && task.startedAt === startedAt
+        && task.projectDir === projectDir
         && task.runMode === runMode
         && task.agentProfile === agentProfile
         && task.contractVersion === contractVersion
@@ -553,6 +639,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return {
         ...task,
         label: displayName,
+        projectDir,
         status,
         title,
         coreQuestion,
@@ -595,7 +682,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }))
   },
 
-  refreshPlan: async (projectId: string) => {
+  submitPlanAnswers: (answers) => {
+    const { selectedTaskId, mode, agentProfile } = get()
+    if (!selectedTaskId) return
+    wsClient.send({
+      type: 'plan_answer',
+      content: '',
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+      loop_mode: 'project',
+      mode,
+      agent_profile: agentProfile,
+      answers,
+    })
+    void markSessionPendingSafe(selectedTaskId)
+  },
+
+  submitPlanDecision: (decision, feedback) => {
+    const { selectedTaskId, mode, agentProfile } = get()
+    if (!selectedTaskId) return
+    wsClient.send({
+      type: 'plan_decision',
+      content: '',
+      session_id: selectedTaskId,
+      user_id: 'ui_user',
+      loop_mode: 'project',
+      mode,
+      agent_profile: agentProfile,
+      decision,
+      feedback,
+    })
+    void markSessionPendingSafe(selectedTaskId)
+  },
+
+  refreshPlan: async (projectId: string, options?: RefreshPlanOptions) => {
     const [plan, contract] = await Promise.all([
       fetchPlan(projectId) as Promise<TaskPlan | null>,
       fetchPlanContract(projectId),
@@ -623,6 +743,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const isSelected = selectedTaskId === projectId
     const applied = updated[idx]
+    // Background refreshes preserve the user's current stage. Explicit plan
+    // events from the websocket can force-entry so `/plan` immediately reveals
+    // the interactive questions/draft even if the user was viewing an experiment.
+    const planPhase = applied.plan?.phase
+    const currentStage = get().activeStage
+    const shouldEnterPlan =
+      isSelected &&
+      (planPhase === 'questions' || planPhase === 'draft') &&
+      (options?.enterPlan === true || currentStage === 'research' || currentStage === 'plan')
     set({
       tasks: updated,
       stats: computeStats(updated),
@@ -630,6 +759,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...(isSelected && {
         selectedExpId: resolveSelectedExperimentId(applied, get().selectedExpId),
       }),
+      ...(shouldEnterPlan && { activeStage: 'plan' as PipelineStage }),
     })
   },
 }))

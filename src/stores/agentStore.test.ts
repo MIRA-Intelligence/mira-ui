@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAgentStore } from './agentStore'
+import { useProjectStore } from './projectStore'
 
 const initialAgentState = useAgentStore.getState()
+const initialProjectState = useProjectStore.getState()
 
 describe('agentStore hydrateLogs', () => {
   beforeEach(() => {
@@ -85,6 +87,47 @@ describe('agentStore hydrateLogs', () => {
         metadata: {},
       },
     ])
+  })
+})
+
+describe('agentStore plan refreshes', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    useAgentStore.setState(initialAgentState, true)
+    useProjectStore.setState(initialProjectState, true)
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('forces plan entry when a project response advertises pending questions', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-0001',
+      content: 'Plan questions are ready',
+      metadata: { _plan_phase: 'questions' },
+    })
+
+    expect(refreshPlan).toHaveBeenCalledWith('PRJ-0001', { enterPlan: true })
+  })
+
+  it('refreshes custom project ids from project metadata', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'brain-age-inference',
+      content: 'Plan questions are ready',
+      metadata: { _plan_phase: 'questions', project_id: 'brain-age-inference' },
+    })
+
+    expect(refreshPlan).toHaveBeenCalledWith('brain-age-inference', { enterPlan: true })
   })
 })
 

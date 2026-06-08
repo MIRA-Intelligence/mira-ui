@@ -1,6 +1,6 @@
 /* ── Pipeline stages ───────────────────────────── */
 
-export type PipelineStage = 'research' | 'experiment' | 'result'
+export type PipelineStage = 'research' | 'plan' | 'experiment' | 'result'
 export type AppMode = 'normal' | 'project'
 export type AgentProfile = 'engineer' | 'research'
 export type ContractVersion = 1 | 2
@@ -107,6 +107,39 @@ export interface ResearchData {
   survey?: string
 }
 
+/* ── Interactive plan mode ─────────────────────── */
+
+export type PlanPhase = 'questions' | 'draft' | 'approved'
+export type PlanQuestionKind = 'single' | 'multi' | 'text'
+
+export interface PlanQuestion {
+  id: string
+  prompt: string
+  kind: PlanQuestionKind
+  options?: string[]
+  rationale?: string
+}
+
+export interface PlanDraftExperiment {
+  title: string
+  hypothesis?: string
+  method?: string
+}
+
+export interface PlanDraft {
+  summary?: string
+  experiments: PlanDraftExperiment[]
+}
+
+export interface PlanData {
+  phase: PlanPhase
+  questions: PlanQuestion[]
+  answers: Record<string, string | string[]>
+  draft?: PlanDraft
+  feedback?: string
+  updatedAt?: string
+}
+
 /* ── Final result / deliverable ────────────────── */
 
 export interface ResultData {
@@ -126,6 +159,7 @@ export interface ResultSection {
 export interface ProjectTask {
   id: string
   label: string
+  projectDir?: string
   status: 'in_progress' | 'completed' | 'pending'
   title: string
   coreQuestion?: string
@@ -136,6 +170,7 @@ export interface ProjectTask {
   experiments: Experiment[]
   knowledge: string[]
   research: ResearchData
+  plan?: PlanData
   result: ResultData
   startedAt: string
 }
@@ -177,6 +212,20 @@ export interface TaskPlan {
     }>
     notes?: string[]
     survey?: string
+  }
+  plan?: {
+    phase?: PlanPhase
+    updated_at?: string
+    questions?: Array<{
+      id: string; prompt: string; kind: PlanQuestionKind
+      options?: string[]; rationale?: string
+    }>
+    answers?: Record<string, string | string[]>
+    draft?: {
+      summary?: string
+      experiments?: Array<{ title: string; hypothesis?: string; method?: string }>
+    }
+    feedback?: string
   }
   result?: {
     summary?: string
@@ -276,6 +325,10 @@ export interface LiteratureReviewOptions {
 }
 
 export interface NewProjectInput {
+  projectId?: string
+  displayName?: string
+  projectParentDir?: string
+  projectDir?: string
   description: string
   title?: string
   domain?: string
@@ -291,7 +344,7 @@ export interface NewProjectInput {
 /* ── WebSocket protocol ─────────────────────────── */
 
 export interface WsMessage {
-  type: 'message' | 'command' | 'set_mode' | 'bind'
+  type: 'message' | 'command' | 'set_mode' | 'bind' | 'plan_answer' | 'plan_decision'
   content: string
   session_id: string
   user_id?: string
@@ -304,6 +357,10 @@ export interface WsMessage {
   allow_result_write?: boolean
   // Opt-in token streaming for this message (defaults on in the UI).
   stream?: boolean
+  // Interactive plan-mode payloads.
+  answers?: Record<string, string | string[]>
+  decision?: 'approve' | 'revise'
+  feedback?: string
 }
 
 export interface WsResponse {

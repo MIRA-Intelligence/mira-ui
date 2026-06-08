@@ -114,6 +114,7 @@ export async function submitFeedbackReport(payload: FeedbackPayload): Promise<{ 
 export interface RemoteProject {
   id: string
   display_name?: string
+  project_dir?: string
   title?: string
   status?: string
   core_question?: string
@@ -123,6 +124,37 @@ export interface RemoteProject {
   contract_version?: ContractVersion
   has_plan: boolean
   has_meta?: boolean
+}
+
+export async function createRemoteProject(payload: {
+  projectId?: string
+  displayName?: string
+  projectParentDir?: string
+  projectDir?: string
+  runMode?: 'manual' | 'auto'
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
+  automationPolicy?: unknown
+}): Promise<RemoteProject> {
+  const body: Record<string, unknown> = {}
+  if (payload.projectId) body.project_id = payload.projectId
+  if (payload.displayName) body.display_name = payload.displayName
+  if (payload.projectParentDir) body.project_parent_dir = payload.projectParentDir
+  if (payload.projectDir) body.project_dir = payload.projectDir
+  if (payload.runMode) body.run_mode = payload.runMode
+  if (payload.agentProfile) body.agent_profile = payload.agentProfile
+  if (payload.contractVersion) body.contract_version = payload.contractVersion
+  if (payload.automationPolicy !== undefined) body.automation_policy = payload.automationPolicy
+
+  const resp = await fetch(`${getApiUrl()}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  return await resp.json() as RemoteProject
 }
 
 export async function fetchProjects(): Promise<RemoteProject[] | null> {

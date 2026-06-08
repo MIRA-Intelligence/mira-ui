@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   upgradeLocalEngine: (packageName = 'mira-engine') => ipcRenderer.invoke('engine:upgrade', packageName),
   repairLocalEngineService: () => ipcRenderer.invoke('engine:repair-service'),
   selectDataPath: (kind: 'file' | 'directory') => ipcRenderer.invoke('dialog:select-data-path', kind),
+  selectDirectory: () => ipcRenderer.invoke('project:select-directory'),
 
   // App auto-update (v1: GitHub-release version-check + open release page).
   getAppVersion: () => ipcRenderer.invoke('update:get-app-version'),

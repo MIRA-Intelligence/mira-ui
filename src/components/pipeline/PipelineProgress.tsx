@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
 import type { AgentProfile, ContractVersion, PipelineStage } from '@/types'
 import { t } from '@/i18n'
+import type { I18nKey } from '@/i18n'
 
 // Minimum useful width (px) for the truncated coreQuestion line. If the row
 // has less remaining space than this after laying out everything else, the
@@ -18,10 +19,11 @@ const MAX_QUESTION_PX = 300
 // the `pl-3` on the <p>).
 const QUESTION_GAP_PX = 12
 
-const STAGES: { key: PipelineStage; icon: string }[] = [
-  { key: 'research', icon: '📚' },
-  { key: 'experiment', icon: '🔬' },
-  { key: 'result', icon: '📝' },
+const STAGES: { key: PipelineStage; icon: string; labelKey: I18nKey }[] = [
+  { key: 'research', icon: '📚', labelKey: 'research' },
+  { key: 'plan', icon: '🗺️', labelKey: 'plan' },
+  { key: 'experiment', icon: '🔬', labelKey: 'experiment' },
+  { key: 'result', icon: '📝', labelKey: 'result' },
 ]
 
 const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' }> = [
@@ -38,6 +40,12 @@ function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0
   if (stage === 'research') {
     const count = task.research.references.length
     return count > 0 ? `${count}` : null
+  }
+  if (stage === 'plan') {
+    const phase = task.plan?.phase
+    if (phase === 'questions' || phase === 'draft') return '!'
+    if (phase === 'approved') return '✓'
+    return null
   }
   if (stage === 'experiment') {
     const c = task.experiments.filter((e) => e.status === 'completed' || e.status === 'skipped').length
@@ -278,7 +286,7 @@ export function PipelineProgress() {
                   }`}
                 >
                   <span className="text-[13px]">{stage.icon}</span>
-                  <span>{t(stage.key === 'research' ? 'research' : stage.key === 'experiment' ? 'experiment' : 'result', lang)}</span>
+                  <span>{t(stage.labelKey, lang)}</span>
                   {badge && (
                     <span className={`text-[10px] font-mono px-1 py-px rounded ${
                       isActive

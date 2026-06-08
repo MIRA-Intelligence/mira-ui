@@ -213,6 +213,8 @@ export function SettingsModal() {
   const loadTokenRef = useRef(0)
 
   const curLang = draft.language
+  const projectLocation = store.runtimeConfig?.project_location
+  const customProjectDirsAllowed = projectLocation?.custom_dir_allowed ?? true
 
   const loadRuntimeConfig = async (
     mode: DeploymentMode,
@@ -360,6 +362,9 @@ export function SettingsModal() {
     const previousApiUrl = store.apiUrl
     const previousWsUrl = store.wsUrl
     const previousWorkspacePath = store.workspacePath
+    const effectiveWorkspacePath = customProjectDirsAllowed
+      ? nextWorkspacePath
+      : (store.runtimeConfig?.projects_root ?? previousWorkspacePath)
     setBusy(true)
     setFeedback(null)
     setFeedbackError(false)
@@ -419,9 +424,9 @@ export function SettingsModal() {
               },
             }
         const payload = await saveRuntimeConfig({
-          projects_root: nextWorkspacePath,
+          ...(customProjectDirsAllowed ? { projects_root: effectiveWorkspacePath } : {}),
           runtime: {
-            workspace: nextWorkspacePath,
+            ...(customProjectDirsAllowed ? { workspace: effectiveWorkspacePath } : {}),
             provider: draft.provider,
             model: trimmedModel,
             reasoning_effort: draft.reasoningEffort,
@@ -465,8 +470,11 @@ export function SettingsModal() {
           || endpointChanged(previousApiUrl, previousWsUrl, nextApiUrl, nextWsUrl)
 
         let payload = await fetchRuntimeConfig(nextApiUrl)
+        const remoteCustomProjectDirsAllowed = payload.project_location?.custom_dir_allowed ?? true
         const engineWorkspacePath = runtimeWorkspacePath(payload)
-        const shouldUpdateWorkspace = workspaceEdited && workspacePathChanged(engineWorkspacePath, nextWorkspacePath)
+        const shouldUpdateWorkspace = remoteCustomProjectDirsAllowed
+          && workspaceEdited
+          && workspacePathChanged(engineWorkspacePath, nextWorkspacePath)
         if (shouldUpdateWorkspace) {
           payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
         }
@@ -694,12 +702,13 @@ export function SettingsModal() {
                     setWorkspaceEdited(true)
                     setDraft((current) => ({ ...current, workspacePath: e.target.value }))
                   }}
-                  className={inputClass}
+                  disabled={!customProjectDirsAllowed}
+                  className={cn(inputClass, !customProjectDirsAllowed && 'cursor-not-allowed opacity-70')}
                 />
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                  {localMode
-                    ? 'This path is saved into the local Mira runtime config and used as the projects root.'
-                    : t('workspacePathHint', curLang)}
+                  {customProjectDirsAllowed
+                    ? t('workspacePathHint', curLang)
+                    : t('managedProjectLocationHint', curLang)}
                 </p>
               </Section>
 

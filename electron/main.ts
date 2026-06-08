@@ -63,6 +63,16 @@ app.whenReady().then(() => {
     if (result.canceled) return null
     return result.filePaths[0] ?? null
   })
+  ipcMain.handle('project:select-directory', async () => {
+    const options: OpenDialogOptions = {
+      properties: ['openDirectory', 'createDirectory'],
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
   registerUpdateCheck(() => mainWindow)
   void engineManager.bootstrapLocalEngine().catch(() => {})
   createWindow()
