@@ -221,8 +221,24 @@ function parsePlan(raw: any): PlanData | undefined {
         })
         .filter((q: PlanQuestion) => q.prompt.trim().length > 0)
     : []
-  const answers: Record<string, string | string[]> =
+  const rawAnswers: Record<string, unknown> =
     raw.answers && typeof raw.answers === 'object' ? raw.answers : {}
+  const answers: Record<string, string | string[]> = {}
+  for (const question of questions) {
+    const value = rawAnswers[question.id]
+    if (question.kind === 'multi') {
+      const options = new Set(question.options ?? [])
+      const selected = Array.isArray(value)
+        ? value.map((item) => String(item)).filter((item) => options.has(item))
+        : []
+      if (selected.length > 0) answers[question.id] = selected
+    } else if (typeof value === 'string' && value.trim().length > 0) {
+      const trimmed = value.trim()
+      if (question.kind !== 'single' || !question.options || question.options.includes(trimmed)) {
+        answers[question.id] = trimmed
+      }
+    }
+  }
   let draft: PlanDraft | undefined
   if (raw.draft && typeof raw.draft === 'object') {
     const experiments: PlanDraftExperiment[] = Array.isArray(raw.draft.experiments)
