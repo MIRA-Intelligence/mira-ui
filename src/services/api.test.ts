@@ -1,9 +1,45 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteProject, uploadProjectFiles } from './api'
+import { deleteProject, fetchProjectFilesResult, uploadProjectFiles } from './api'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialSettingsState = useSettingsStore.getState()
+
+describe('fetchProjectFilesResult', () => {
+  it('returns normalized file rows on success', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        files: [
+          { name: 'a.csv', path: 'data/a.csv', size: 12, mtime: 1_700_000_000, is_dir: false },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    const result = await fetchProjectFilesResult('PRJ-0001')
+    expect(result).toEqual({
+      ok: true,
+      files: [{
+        name: 'a.csv',
+        path: 'data/a.csv',
+        size: 12,
+        mtime: 1_700_000_000,
+        is_dir: false,
+      }],
+    })
+  })
+
+  it('surfaces HTTP errors instead of pretending the folder is empty', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      '405: Method Not Allowed',
+      { status: 405 },
+    )))
+
+    const result = await fetchProjectFilesResult('PRJ-0001')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(405)
+  })
+})
 
 describe('uploadProjectFiles', () => {
   beforeEach(() => {
@@ -55,7 +91,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: true, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://agent.local/api/projects?session_id=PRJ-0001',
+      expect.stringContaining('/api/projects?session_id=PRJ-0001'),
       { method: 'DELETE' },
     )
   })
@@ -71,7 +107,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: false, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://agent.local/api/projects/PRJ-0001/remove',
+      expect.stringContaining('/api/projects/PRJ-0001/remove'),
       { method: 'POST' },
     )
   })

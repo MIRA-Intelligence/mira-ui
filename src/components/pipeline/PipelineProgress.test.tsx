@@ -72,9 +72,9 @@ describe('PipelineProgress agent profile switch', () => {
     expect(useProjectStore.getState().agentProfile).toBe('engineer')
   })
 
-  it('disables switching profile while a run is active', () => {
+  it('disables switching profile while the agent is streaming', () => {
     useProjectStore.setState({
-      tasks: [makeTask(true)],
+      tasks: [makeTask(false)],
       selectedTaskId: 'PRJ-0001',
       mode: 'manual',
       agentProfile: 'research',
@@ -88,6 +88,24 @@ describe('PipelineProgress agent profile switch', () => {
     expect(engineer).toBeDisabled()
     fireEvent.click(engineer)
     expect(useProjectStore.getState().agentProfile).toBe('research')
+  })
+
+  it('allows switching profile when an experiment is marked running but the agent is idle', () => {
+    useProjectStore.setState({
+      tasks: [makeTask(true)],
+      selectedTaskId: 'PRJ-0001',
+      mode: 'auto',
+      agentProfile: 'research',
+      activeStage: 'research',
+    })
+    useAgentStore.setState({ streamingBySession: {} })
+
+    render(<PipelineProgress />)
+
+    const engineer = screen.getByRole('button', { name: 'Engineer' })
+    expect(engineer).not.toBeDisabled()
+    fireEvent.click(engineer)
+    expect(useProjectStore.getState().agentProfile).toBe('engineer')
   })
 
   it('allows switching contract mode when idle', () => {

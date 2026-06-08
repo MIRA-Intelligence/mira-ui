@@ -7,23 +7,10 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
+import { buildPromotePrefill } from './promote'
 import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
-
-// Build a project-description seed from a chat's transcript so promoting a
-// conversation into a research project carries the context forward.
-function buildPromotePrefill(logs: AgentLogEntry[]): string {
-  const lines: string[] = []
-  for (const entry of logs) {
-    if (entry.type !== 'response') continue
-    const who = entry.metadata?._user ? 'User' : 'Mira'
-    const text = entry.content.trim()
-    if (!text) continue
-    lines.push(`${who}: ${text}`)
-  }
-  return lines.join('\n\n').slice(0, 4000)
-}
 
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
@@ -32,21 +19,31 @@ type RenderItem =
 function ChatComposer({
   sessionId,
   isStreaming,
+  isChat,
   lang,
   onSend,
   onStop,
 }: {
   sessionId: string | null
   isStreaming: boolean
+  isChat: boolean
   lang: ReturnType<typeof useSettingsStore.getState>['language']
   onSend: (text: string) => void
   onStop: () => void
 }) {
   const [input, setInput] = useState('')
+  const agentDraftPrompt = useUiStore((s) => s.agentDraftPrompt)
+  const setAgentDraftPrompt = useUiStore((s) => s.setAgentDraftPrompt)
 
   useEffect(() => {
     setInput('')
   }, [sessionId])
+
+  useEffect(() => {
+    if (!agentDraftPrompt) return
+    setInput(agentDraftPrompt)
+    setAgentDraftPrompt(null)
+  }, [agentDraftPrompt, setAgentDraftPrompt])
 
   const sendCurrent = () => {
     const text = input.trim()
@@ -67,7 +64,11 @@ function ChatComposer({
               sendCurrent()
             }
           }}
-          placeholder={sessionId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
+          placeholder={
+            sessionId
+              ? t('typeMessage', lang)
+              : t(isChat ? 'selectOrCreateChat' : 'selectProjectFirst', lang)
+          }
           disabled={!sessionId}
           rows={1}
           className="flex-1 h-9 overflow-y-auto bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
@@ -92,7 +93,12 @@ function ChatComposer({
   )
 }
 
-export function AgentPanel() {
+export function AgentPanel({
+  embeddedInWorkbench = false,
+}: {
+  /** When true, title bar is compact (workbench tabs own the section label). */
+  embeddedInWorkbench?: boolean
+}) {
   const { connected, logsByProject, hydrateLogs, streamingBySession } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
@@ -263,42 +269,43 @@ export function AgentPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] shrink-0">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-accent)]">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-        <span className="text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
-          {t('agentChat', lang)}
-        </span>
-        <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'}`} />
-        <span className="text-[10px] text-[var(--color-text-muted)]">
-          {connected ? t('connected', lang) : t('disconnected', lang)}
-        </span>
-        {isAuto && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/15 text-[var(--color-success)] font-medium">
-            AUTO
+      {!embeddedInWorkbench && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] shrink-0">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--color-accent)]">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          <span className="text-xs font-semibold tracking-wide text-[var(--color-text-muted)] uppercase">
+            {t('agentChat', lang)}
           </span>
-        )}
-        {sessionId && isChat && (
-          <button
-            onClick={() => openNewProject({ prefill: buildPromotePrefill(logs), fromChatId: sessionId })}
-            title={t('promoteToProjectHint', lang)}
-            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
-            {t('promoteToProject', lang)}
-          </button>
-        )}
-        {sessionId && appMode === 'project' && (
-          <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
-            {sessionId}
+          <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-[var(--color-success)]' : 'bg-[var(--color-text-muted)]'}`} />
+          <span className="text-[10px] text-[var(--color-text-muted)]">
+            {connected ? t('connected', lang) : t('disconnected', lang)}
           </span>
-        )}
-      </div>
+          {isAuto && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-success)]/15 text-[var(--color-success)] font-medium">
+              AUTO
+            </span>
+          )}
+          {sessionId && isChat && (
+            <button
+              onClick={() => openNewProject({ prefill: buildPromotePrefill(logs), fromChatId: sessionId })}
+              title={t('promoteToProjectHint', lang)}
+              className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+              {t('promoteToProject', lang)}
+            </button>
+          )}
+          {sessionId && appMode === 'project' && (
+            <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
+              {sessionId}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Message stream */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
@@ -411,7 +418,9 @@ export function AgentPanel() {
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             <span className="text-xs">
-              {sessionId ? t(isChat ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang) : t('selectProjectFirst', lang)}
+              {sessionId
+                ? t(isChat ? 'sendNormalMessageToStart' : 'sendMessageToStart', lang)
+                : t(isChat ? 'selectOrCreateChat' : 'selectProjectFirst', lang)}
             </span>
           </div>
         )}
@@ -420,6 +429,7 @@ export function AgentPanel() {
       <ChatComposer
         sessionId={sessionId}
         isStreaming={isStreaming}
+        isChat={isChat}
         lang={lang}
         onSend={handleSend}
         onStop={handleStop}

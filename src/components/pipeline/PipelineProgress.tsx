@@ -8,6 +8,10 @@ import { cn } from '@/lib/utils'
 import type { AgentProfile, ContractVersion, PipelineStage } from '@/types'
 import { t } from '@/i18n'
 import type { I18nKey } from '@/i18n'
+import {
+  isRuntimePreferenceSwitchBlocked,
+  runtimePreferenceSwitchBlockTitle,
+} from '@/lib/runtimePreferencesGuard'
 
 // Minimum useful width (px) for the truncated coreQuestion line. If the row
 // has less remaining space than this after laying out everything else, the
@@ -76,9 +80,10 @@ export function PipelineProgress() {
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const task = tasks.find((t) => t.id === selectedTaskId)
-  const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
-  const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
-  const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
+  const canSwitchAgentProfile = !isRuntimePreferenceSwitchBlocked(isStreaming)
+  const canSwitchContractVersion = !isRuntimePreferenceSwitchBlocked(isStreaming)
+  const profileSwitchTitle = runtimePreferenceSwitchBlockTitle(lang, isStreaming, 'profile')
+  const contractSwitchTitle = runtimePreferenceSwitchBlockTitle(lang, isStreaming, 'contract')
   const effectiveContractVersion = task?.contractVersion ?? contractVersion
   const agentProfileSlider = (
     <div className="shrink-0">
@@ -87,7 +92,7 @@ export function PipelineProgress() {
           'relative grid w-32 grid-cols-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 transition-opacity',
           !canSwitchAgentProfile && 'opacity-60',
         )}
-        title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
+        title={profileSwitchTitle}
       >
         <span
           aria-hidden
@@ -239,7 +244,7 @@ export function PipelineProgress() {
             'flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 shrink-0',
             !canSwitchContractVersion && 'opacity-60',
           )}
-          title={!canSwitchContractVersion ? t('contractSwitchManualOnly', lang) : undefined}
+          title={contractSwitchTitle}
         >
           {CONTRACT_MODES.map((item) => (
             <button

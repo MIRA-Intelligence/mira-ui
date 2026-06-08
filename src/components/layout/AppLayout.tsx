@@ -5,7 +5,8 @@ import { PipelineProgress } from '@/components/pipeline/PipelineProgress'
 import { ProjectQueue } from '@/components/queue/ProjectQueue'
 import { ExperimentTimeline } from '@/components/experiment/ExperimentTimeline'
 import { TaskDetail } from '@/components/task/TaskDetail'
-import { AgentPanel } from '@/components/agent/AgentPanel'
+import { AgentWorkspacePanel } from '@/components/agent/AgentWorkspacePanel'
+import { ChatMainPlaceholder } from '@/components/layout/ChatMainPlaceholder'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
@@ -134,9 +135,6 @@ export function AppLayout() {
   const activeStage = useProjectStore((s) => s.activeStage)
   const appMode = useProjectStore((s) => s.appMode)
   const lang = useSettingsStore((s) => s.language)
-  // In Quick Chat the conversation IS the primary content, so it takes the
-  // center column and the right agent panel (and project-only experiment
-  // timeline) are hidden. Project mode keeps the 3-column research layout.
   const isChat = appMode === 'normal'
   // Suppress width transitions while actively dragging a splitter so the panel
   // tracks the cursor 1:1 instead of easing behind it.
@@ -191,41 +189,37 @@ export function AppLayout() {
           </div>
         )}
 
-        {/* Center: the chat (Quick Chat) or the project's Experiment Detail */}
+        {/* Center: project work area or quick-chat placeholder */}
         <div className="flex-1 overflow-hidden min-w-0">
-          {isChat ? <AgentPanel /> : <TaskDetail />}
+          {isChat ? <ChatMainPlaceholder /> : <TaskDetail />}
         </div>
 
-        {/* Right agent panel — project mode only (in chat mode the chat is centered) */}
-        {!isChat && (
-          <>
-            <SplitterToggle
-              onToggle={toggleAgentPanel}
-              onStart={() => {
-                setAgentPanelCollapsed(false)
-                setResizing(true)
-              }}
-              onEnd={() => setResizing(false)}
-              onMove={(clientX) => setAgentPanelWidth(window.innerWidth - clientX)}
-              className="border-l border-[var(--color-border)]"
-              ariaLabel={t('toggleAgentPanel', lang)}
-            >
-              {agentPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
-            </SplitterToggle>
+        {/* Right workbench: files + agent (all modes) */}
+        <SplitterToggle
+          onToggle={toggleAgentPanel}
+          onStart={() => {
+            setAgentPanelCollapsed(false)
+            setResizing(true)
+          }}
+          onEnd={() => setResizing(false)}
+          onMove={(clientX) => setAgentPanelWidth(window.innerWidth - clientX)}
+          className="border-l border-[var(--color-border)]"
+          ariaLabel={t('toggleAgentPanel', lang)}
+        >
+          {agentPanelCollapsed ? <ChevronLeft /> : <ChevronRight />}
+        </SplitterToggle>
 
-            <div
-              className={cn(
-                'shrink-0 overflow-hidden',
-                !resizing && 'transition-[width] duration-200 ease-in-out',
-              )}
-              style={{ width: agentPanelCollapsed ? 0 : agentPanelWidth }}
-            >
-              <div className="h-full" style={{ width: agentPanelWidth }}>
-                <AgentPanel />
-              </div>
-            </div>
-          </>
-        )}
+        <div
+          className={cn(
+            'shrink-0 overflow-hidden',
+            !resizing && 'transition-[width] duration-200 ease-in-out',
+          )}
+          style={{ width: agentPanelCollapsed ? 0 : agentPanelWidth }}
+        >
+          <div className="h-full" style={{ width: agentPanelWidth }}>
+            <AgentWorkspacePanel />
+          </div>
+        </div>
       </div>
 
       <StatusBar />

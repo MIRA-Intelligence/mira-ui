@@ -244,26 +244,17 @@ export function NewProjectModal() {
   const { newProjectOpen, closeNewProject, newProjectPrefill, newProjectFromChatId } = useUiStore()
   const removeChat = useChatStore((s) => s.removeChat)
   const {
-    tasks,
-    selectedTaskId,
     createProject,
     deleteTask,
     projectsLoaded,
     agentProfile,
     contractVersion,
-    setAgentProfile,
-    setContractVersion,
   } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
-  // Block runtime switching while ANY session is mid-stream, not just one.
-  const isStreaming = useAgentStore((s) => Object.values(s.streamingBySession).some(Boolean))
   const { workspacePath, language: lang, deploymentMode, runtimeConfig } = useSettingsStore()
   const projectLocation = runtimeConfig?.project_location
   const customProjectDirAllowed = projectLocation?.custom_dir_allowed ?? true
   const defaultProjectParentDir = projectLocation?.default_parent_dir || workspacePath
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId)
-  const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
-  const canSwitchRuntime = !isStreaming && !hasRunningExperiment
 
   const dataFileInputRef = useRef<HTMLInputElement | null>(null)
   const referenceFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -291,6 +282,8 @@ export function NewProjectModal() {
   const [goalValueInputs, setGoalValueInputs] = useState<string[]>([''])
   const [maxExperiments, setMaxExperiments] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
+  const [draftAgentProfile, setDraftAgentProfile] = useState<AgentProfile>(agentProfile)
+  const [draftContractVersion, setDraftContractVersion] = useState<ContractVersion>(contractVersion)
 
   const projectIdPreview = slugifyProjectId(projectName)
   const projectDirPreview = customProjectDirAllowed
@@ -371,7 +364,9 @@ export function NewProjectModal() {
   useEffect(() => {
     if (!newProjectOpen) return
     setProjectParentDir(defaultProjectParentDir)
-  }, [newProjectOpen, defaultProjectParentDir])
+    setDraftAgentProfile(agentProfile)
+    setDraftContractVersion(contractVersion)
+  }, [newProjectOpen, defaultProjectParentDir, agentProfile, contractVersion])
 
   if (!newProjectOpen) return null
 
@@ -550,8 +545,8 @@ export function NewProjectModal() {
         enabled: literatureResearchEnabled,
         sources: selectedLiteratureSources,
       },
-      agentProfile,
-      contractVersion,
+      agentProfile: draftAgentProfile,
+      contractVersion: draftContractVersion,
       automationPolicy,
     }
 
@@ -743,28 +738,19 @@ export function NewProjectModal() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
               <div className="space-y-1">
                 <p className="text-[11px] text-[var(--color-text-muted)]">{t('profileLabel', lang)}</p>
-                <div
-                  className={cn(
-                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
-                    !canSwitchRuntime && 'opacity-60',
-                  )}
-                  title={!canSwitchRuntime ? t('profileSwitchManualOnly', lang) : undefined}
-                >
+                <div className="flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5">
                   {PROFILE_OPTIONS.map((item) => (
                     <button
                       key={item.key}
                       type="button"
-                      disabled={!canSwitchRuntime}
-                      onClick={() => {
-                        if (!canSwitchRuntime) return
-                        setAgentProfile(item.key)
-                      }}
+                      disabled={creating}
+                      onClick={() => setDraftAgentProfile(item.key)}
                       className={cn(
                         'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                        agentProfile === item.key
+                        draftAgentProfile === item.key
                           ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
                           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                        !canSwitchRuntime && 'cursor-not-allowed',
+                        creating && 'cursor-not-allowed opacity-60',
                       )}
                     >
                       {t(item.labelKey, lang)}
@@ -775,28 +761,19 @@ export function NewProjectModal() {
 
               <div className="space-y-1">
                 <p className="text-[11px] text-[var(--color-text-muted)]">{t('contractModeLabel', lang)}</p>
-                <div
-                  className={cn(
-                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
-                    !canSwitchRuntime && 'opacity-60',
-                  )}
-                  title={!canSwitchRuntime ? t('contractSwitchManualOnly', lang) : undefined}
-                >
+                <div className="flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5">
                   {CONTRACT_OPTIONS.map((item) => (
                     <button
                       key={item.key}
                       type="button"
-                      disabled={!canSwitchRuntime}
-                      onClick={() => {
-                        if (!canSwitchRuntime) return
-                        setContractVersion(item.key)
-                      }}
+                      disabled={creating}
+                      onClick={() => setDraftContractVersion(item.key)}
                       className={cn(
                         'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                        contractVersion === item.key
+                        draftContractVersion === item.key
                           ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
                           : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                        !canSwitchRuntime && 'cursor-not-allowed',
+                        creating && 'cursor-not-allowed opacity-60',
                       )}
                     >
                       {t(item.labelKey, lang)}

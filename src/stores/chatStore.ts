@@ -88,7 +88,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       writeChats(s.workspaceKey, chats)
       return { chats, activeChatId: id }
     })
-    useProjectStore.getState().setAppMode('normal')
+    useProjectStore.setState({
+      appMode: 'normal',
+      selectedTaskId: null,
+      selectedExpId: null,
+      activeStage: 'research',
+    })
     return id
   },
 

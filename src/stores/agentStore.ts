@@ -344,7 +344,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setConnected: (connected) =>
-    set((state) => (state.connected === connected ? state : { connected })),
+    set((state) => {
+      if (state.connected === connected) return state
+      if (!connected) {
+        const streamingBySession = Object.fromEntries(
+          Object.keys(state.streamingBySession).map((id) => [id, false]),
+        ) as Record<string, boolean>
+        return { connected, streamingBySession }
+      }
+      return { connected }
+    }),
 
   clearLogs: (projectId) =>
     set((state) => {

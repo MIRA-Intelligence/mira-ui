@@ -191,7 +191,7 @@ describe('projectStore runtime preferences', () => {
   })
 
   it('keeps normal mode unbound from projects when project list syncs', async () => {
-    useProjectStore.getState().setAppMode('normal')
+    useProjectStore.setState({ appMode: 'normal', selectedTaskId: null, selectedExpId: null })
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.endsWith('/projects')) {

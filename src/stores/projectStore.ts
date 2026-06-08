@@ -364,9 +364,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setAppMode: (appMode) => {
     if (appMode === 'normal') {
+      // Keep selectedTaskId so project files stay reachable while in Quick Chat.
       set({
         appMode,
-        selectedTaskId: null,
         selectedExpId: null,
         activeStage: 'research',
       })
@@ -656,7 +656,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     )
     const hasSelected = selectedTaskId ? merged.some((task) => task.id === selectedTaskId) : false
     const nextSelectedTaskId = appMode === 'normal'
-      ? null
+      ? (hasSelected ? selectedTaskId : null)
       : hasSelected ? selectedTaskId : (merged[0]?.id ?? null)
     const selectedTask = merged.find((task) => task.id === nextSelectedTaskId) ?? null
     set({
