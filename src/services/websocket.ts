@@ -1,4 +1,5 @@
 import type { WsMessage, WsResponse } from '@/types'
+import { resolveWsUrl } from '@/lib/gatewayEndpoints'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
 
@@ -6,7 +7,7 @@ type MessageHandler = (msg: WsResponse) => void
 type StatusHandler = (connected: boolean, detail: string | null) => void
 
 function getWsUrl(): string {
-  return useSettingsStore.getState().wsUrl
+  return resolveWsUrl(useSettingsStore.getState())
 }
 
 function currentLanguage() {

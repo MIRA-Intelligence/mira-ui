@@ -228,10 +228,10 @@ export function ProjectQueue() {
     <aside className="flex flex-col h-full border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
       {/* Tab bar: Chats | Projects + contextual add */}
       <div className="flex items-stretch border-b border-[var(--color-border)]">
-        <TabButton active={showChats} count={chats.length} onClick={() => setTab('chats')}>
+        <TabButton active={tab === 'chats'} count={chats.length} onClick={() => setTab('chats')}>
           {t('conversations', lang)}
         </TabButton>
-        <TabButton active={!showChats} count={tasks.length} onClick={() => setTab('projects')}>
+        <TabButton active={tab === 'projects'} count={tasks.length} onClick={() => setTab('projects')}>
           {t('projectsSection', lang)}
         </TabButton>
         <button
@@ -259,7 +259,7 @@ export function ProjectQueue() {
         </button>
       </div>
 
-      {!showChats && <QueueStatsBar stats={stats} taskCount={tasks.length} lang={lang} />}
+      {tab === 'projects' && <QueueStatsBar stats={stats} taskCount={tasks.length} lang={lang} />}
 
       <div className="border-b border-[var(--color-border)] p-2">
         <input
@@ -372,7 +372,7 @@ export function ProjectQueue() {
         )}
       </div>
 
-      {appMode === 'project' && !showChats && (
+      {appMode === 'project' && tab === 'projects' && (
         <div className="p-3 border-t border-[var(--color-border)] flex items-center justify-center">
           <div className="relative w-full max-w-[220px] rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-1">
             <span

@@ -54,7 +54,7 @@ describe('NewProjectModal', () => {
     expect(screen.queryByText('New Research Project')).not.toBeInTheDocument()
   })
 
-  it('syncs profile and contract selection with project store', () => {
+  it('keeps profile and contract choices local until the project is created', () => {
     useProjectStore.setState({
       tasks: [{
         id: 'PRJ-0001',
@@ -88,14 +88,33 @@ describe('NewProjectModal', () => {
       useUiStore.setState({ newProjectOpen: true })
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Engineer' }))
     fireEvent.click(screen.getByRole('button', { name: 'Strict' }))
 
     const store = useProjectStore.getState()
     expect(store.agentProfile).toBe('research')
-    expect(store.contractVersion).toBe(2)
+    expect(store.contractVersion).toBe(1)
     expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.agentProfile).toBe('research')
-    expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.contractVersion).toBe(2)
+    expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.contractVersion).toBe(1)
+  })
+
+  it('allows profile selection while another session is streaming', () => {
+    useAgentStore.setState({ streamingBySession: { 'PRJ-0001': true } })
+
+    render(
+      <StrictMode>
+        <NewProjectModal />
+      </StrictMode>,
+    )
+
+    act(() => {
+      useUiStore.setState({ newProjectOpen: true })
+    })
+
+    const engineer = screen.getByRole('button', { name: 'Engineer' })
+    expect(engineer).not.toBeDisabled()
+    fireEvent.click(engineer)
+    expect(engineer).toHaveClass('text-[var(--color-accent)]')
   })
 
   it('shows advanced literature source controls with all libraries enabled by default', () => {

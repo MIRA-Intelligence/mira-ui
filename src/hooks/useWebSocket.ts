@@ -10,6 +10,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useOrganizationStore } from '@/stores/organizationStore'
 import { useUiStore } from '@/stores/uiStore'
+import { resolveApiUrl, resolveWsUrl } from '@/lib/gatewayEndpoints'
 import { t } from '@/i18n'
 
 async function syncOnConnect() {
@@ -97,9 +98,7 @@ export function useWebSocket() {
         setConnectionMessage(null)
         const lang = useSettingsStore.getState().language
         const localBundle = deploymentMode === 'localBundle'
-        const safeApiUrl = localBundle
-          ? 'http://127.0.0.1:18790/api'
-          : (typeof apiUrl === 'string' ? apiUrl : 'http://127.0.0.1:18790/api')
+        const safeApiUrl = resolveApiUrl(useSettingsStore.getState())
 
         if (localBundle) {
           if (!hasDesktopEngineManager()) {
@@ -185,8 +184,7 @@ export function useWebSocket() {
   }, [apiUrl, deploymentMode, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 
   useEffect(() => {
-    const localBundle = deploymentMode === 'localBundle'
-    const safeWsUrl = localBundle ? 'ws://127.0.0.1:18790/ws' : wsUrl
+    const safeWsUrl = resolveWsUrl(useSettingsStore.getState())
 
     if (!safeWsUrl || !safeWsUrl.trim()) {
       const lang = useSettingsStore.getState().language
