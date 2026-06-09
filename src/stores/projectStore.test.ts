@@ -102,6 +102,16 @@ describe('projectStore runtime preferences', () => {
   })
 
   it('clears project logs when deleting a task', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/projects/PRJ-0001/remove') && init?.method === 'POST') {
+        return new Response(
+          JSON.stringify({ deleted: false, removed: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
     useAgentStore.getState().addLog('PRJ-0001', {
       id: 'log-to-delete',
       timestamp: new Date().toISOString(),
@@ -114,6 +124,42 @@ describe('projectStore runtime preferences', () => {
     await useProjectStore.getState().deleteTask('PRJ-0001', false)
 
     expect(useAgentStore.getState().logsByProject['PRJ-0001']).toBeUndefined()
+  })
+
+  it('keeps project state when local file deletion is not confirmed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/projects?session_id=PRJ-0001') && init?.method === 'DELETE') {
+        return new Response(
+          JSON.stringify({ deleted: false, removed: false, reason: 'not found' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await expect(useProjectStore.getState().deleteTask('PRJ-0001', true)).rejects.toThrow('not found')
+
+    expect(useProjectStore.getState().tasks.map((task) => task.id)).toEqual(['PRJ-0001'])
+    expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-0001')
+  })
+
+  it('removes project state when local file deletion is confirmed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/projects?session_id=PRJ-0001') && init?.method === 'DELETE') {
+        return new Response(
+          JSON.stringify({ deleted: true, removed: true }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    await expect(useProjectStore.getState().deleteTask('PRJ-0001', true)).resolves.toBe(true)
+
+    expect(useProjectStore.getState().tasks).toEqual([])
+    expect(useProjectStore.getState().selectedTaskId).toBeNull()
   })
 
   it('syncs status for existing projects from remote list', async () => {

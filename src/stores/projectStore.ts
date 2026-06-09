@@ -6,7 +6,7 @@ import type {
 } from '@/types'
 import {
   createRemoteProject,
-  deleteProjectFiles,
+  deleteProject,
   fetchPlan,
   fetchPlanContract,
   fetchProjects,
@@ -62,7 +62,7 @@ interface ProjectState {
   submitPlanDecision: (decision: 'approve' | 'revise', feedback?: string) => void
   refreshPlan: (projectId: string, options?: RefreshPlanOptions) => Promise<void>
   renameTask: (id: string, label: string) => void
-  deleteTask: (id: string, deleteFiles?: boolean) => Promise<void>
+  deleteTask: (id: string, deleteFiles?: boolean) => Promise<boolean>
   duplicateTask: (id: string) => void
   createProject: (input: NewProjectInput) => Promise<string>
   loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
@@ -458,9 +458,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   deleteTask: async (id, deleteFiles = false) => {
-    if (deleteFiles) {
-      await deleteProjectFiles(id)
-    }
+    await deleteProject(id, { deleteFiles })
     await clearAgentLogs(id)
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
@@ -479,6 +477,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       agentProfile: normalizeAgentProfile(nextSelectedTask?.agentProfile, get().agentProfile),
       contractVersion: normalizeContractVersion(nextSelectedTask?.contractVersion, get().contractVersion),
     })
+    return true
   },
 
   duplicateTask: (id) => {
