@@ -129,6 +129,22 @@ describe('agentStore plan refreshes', () => {
 
     expect(refreshPlan).toHaveBeenCalledWith('brain-age-inference', { enterPlan: true })
   })
+
+  it('clears thinking state when auto-run reports a terminal stop reason', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+    const store = useAgentStore.getState()
+    store.markSessionPending('PRJ-0001')
+
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-0001',
+      content: 'auto-run stop reason: queue exhausted, no replan condition met',
+    })
+
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-0001')).toBe(false)
+    expect(refreshPlan).toHaveBeenCalledWith('PRJ-0001')
+  })
 })
 
 describe('agentStore token streaming', () => {

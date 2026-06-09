@@ -54,6 +54,11 @@ function shouldEnterPlanFromMetadata(meta: Record<string, unknown> | undefined):
   return phase === 'questions' || phase === 'draft'
 }
 
+function isTerminalProgressMessage(msg: WsResponse): boolean {
+  if (msg.type !== 'progress') return false
+  return msg.content.trim().toLowerCase().startsWith('auto-run stop reason:')
+}
+
 function readMetadataString(meta: Record<string, unknown> | undefined, key: string): string | null {
   const value = meta?.[key]
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
@@ -252,9 +257,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const usageUpdate = readUsageFromMetadata(msg.metadata)
     const enterPlan = shouldEnterPlanFromMetadata(msg.metadata)
     const projectRefreshId = resolveProjectRefreshId(msg, sessionId)
+    const terminalProgress = isTerminalProgressMessage(msg)
 
     set((state) => {
-      const streaming = msg.type === 'progress' || msg.type === 'tool_call'
+      const streaming = (msg.type === 'progress' && !terminalProgress) || msg.type === 'tool_call'
       const next: Partial<AgentState> = {
         streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, streaming),
       }
@@ -296,7 +302,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return next as AgentState
     })
 
-    if (msg.type === 'progress' || msg.type === 'tool_call') {
+    if (terminalProgress) {
+      stopPlanPolling(projectRefreshId)
+      if (projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(projectRefreshId)
+        scheduleResponseRefreshes(projectRefreshId, false)
+      }
+    } else if (msg.type === 'progress' || msg.type === 'tool_call') {
       clearResponseRefreshTimers(projectRefreshId)
       ensurePlanPolling(projectRefreshId)
       if (enterPlan && projectRefreshId) {
