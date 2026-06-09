@@ -229,18 +229,57 @@ export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]
   }
 }
 
-export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
+export interface DeleteProjectResult {
+  deleted: boolean
+  removed: boolean
+  reason?: string
+}
+
+function readErrorMessage(data: unknown, fallback: string): string {
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const error = record.error ?? record.reason
+  return typeof error === 'string' && error.trim().length > 0 ? error.trim() : fallback
+}
+
+export async function deleteProject(
+  sessionId: string,
+  options: { deleteFiles?: boolean } = {},
+): Promise<DeleteProjectResult> {
+  const deleteFiles = options.deleteFiles ?? true
+  const encoded = encodeURIComponent(sessionId)
+  const resp = deleteFiles
+    ? await fetch(`${getApiUrl()}/projects?session_id=${encoded}`, { method: 'DELETE' })
+    : await fetch(`${getApiUrl()}/projects/${encoded}/remove`, { method: 'POST' })
+
+  let data: unknown = null
   try {
-    const resp = await fetch(
-      `${getApiUrl()}/projects?session_id=${encodeURIComponent(sessionId)}`,
-      { method: 'DELETE' },
-    )
-    if (!resp.ok) return false
-    const data = await resp.json()
-    return !!data?.deleted
+    data = await resp.json()
   } catch {
-    return false
+    data = null
   }
+
+  if (!resp.ok) {
+    throw new Error(readErrorMessage(data, `project delete failed (${resp.status})`))
+  }
+
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const result: DeleteProjectResult = {
+    deleted: record.deleted === true,
+    removed: record.removed === true || record.deleted === true,
+    reason: typeof record.reason === 'string' ? record.reason : undefined,
+  }
+
+  if (deleteFiles && !result.deleted) {
+    throw new Error(result.reason || 'project files were not deleted')
+  }
+  if (!deleteFiles && !result.removed) {
+    throw new Error(result.reason || 'project was not removed')
+  }
+  return result
+}
+
+export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
+  return (await deleteProject(sessionId, { deleteFiles: true })).deleted
 }
 
 export interface UploadedProjectFile {

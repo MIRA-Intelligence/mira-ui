@@ -29,13 +29,26 @@ export function ProjectQueue() {
     stats,
   } = useProjectStore()
   const lang = useSettingsStore((s) => s.language)
+  const openNewProject = useUiStore((s) => s.openNewProject)
+  const pushSystemMessage = useUiStore((s) => s.pushSystemMessage)
   const modePollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const modePollDeadlineRef = useRef<number>(0)
 
-  const handleDelete = (id: string, deleteFiles: boolean) => {
-    deleteTask(id, deleteFiles)
+  const handleDelete = async (id: string, deleteFiles: boolean) => {
+    try {
+      await deleteTask(id, deleteFiles)
+      pushSystemMessage(
+        t(deleteFiles ? 'projectDeletedFromDisk' : 'projectRemovedFromUi', lang),
+        { severity: 'success', ttlMs: 4000 },
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      pushSystemMessage(
+        t('projectDeleteFailed', lang, { reason: reason || t('unknownError', lang) }),
+        { severity: 'error', ttlMs: 7000 },
+      )
+    }
   }
-  const { openNewProject } = useUiStore()
   const { chats, activeChatId, createChat, selectChat, renameChat, deleteChat } = useChatStore()
   const isChatActive = appMode === 'normal'
 

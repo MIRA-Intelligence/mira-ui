@@ -573,7 +573,11 @@ export function NewProjectModal() {
           ...referencesUpload.extracted.map((item) => item.path),
         ])
       } catch (err) {
-        await deleteTask(projectId, true)
+        try {
+          await deleteTask(projectId, true)
+        } catch {
+          // Preserve the upload error shown to the user; cleanup can be retried from the queue.
+        }
         setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
         setCreating(false)
         return
