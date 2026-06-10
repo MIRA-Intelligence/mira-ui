@@ -140,6 +140,18 @@ export interface PlanData {
   updatedAt?: string
 }
 
+/* ── Plan revision audit (ReAct adaptive replanning) ── */
+
+export type PlanRevisionAction = 'add' | 'skip' | 'remove' | 'reprioritize'
+
+export interface PlanRevision {
+  action: PlanRevisionAction
+  target?: string
+  rationale?: string
+  sourceExperiment?: string
+  at?: string
+}
+
 /* ── Final result / deliverable ────────────────── */
 
 export interface ResultData {
@@ -171,6 +183,7 @@ export interface ProjectTask {
   knowledge: string[]
   research: ResearchData
   plan?: PlanData
+  revisions?: PlanRevision[]
   result: ResultData
   startedAt: string
 }
@@ -227,6 +240,13 @@ export interface TaskPlan {
     }
     feedback?: string
   }
+  revisions?: Array<{
+    action?: string
+    target?: string
+    rationale?: string
+    source_experiment?: string
+    at?: string
+  }>
   result?: {
     summary?: string
     output_path?: string

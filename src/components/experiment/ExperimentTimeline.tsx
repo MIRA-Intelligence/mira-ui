@@ -107,6 +107,21 @@ export function ExperimentTimeline() {
         ))}
       </div>
 
+      {/* Plan revisions (ReAct adaptive replanning audit) */}
+      {(task.revisions?.length ?? 0) > 0 && (
+        <button
+          onClick={() => selectExperiment('__revisions__')}
+          className={`mx-1.5 mb-1.5 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors ${
+            selectedExpId === '__revisions__'
+              ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)]'
+              : 'hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
+          }`}
+        >
+          <span className="text-[11px]">🔀 {t('planRevisions', lang)}</span>
+          <span className="text-[10px] text-[var(--color-text-muted)] ml-1">({task.revisions?.length ?? 0})</span>
+        </button>
+      )}
+
       {/* Knowledge count */}
       {task.knowledge.length > 0 && (
         <button
