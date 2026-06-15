@@ -496,4 +496,60 @@ describe('LocalEngineManager', () => {
     expect(state.version).toBe('0.4.0')
     expect(state.error).toBeNull()
   })
+
+  it('pauses automatic Windows bootstrap after repeated service failures and allows force retry', async () => {
+    const restorePlatform = mockProcessPlatform('win32')
+    try {
+      const executable = process.env.MIRA_ENGINE_PATH as string
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 503 }))
+      vi.spyOn(LocalEngineManager.prototype, 'status').mockResolvedValue({
+        result: {
+          ok: true,
+          code: 0,
+          stdout: '{}',
+          stderr: '',
+          command: [executable, 'status'],
+          executablePath: executable,
+        },
+        payload: {
+          installed: false,
+          running: false,
+          port: 18790,
+          engine_manifest: { sha256: 'old-sha' },
+        },
+      })
+      const installSpy = vi.spyOn(LocalEngineManager.prototype, 'installService').mockResolvedValue({
+        ok: false,
+        code: 1,
+        stdout: '',
+        stderr: 'service install failed',
+        command: [executable, 'install-service'],
+        executablePath: executable,
+      })
+
+      const manager = new LocalEngineManager()
+      const internals = manager as unknown as {
+        windowsBootstrapFailures: number[]
+        windowsBootstrapCooldownUntil: number
+      }
+      await manager.bootstrapLocalEngine()
+      await manager.bootstrapLocalEngine()
+      await manager.bootstrapLocalEngine()
+      expect(installSpy).toHaveBeenCalledTimes(3)
+      expect(internals.windowsBootstrapFailures).toHaveLength(3)
+      expect(internals.windowsBootstrapCooldownUntil).toBeGreaterThan(Date.now())
+
+      const blocked = await manager.bootstrapLocalEngine()
+      expect(blocked.phase).toBe('error')
+      expect(blocked.message).toContain('paused')
+      expect(installSpy).toHaveBeenCalledTimes(3)
+
+      const forced = await manager.bootstrapLocalEngine({ force: true })
+      expect(forced.phase).toBe('error')
+      expect(installSpy).toHaveBeenCalledTimes(4)
+    } finally {
+      restorePlatform()
+    }
+  })
+
 })

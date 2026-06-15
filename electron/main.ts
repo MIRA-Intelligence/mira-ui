@@ -41,7 +41,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  ipcMain.handle('engine:bootstrap', async () => engineManager.bootstrapLocalEngine())
+  ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
   ipcMain.handle('engine:start', async () => engineManager.start())

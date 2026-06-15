@@ -71,6 +71,9 @@ const HEALTH_POLL_FAST_WINDOW_MS = 5_000
 const COMMAND_TIMEOUT_MS = 120_000
 const REPAIR_TIMEOUT_MS = 180_000
 const INSTALL_RETRY_DELAY_MS = 3_000
+const WINDOWS_CRASH_LOOP_WINDOW_MS = 5 * 60_000
+const WINDOWS_CRASH_LOOP_COOLDOWN_MS = 10 * 60_000
+const WINDOWS_CRASH_LOOP_FAILURE_LIMIT = 3
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
 const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
@@ -95,12 +98,19 @@ function engineExecutableName(): string {
   return process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine'
 }
 
-function bundledEngineCandidate(): string {
+function bundledEngineCandidates(): string[] {
   const platformDir = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
   const baseDir = app.isPackaged
     ? process.resourcesPath
     : path.resolve(app.getAppPath(), '..')
-  return path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName())
+  if (!baseDir) return []
+  if (process.platform === 'win32') {
+    return [
+      path.join(baseDir, 'bundled-engine', platformDir, 'mira-engine', engineExecutableName()),
+      path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName()),
+    ]
+  }
+  return [path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName())]
 }
 
 function engineManifestCandidate(executablePath: string): string {
@@ -118,14 +128,15 @@ async function isExecutable(candidate: string): Promise<boolean> {
 }
 
 async function resolveExecutable(): Promise<string | null> {
+  for (const bundled of bundledEngineCandidates()) {
+    if (await isExecutable(bundled)) {
+      return bundled
+    }
+  }
+
   const fromEnv = process.env.MIRA_ENGINE_PATH?.trim()
   if (fromEnv && await isExecutable(fromEnv)) {
     return fromEnv
-  }
-
-  const bundled = bundledEngineCandidate()
-  if (await isExecutable(bundled)) {
-    return bundled
   }
 
   return null
@@ -165,6 +176,8 @@ function defaultState(): EngineBootstrapState {
 export class LocalEngineManager {
   private state: EngineBootstrapState = defaultState()
   private bootstrapPromise: Promise<EngineBootstrapState> | null = null
+  private windowsBootstrapFailures: number[] = []
+  private windowsBootstrapCooldownUntil = 0
 
   getState(): EngineBootstrapState {
     return { ...this.state, lastCommand: this.state.lastCommand ? [...this.state.lastCommand] : null }
@@ -173,6 +186,36 @@ export class LocalEngineManager {
   private setState(patch: Partial<EngineBootstrapState>): EngineBootstrapState {
     this.state = { ...this.state, ...patch }
     return this.getState()
+  }
+
+  private windowsCrashLoopCooldownState(): EngineBootstrapState | null {
+    if (process.platform !== 'win32') return null
+    const now = Date.now()
+    if (now >= this.windowsBootstrapCooldownUntil) return null
+    const seconds = Math.max(1, Math.ceil((this.windowsBootstrapCooldownUntil - now) / 1000))
+    return this.setState({
+      phase: 'error',
+      operation: 'bootstrap',
+      message: `Windows local engine auto-start is paused for ${seconds}s because repeated service start attempts failed. Use Repair service to force one manual attempt.`,
+      serviceRunning: false,
+      error: 'windows local engine crash-loop guard active',
+    })
+  }
+
+  private recordWindowsBootstrapFailure(): void {
+    if (process.platform !== 'win32') return
+    const now = Date.now()
+    const windowStart = now - WINDOWS_CRASH_LOOP_WINDOW_MS
+    this.windowsBootstrapFailures = this.windowsBootstrapFailures.filter((timestamp) => timestamp >= windowStart)
+    this.windowsBootstrapFailures.push(now)
+    if (this.windowsBootstrapFailures.length >= WINDOWS_CRASH_LOOP_FAILURE_LIMIT) {
+      this.windowsBootstrapCooldownUntil = now + WINDOWS_CRASH_LOOP_COOLDOWN_MS
+    }
+  }
+
+  private clearWindowsBootstrapFailures(): void {
+    this.windowsBootstrapFailures = []
+    this.windowsBootstrapCooldownUntil = 0
   }
 
   private configPath(): string {
@@ -801,6 +844,7 @@ export class LocalEngineManager {
           })
         }
       }
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'update',
@@ -833,6 +877,7 @@ export class LocalEngineManager {
     if (!health.ok) {
       const start = await this.start()
       if (!start.ok) {
+        this.recordWindowsBootstrapFailure()
         return this.setState({
           phase: 'error',
           operation: 'update',
@@ -848,6 +893,7 @@ export class LocalEngineManager {
     }
 
     if (!health.ok) {
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'update',
@@ -860,6 +906,7 @@ export class LocalEngineManager {
       })
     }
 
+    this.clearWindowsBootstrapFailures()
     return this.setState({
       phase: 'ready',
       operation: null,
@@ -873,6 +920,7 @@ export class LocalEngineManager {
   }
 
   async repairLocalEngineService(): Promise<EngineBootstrapState> {
+    this.clearWindowsBootstrapFailures()
     this.setState({
       phase: 'repairing',
       operation: 'repair',
@@ -886,6 +934,7 @@ export class LocalEngineManager {
 
     const install = await this.installService(port)
     if (!install.ok) {
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'repair',
@@ -900,6 +949,7 @@ export class LocalEngineManager {
 
     const start = await this.start()
     if (!start.ok) {
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'repair',
@@ -948,7 +998,14 @@ export class LocalEngineManager {
     })
   }
 
-  async bootstrapLocalEngine(): Promise<EngineBootstrapState> {
+  async bootstrapLocalEngine(options: { force?: boolean } = {}): Promise<EngineBootstrapState> {
+    if (!options.force) {
+      const cooldownState = this.windowsCrashLoopCooldownState()
+      if (cooldownState) return cooldownState
+    } else {
+      this.clearWindowsBootstrapFailures()
+    }
+
     if (this.bootstrapPromise) {
       return this.bootstrapPromise
     }
@@ -982,6 +1039,7 @@ export class LocalEngineManager {
       if (fastHealth.ok) {
         if (this.liveEngineMatchesBundle(fastHealth, fastExecutablePath, bundledManifest)) {
           if (process.platform !== 'win32') {
+            this.clearWindowsBootstrapFailures()
             return this.setState({
               phase: 'ready',
               operation: null,
@@ -1006,6 +1064,7 @@ export class LocalEngineManager {
             )
             if (updated) return updated
           } else {
+            this.clearWindowsBootstrapFailures()
             return this.setState({
               phase: 'ready',
               operation: null,
@@ -1085,6 +1144,7 @@ export class LocalEngineManager {
         })
         const install = await this.installService(port)
         if (!install.ok) {
+          this.recordWindowsBootstrapFailure()
           return this.setState({
             phase: 'error',
             operation: 'install',
@@ -1111,6 +1171,7 @@ export class LocalEngineManager {
         })
         const started = await this.start()
         if (!started.ok) {
+          this.recordWindowsBootstrapFailure()
           return this.setState({
             phase: 'error',
             operation: 'start',
@@ -1135,6 +1196,7 @@ export class LocalEngineManager {
 
       const health = await this.waitForHealth(port, status.payload?.log_file)
       if (!health.ok) {
+        this.recordWindowsBootstrapFailure()
         return this.setState({
           phase: 'error',
           operation: serviceInstalled ? 'start' : 'install',
@@ -1147,6 +1209,7 @@ export class LocalEngineManager {
         })
       }
 
+      this.clearWindowsBootstrapFailures()
       return this.setState({
         phase: 'ready',
         operation: null,

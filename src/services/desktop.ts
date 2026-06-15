@@ -44,8 +44,8 @@ export function hasDesktopEngineManager(): boolean {
   return typeof window !== 'undefined' && Boolean(getElectronApi()?.bootstrapLocalEngine)
 }
 
-export async function bootstrapLocalEngine(): Promise<LocalEngineBootstrapState | null> {
-  return getElectronApi()?.bootstrapLocalEngine?.() ?? null
+export async function bootstrapLocalEngine(options?: { force?: boolean }): Promise<LocalEngineBootstrapState | null> {
+  return getElectronApi()?.bootstrapLocalEngine?.(options) ?? null
 }
 
 export async function getBootstrapState(): Promise<LocalEngineBootstrapState | null> {
