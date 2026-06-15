@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { chmod, copyFile, cp, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+
+import { sha256Directory, sha256File } from './engine-payload-hash.mjs'
 
 const args = process.argv.slice(2)
 const platformDir = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
@@ -163,13 +164,6 @@ async function copyLocalWinSwBinary(localBinary) {
   await chmod(winswPath, 0o755)
 }
 
-async function sha256File(filePath) {
-  const hash = createHash('sha256')
-  const raw = await readFile(filePath)
-  hash.update(raw)
-  return hash.digest('hex')
-}
-
 function currentGitSha(cwd) {
   const result = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], {
     cwd,
@@ -198,9 +192,26 @@ function currentPackageVersion() {
   }
 }
 
+async function enginePayloadFingerprint() {
+  // macOS/Linux ship a single self-contained executable, so its file hash is
+  // the whole engine identity. Windows ships a PyInstaller one-dir payload
+  // where the launcher is just a small bootloader and the real code/data lives
+  // in _internal/ — hashing only the launcher would miss data/native-library
+  // updates, so fingerprint the entire payload directory. Sidecar files we
+  // write ourselves are excluded so they never flip the engine identity.
+  if (process.platform !== 'win32') {
+    const stats = await stat(enginePath)
+    return { sha256: await sha256File(enginePath), size: stats.size }
+  }
+  const winswConfigPath = path.join(enginePayloadDir, 'MiraEngineService.xml')
+  return sha256Directory(enginePayloadDir, {
+    exclude: [engineManifestPath, feedbackConfigPath, winswPath, winswConfigPath],
+  })
+}
+
 async function writeBundledEngineManifest() {
-  const stats = await stat(enginePath)
   const feedbackConfigSha256 = existsSync(feedbackConfigPath) ? await sha256File(feedbackConfigPath) : null
+  const { sha256, size } = await enginePayloadFingerprint()
   const manifest = {
     schema: 1,
     kind: 'mira-bundled-engine',
@@ -208,8 +219,8 @@ async function writeBundledEngineManifest() {
     platform: process.platform,
     arch: process.arch,
     executable: path.relative(engineDir, enginePath).split(path.sep).join('/'),
-    sha256: await sha256File(enginePath),
-    size: stats.size,
+    sha256,
+    size,
     uiBundleVersion: currentPackageVersion(),
     engineReleaseTag: process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || null,
     source: process.env.MIRA_ENGINE_LOCAL_DIR?.trim() || process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
