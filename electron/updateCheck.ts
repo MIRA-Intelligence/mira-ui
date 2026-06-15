@@ -1,9 +1,8 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { promises as fs } from 'node:fs'
-import { join } from 'node:path'
 import { request } from 'node:https'
 
 import { compareVersions, isPrerelease, parseVersion } from '../src/lib/version'
+import { getSkippedVersions, setSkippedVersions } from './appState'
 
 // GitHub repo to query for releases. Hard-coded since we own the repo and
 // shipping a setting for "where to check for updates" would invite confusion.
@@ -32,10 +31,6 @@ interface CacheEntry {
   result: UpdateInfo | null
 }
 
-interface SkipState {
-  skippedVersions: string[]
-}
-
 interface RawRelease {
   tag_name?: string
   name?: string
@@ -48,32 +43,6 @@ interface RawRelease {
 
 let cache: CacheEntry | null = null
 let getMainWindow: (() => BrowserWindow | null) | null = null
-
-function stateFile(): string {
-  return join(app.getPath('userData'), 'update-state.json')
-}
-
-async function readSkipState(): Promise<SkipState> {
-  try {
-    const raw = await fs.readFile(stateFile(), 'utf8')
-    const parsed = JSON.parse(raw) as Partial<SkipState>
-    if (!parsed || !Array.isArray(parsed.skippedVersions)) {
-      return { skippedVersions: [] }
-    }
-    return { skippedVersions: parsed.skippedVersions.filter((v) => typeof v === 'string') }
-  } catch {
-    return { skippedVersions: [] }
-  }
-}
-
-async function writeSkipState(state: SkipState): Promise<void> {
-  try {
-    await fs.mkdir(app.getPath('userData'), { recursive: true })
-    await fs.writeFile(stateFile(), JSON.stringify(state, null, 2), 'utf8')
-  } catch {
-    /* swallow — skip-list is best-effort */
-  }
-}
 
 function fetchJson(url: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -208,7 +177,7 @@ export async function checkForUpdates(opts: {
 
 async function notifyRendererIfActionable(info: UpdateInfo | null): Promise<void> {
   if (!info) return
-  const { skippedVersions } = await readSkipState()
+  const skippedVersions = await getSkippedVersions()
   if (skippedVersions.includes(info.version)) return
   const win = getMainWindow?.()
   if (!win || win.isDestroyed()) return
@@ -250,21 +219,19 @@ export function registerUpdateCheck(getWindow: () => BrowserWindow | null): void
 
   ipcMain.handle('update:skip-version', async (_event, version: string) => {
     if (typeof version !== 'string' || !version) return false
-    const state = await readSkipState()
-    if (!state.skippedVersions.includes(version)) {
-      state.skippedVersions.push(version)
-      await writeSkipState(state)
+    const skippedVersions = await getSkippedVersions()
+    if (!skippedVersions.includes(version)) {
+      await setSkippedVersions([...skippedVersions, version])
     }
     return true
   })
 
   ipcMain.handle('update:get-skipped-versions', async () => {
-    const state = await readSkipState()
-    return state.skippedVersions
+    return getSkippedVersions()
   })
 
   ipcMain.handle('update:reset-skipped-versions', async () => {
-    await writeSkipState({ skippedVersions: [] })
+    await setSkippedVersions([])
     return true
   })
 }
