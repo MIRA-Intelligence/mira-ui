@@ -12,7 +12,7 @@ interface ImportMeta {
 interface Window {
   electronAPI?: {
     platform: string
-    bootstrapLocalEngine?: () => Promise<{
+    bootstrapLocalEngine?: (options?: { force?: boolean }) => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
       executablePath: string | null

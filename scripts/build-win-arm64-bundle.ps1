@@ -445,9 +445,10 @@ if (-not $SkipEngineBuild) {
   Invoke-Checked -FilePath $pyInstaller -Arguments @("--clean", "mira-engine.spec") -WorkingDirectory $MiraRepo
 }
 
-$engineExe = Join-Path $MiraRepo "dist\mira-engine.exe"
+$engineDir = Join-Path $MiraRepo "dist\mira-engine"
+$engineExe = Join-Path $engineDir "mira-engine.exe"
 if (-not (Test-Path $engineExe)) {
-  throw "mira-engine.exe was not found: $engineExe"
+  throw "Windows one-dir mira-engine.exe was not found: $engineExe. Ensure mira-engine.spec produced dist\mira-engine\mira-engine.exe instead of a one-file dist\mira-engine.exe."
 }
 
 $downloadsDir = Join-Path $env:USERPROFILE "Downloads"
@@ -468,12 +469,14 @@ if (-not $SkipNpmCi) {
   Invoke-Checked -FilePath $npmPath -Arguments @("ci") -WorkingDirectory $MiraUiRepo
 }
 
+$oldEngineDir = [System.Environment]::GetEnvironmentVariable("MIRA_ENGINE_LOCAL_DIR", "Process")
 $oldEngineBinary = [System.Environment]::GetEnvironmentVariable("MIRA_ENGINE_LOCAL_BINARY", "Process")
 $oldWinSwBinary = [System.Environment]::GetEnvironmentVariable("MIRA_WINSW_LOCAL_BINARY", "Process")
 $oldBundleVersion = [System.Environment]::GetEnvironmentVariable("MIRA_UI_BUNDLE_VERSION", "Process")
 $oldBundleArtifactVersion = [System.Environment]::GetEnvironmentVariable("MIRA_UI_BUNDLE_ARTIFACT_VERSION", "Process")
 try {
-  $env:MIRA_ENGINE_LOCAL_BINARY = $engineExe
+  $env:MIRA_ENGINE_LOCAL_DIR = $engineDir
+  Remove-Item Env:\MIRA_ENGINE_LOCAL_BINARY -ErrorAction SilentlyContinue
   $env:MIRA_WINSW_LOCAL_BINARY = $resolvedWinSwExe
   if ($BundleVersion) {
     $env:MIRA_UI_BUNDLE_VERSION = $BundleVersion
@@ -484,6 +487,11 @@ try {
   $bundleArgs = @("run", "dist:bundle:win", "--", "--arm64")
   Invoke-Checked -FilePath $npmPath -Arguments $bundleArgs -WorkingDirectory $MiraUiRepo
 } finally {
+  if ($null -eq $oldEngineDir) {
+    Remove-Item Env:\MIRA_ENGINE_LOCAL_DIR -ErrorAction SilentlyContinue
+  } else {
+    $env:MIRA_ENGINE_LOCAL_DIR = $oldEngineDir
+  }
   if ($null -eq $oldEngineBinary) {
     Remove-Item Env:\MIRA_ENGINE_LOCAL_BINARY -ErrorAction SilentlyContinue
   } else {

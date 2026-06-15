@@ -3,7 +3,7 @@ import type { IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
-  bootstrapLocalEngine: () => ipcRenderer.invoke('engine:bootstrap'),
+  bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),

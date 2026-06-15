@@ -1,21 +1,22 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { chmod, copyFile, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const args = process.argv.slice(2)
 const platformDir = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
 const engineDir = path.resolve(process.cwd(), 'bundled-engine', platformDir)
-const enginePath = path.resolve(
-  process.cwd(),
-  'bundled-engine',
-  platformDir,
+const enginePayloadDir = process.platform === 'win32'
+  ? path.join(engineDir, 'mira-engine')
+  : engineDir
+const enginePath = path.join(
+  enginePayloadDir,
   process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine',
 )
-const engineManifestPath = path.resolve(engineDir, 'mira-engine.manifest.json')
-const feedbackConfigPath = path.resolve(engineDir, 'mira-engine.feedback.json')
-const winswPath = path.join(engineDir, 'MiraEngineService.exe')
+const engineManifestPath = path.resolve(enginePayloadDir, 'mira-engine.manifest.json')
+const feedbackConfigPath = path.resolve(enginePayloadDir, 'mira-engine.feedback.json')
+const winswPath = path.join(enginePayloadDir, 'MiraEngineService.exe')
 
 async function localElectronDistPreservesFrameworkSymlinks() {
   if (process.platform !== 'darwin') return false
@@ -57,7 +58,7 @@ function bundledEngineAssetName() {
     return `mira-engine-macos-${process.arch === 'arm64' ? 'arm64' : 'x86_64'}`
   }
   if (process.platform === 'win32') {
-    return 'mira-engine-windows-x86_64.exe'
+    return 'mira-engine-windows-x86_64.zip'
   }
   return 'mira-engine-linux-x86_64'
 }
@@ -98,7 +99,7 @@ async function downloadReleaseAsset() {
   const configuredTag = process.env.MIRA_ENGINE_RELEASE_TAG?.trim()
   const releaseTag = configuredTag || latestReleaseTag(repo) || await packageVersionToReleaseTag()
   const asset = bundledEngineAssetName()
-  const targetDir = path.dirname(enginePath)
+  const targetDir = process.platform === 'win32' ? engineDir : path.dirname(enginePath)
 
   await mkdir(targetDir, { recursive: true })
 
@@ -116,7 +117,20 @@ async function downloadReleaseAsset() {
   }
 
   const downloadedPath = path.join(targetDir, asset)
-  if (downloadedPath !== enginePath) {
+  if (process.platform === 'win32') {
+    await rm(enginePayloadDir, { recursive: true, force: true })
+    const extract = spawnSync('tar', ['-xf', downloadedPath, '-C', targetDir], {
+      stdio: 'inherit',
+      env: process.env,
+    })
+    if (extract.status !== 0) {
+      throw new Error(`Failed to extract ${downloadedPath}`)
+    }
+    if (!existsSync(enginePath)) {
+      throw new Error(`Downloaded Windows engine asset did not contain ${enginePath}`)
+    }
+    await rm(downloadedPath, { force: true })
+  } else if (downloadedPath !== enginePath) {
     await rename(downloadedPath, enginePath)
   }
   await chmod(enginePath, 0o755)
@@ -126,6 +140,20 @@ async function copyLocalEngineBinary(localBinary) {
   const targetDir = path.dirname(enginePath)
   await mkdir(targetDir, { recursive: true })
   await copyFile(localBinary, enginePath)
+  await chmod(enginePath, 0o755)
+}
+
+async function copyLocalEngineDirectory(localDir) {
+  if (process.platform !== 'win32') {
+    throw new Error('MIRA_ENGINE_LOCAL_DIR is only supported for Windows one-dir engine bundles.')
+  }
+  const launcher = path.join(localDir, 'mira-engine.exe')
+  if (!existsSync(launcher)) {
+    throw new Error(`MIRA_ENGINE_LOCAL_DIR must contain mira-engine.exe: ${launcher}`)
+  }
+  await rm(enginePayloadDir, { recursive: true, force: true })
+  await mkdir(path.dirname(enginePayloadDir), { recursive: true })
+  await cp(localDir, enginePayloadDir, { recursive: true })
   await chmod(enginePath, 0o755)
 }
 
@@ -179,12 +207,12 @@ async function writeBundledEngineManifest() {
     generatedAt: new Date().toISOString(),
     platform: process.platform,
     arch: process.arch,
-    executable: path.basename(enginePath),
+    executable: path.relative(engineDir, enginePath).split(path.sep).join('/'),
     sha256: await sha256File(enginePath),
     size: stats.size,
     uiBundleVersion: currentPackageVersion(),
     engineReleaseTag: process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || null,
-    source: process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
+    source: process.env.MIRA_ENGINE_LOCAL_DIR?.trim() || process.env.MIRA_ENGINE_LOCAL_BINARY?.trim() ? 'local' : 'release',
     miraUiGitSha: currentGitSha(process.cwd()),
     feedbackConfigSha256,
   }
@@ -274,6 +302,12 @@ async function ensureWindowsServiceWrapper() {
 }
 
 async function ensureBundledEngine() {
+  const localDir = process.env.MIRA_ENGINE_LOCAL_DIR?.trim()
+  if (localDir) {
+    await copyLocalEngineDirectory(localDir)
+    return
+  }
+
   const localBinary = process.env.MIRA_ENGINE_LOCAL_BINARY?.trim()
   if (localBinary) {
     await copyLocalEngineBinary(localBinary)
@@ -297,7 +331,7 @@ async function ensureBundledEngine() {
   if (!existsSync(enginePath)) {
     throw new Error(
       `Bundled engine binary not found: ${enginePath}\n` +
-      'Install gh and set MIRA_ENGINE_RELEASE_TAG, or provide MIRA_ENGINE_LOCAL_BINARY.',
+      'Install gh and set MIRA_ENGINE_RELEASE_TAG, or provide MIRA_ENGINE_LOCAL_DIR (Windows one-dir) or MIRA_ENGINE_LOCAL_BINARY.',
     )
   }
 }
