@@ -136,7 +136,7 @@ function applyRuntimePayload(
     provider,
     model: payload.runtime.model,
     reasoningEffort: payload.runtime.reasoning_effort,
-    temperature: String(payload.runtime.temperature ?? 0.1),
+    temperature: payload.runtime.temperature == null ? '' : String(payload.runtime.temperature),
     maxToolIterations: String(payload.runtime.max_tool_iterations),
     restrictToWorkspace: payload.runtime.restrict_to_workspace,
     apiBase: providerSettings?.api_base ?? providerSettings?.default_api_base ?? '',
@@ -396,9 +396,16 @@ export function SettingsModal() {
         if (providerSnapshot?.api_key_required && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
           throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
-        const parsedTemperature = Number(draft.temperature.trim())
-        if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
-          throw new Error(t('settingsTemperatureInvalid', curLang))
+        const rawTemperature = draft.temperature.trim()
+        let temperatureValue: number | null
+        if (rawTemperature === '') {
+          temperatureValue = null
+        } else {
+          const parsedTemperature = Number(rawTemperature)
+          if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
+            throw new Error(t('settingsTemperatureInvalid', curLang))
+          }
+          temperatureValue = parsedTemperature
         }
 
         // Skip the (slow) re-bootstrap when the engine is already running and
@@ -437,7 +444,7 @@ export function SettingsModal() {
             provider: draft.provider,
             model: trimmedModel,
             reasoning_effort: draft.reasoningEffort,
-            temperature: parsedTemperature,
+            temperature: temperatureValue,
             max_tool_iterations: Number(draft.maxToolIterations),
             restrict_to_workspace: draft.restrictToWorkspace,
           },
@@ -961,7 +968,7 @@ export function SettingsModal() {
                   onChange={(e) => setDraft((current) => ({ ...current, temperature: e.target.value }))}
                   className={inputClass}
                   inputMode="decimal"
-                  placeholder="0.1"
+                  placeholder={t('settingsTemperaturePlaceholder', curLang)}
                 />
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
                   {t('settingsTemperatureHint', curLang)}
