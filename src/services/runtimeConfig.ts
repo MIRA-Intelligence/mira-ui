@@ -32,6 +32,7 @@ export interface RuntimeConfigPayload {
     provider: string
     model: string
     reasoning_effort: ReasoningEffort
+    temperature: number | null
     max_tool_iterations: number
     restrict_to_workspace: boolean
     setup_required?: boolean
@@ -84,6 +85,7 @@ export async function saveRuntimeConfig(payload: {
     provider: string
     model: string
     reasoning_effort: ReasoningEffort
+    temperature: number | null
     max_tool_iterations: number
     restrict_to_workspace: boolean
   }

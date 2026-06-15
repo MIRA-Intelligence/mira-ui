@@ -29,6 +29,7 @@ function runtimePayload(workspace: string, configPath: string): RuntimeConfigPay
       provider: 'custom',
       model: 'custom/test',
       reasoning_effort: null,
+      temperature: 0.1,
       max_tool_iterations: 200,
       restrict_to_workspace: false,
     },
