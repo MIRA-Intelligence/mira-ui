@@ -4,6 +4,7 @@ import type { IpcRendererEvent } from 'electron'
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
+  setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
-import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager } from '@/services/desktop'
+import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager, setEngineModeHint } from '@/services/desktop'
 import type { LocalEngineBootstrapState } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import { fetchRuntimeConfig } from '@/services/runtimeConfig'
@@ -53,6 +53,13 @@ export function useWebSocket() {
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
+
+  // Mirror the active deployment mode to the main process so the next app
+  // launch can pre-warm (or skip) the local engine based on what the user
+  // last used. Runs on mount (seeding the persisted hint) and on every toggle.
+  useEffect(() => {
+    void setEngineModeHint(deploymentMode)
+  }, [deploymentMode])
 
   useEffect(() => {
     let disposed = false

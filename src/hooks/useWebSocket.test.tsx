@@ -16,6 +16,7 @@ vi.mock('@/services/desktop', () => ({
   hasDesktopEngineManager: vi.fn(() => true),
   bootstrapLocalEngine: vi.fn(),
   getBootstrapState: vi.fn(),
+  setEngineModeHint: vi.fn(),
 }))
 
 vi.mock('@/services/engine', () => ({

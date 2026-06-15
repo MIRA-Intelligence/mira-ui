@@ -24,6 +24,7 @@ interface Window {
       lastCommand: string[] | null
       error: string | null
     }>
+    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual') => Promise<boolean>
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
