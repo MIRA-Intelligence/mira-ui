@@ -68,6 +68,7 @@ type SettingsDraft = {
   provider: string
   model: string
   reasoningEffort: ReasoningEffort
+  temperature: string
   maxToolIterations: string
   restrictToWorkspace: boolean
   apiBase: string
@@ -104,6 +105,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     provider: store.runtimeConfig?.runtime?.provider || 'auto',
     model: 'anthropic/claude-sonnet-4-5',
     reasoningEffort: null,
+    temperature: '0.1',
     maxToolIterations: '200',
     restrictToWorkspace: false,
     apiBase: '',
@@ -134,6 +136,7 @@ function applyRuntimePayload(
     provider,
     model: payload.runtime.model,
     reasoningEffort: payload.runtime.reasoning_effort,
+    temperature: String(payload.runtime.temperature ?? 0.1),
     maxToolIterations: String(payload.runtime.max_tool_iterations),
     restrictToWorkspace: payload.runtime.restrict_to_workspace,
     apiBase: providerSettings?.api_base ?? providerSettings?.default_api_base ?? '',
@@ -151,7 +154,7 @@ function resetWorkspaceScopedState() {
 // open), keep their value instead of overwriting it with the late server read.
 const PRESERVED_DRAFT_FIELDS = [
   'workspacePath', 'apiUrl', 'wsUrl', 'provider', 'model',
-  'reasoningEffort', 'maxToolIterations', 'restrictToWorkspace', 'apiBase', 'apiKey',
+  'reasoningEffort', 'temperature', 'maxToolIterations', 'restrictToWorkspace', 'apiBase', 'apiKey',
 ] as const
 
 function mergePreservingEdits(
@@ -393,6 +396,10 @@ export function SettingsModal() {
         if (providerSnapshot?.api_key_required && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
           throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
+        const parsedTemperature = Number(draft.temperature.trim())
+        if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
+          throw new Error(t('settingsTemperatureInvalid', curLang))
+        }
 
         // Skip the (slow) re-bootstrap when the engine is already running and
         // connected — we only need it up to accept the POST below.
@@ -430,6 +437,7 @@ export function SettingsModal() {
             provider: draft.provider,
             model: trimmedModel,
             reasoning_effort: draft.reasoningEffort,
+            temperature: parsedTemperature,
             max_tool_iterations: Number(draft.maxToolIterations),
             restrict_to_workspace: draft.restrictToWorkspace,
           },
@@ -946,6 +954,18 @@ export function SettingsModal() {
                     </option>
                   ))}
                 </select>
+
+                <Label text="Temperature" className="mt-3" />
+                <input
+                  value={draft.temperature}
+                  onChange={(e) => setDraft((current) => ({ ...current, temperature: e.target.value }))}
+                  className={inputClass}
+                  inputMode="decimal"
+                  placeholder="0.1"
+                />
+                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                  {t('settingsTemperatureHint', curLang)}
+                </p>
 
                 <Label text="Max Tool Iterations" className="mt-3" />
                 <input
