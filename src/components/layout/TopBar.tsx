@@ -4,6 +4,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useTimer } from '@/hooks/useTimer'
 import { t } from '@/i18n'
 import { FeedbackButton } from '@/components/feedback/FeedbackButton'
+import { CommunityButton } from '@/components/community/CommunityButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
@@ -35,6 +36,7 @@ export function TopBar() {
       </h1>
 
       <div className="flex items-center gap-3 min-w-[140px] justify-end">
+        <CommunityButton />
         <FeedbackButton />
         <div
           className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums"

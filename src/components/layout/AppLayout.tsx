@@ -8,6 +8,7 @@ import { TaskDetail } from '@/components/task/TaskDetail'
 import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
+import { CommunityModal } from '@/components/community/CommunityModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
@@ -232,6 +233,7 @@ export function AppLayout() {
       <SettingsModal />
       <LocalEngineUpdateModal />
       <SkillsPluginsModal />
+      <CommunityModal />
       <NewProjectModal />
       <FeedbackDialog />
     </div>
