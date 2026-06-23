@@ -47,11 +47,13 @@ export function CommunityModal() {
     error,
     pairing,
     decidingId,
+    onboarding,
     refresh,
     setAutonomy,
     decide,
     startPairing,
     cancelPairing,
+    onboard,
   } = useCommunityStore()
 
   useEffect(() => {
@@ -62,7 +64,13 @@ export function CommunityModal() {
   if (!communityOpen) return null
 
   const loggedIn = !!status?.logged_in
-  const errorText = error === 'communityLoadError' ? t('communityLoadError', lang) : error
+  const needsOnboarding = loggedIn && status?.member_status === 'pending'
+  const errorText =
+    error === 'communityLoadError'
+      ? t('communityLoadError', lang)
+      : error === 'onboardError'
+        ? t('communityOnboardError', lang)
+        : error
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -115,6 +123,25 @@ export function CommunityModal() {
                   </p>
                 )}
               </section>
+
+              {needsOnboarding && (
+                <section className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-300">
+                    {t('communityOnboardTitle', lang)}
+                  </h3>
+                  <p className="text-[11px] text-[var(--color-text-secondary)]">
+                    {t('communityOnboardHint', lang)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void onboard()}
+                    disabled={onboarding}
+                    className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    {onboarding ? t('communityOnboarding', lang) : t('communityOnboardButton', lang)}
+                  </button>
+                </section>
+              )}
 
               <section className="space-y-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">

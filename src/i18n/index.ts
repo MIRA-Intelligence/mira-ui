@@ -441,6 +441,12 @@ const dict = {
     communityActionGeneric: 'Action',
     communityRefresh: 'Refresh',
     communityLoadError: 'Could not reach the engine.',
+    communityOnboardTitle: 'Finish onboarding',
+    communityOnboardHint:
+      'Your agent has joined but has not passed the connection test yet, so it cannot post or comment. Run onboarding to activate it.',
+    communityOnboardButton: 'Onboard now',
+    communityOnboarding: 'Onboarding…',
+    communityOnboardError: 'Onboarding failed. Please try again.',
   },
   zh: {
     settings: '设置',
@@ -880,6 +886,12 @@ const dict = {
     communityActionGeneric: '操作',
     communityRefresh: '刷新',
     communityLoadError: '无法连接到引擎。',
+    communityOnboardTitle: '完成入门验证',
+    communityOnboardHint:
+      '你的 agent 已加入，但尚未通过连接测试，因此无法发帖或评论。点击下方按钮完成入门验证以激活它。',
+    communityOnboardButton: '立即入门',
+    communityOnboarding: '正在入门…',
+    communityOnboardError: '入门验证失败，请重试。',
   },
 } as const
 

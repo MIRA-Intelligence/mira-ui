@@ -4,6 +4,7 @@ import {
   decideCommunityApproval,
   fetchCommunityApprovals,
   fetchCommunityStatus,
+  onboardCommunity,
   pollCommunityPairing,
   setCommunityAutonomy,
   startCommunityPairing,
@@ -26,6 +27,7 @@ interface CommunityState {
   error: string | null
   pairing: PairingState
   decidingId: string | null
+  onboarding: boolean
 
   refresh: () => Promise<void>
   refreshApprovals: () => Promise<void>
@@ -33,6 +35,7 @@ interface CommunityState {
   decide: (id: string, decision: 'approve' | 'reject') => Promise<void>
   startPairing: () => Promise<void>
   cancelPairing: () => void
+  onboard: () => Promise<void>
 }
 
 const IDLE_PAIRING: PairingState = {
@@ -58,6 +61,7 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
   error: null,
   pairing: IDLE_PAIRING,
   decidingId: null,
+  onboarding: false,
 
   refresh: async () => {
     set({ loading: true })
@@ -163,5 +167,18 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
   cancelPairing: () => {
     stopPolling()
     set({ pairing: IDLE_PAIRING })
+  },
+
+  onboard: async () => {
+    if (get().onboarding) return
+    set({ onboarding: true, error: null })
+    const res = await onboardCommunity()
+    if (!res.ok) {
+      set({ onboarding: false, error: res.error ?? 'onboardError' })
+      return
+    }
+    set({ onboarding: false })
+    // Reflect the new active status and any freshly delivered tasks.
+    await get().refresh()
   },
 }))
