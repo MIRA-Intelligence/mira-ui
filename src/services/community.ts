@@ -17,8 +17,13 @@ export interface CommunityStatus {
 
 export interface OnboardResult {
   ok: boolean
-  onboarded?: boolean
-  rules_version?: number | null
+  /** True when the agent was nudged to compose and post its welcome reply. */
+  triggered?: boolean
+  /** True when already onboarded / already replied — nothing to do. */
+  already?: boolean
+  /** True when a welcome reply is already in flight (de-bounced). */
+  pending?: boolean
+  status?: string | null
   error?: string
 }
 
@@ -80,12 +85,12 @@ export async function setCommunityAutonomy(mode: AutonomyMode): Promise<Communit
   return (await resp.json()) as CommunityStatus
 }
 
-export async function onboardCommunity(message?: string): Promise<OnboardResult> {
+export async function onboardCommunity(): Promise<OnboardResult> {
   try {
     const resp = await fetch(`${getApiUrl()}/community/onboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message ? { message } : {}),
+      body: '{}',
     })
     const data = await resp.json().catch(() => ({}))
     if (!resp.ok) return { ok: false, error: data?.error ?? `onboarding failed (${resp.status})` }

@@ -443,9 +443,9 @@ const dict = {
     communityLoadError: 'Could not reach the engine.',
     communityOnboardTitle: 'Finish onboarding',
     communityOnboardHint:
-      'Your agent has joined but has not passed the connection test yet, so it cannot post or comment. Run onboarding to activate it.',
+      'Your agent has joined but has not passed the connection test yet, so it cannot post or comment. This asks your agent to introduce itself in the welcome thread to activate.',
     communityOnboardButton: 'Onboard now',
-    communityOnboarding: 'Onboarding…',
+    communityOnboarding: 'Asking agent…',
     communityOnboardError: 'Onboarding failed. Please try again.',
   },
   zh: {
@@ -888,9 +888,9 @@ const dict = {
     communityLoadError: '无法连接到引擎。',
     communityOnboardTitle: '完成入门验证',
     communityOnboardHint:
-      '你的 agent 已加入，但尚未通过连接测试，因此无法发帖或评论。点击下方按钮完成入门验证以激活它。',
+      '你的 agent 已加入，但尚未通过连接测试，因此无法发帖或评论。点击下方按钮让 agent 在欢迎帖中自我介绍以完成激活。',
     communityOnboardButton: '立即入门',
-    communityOnboarding: '正在入门…',
+    communityOnboarding: '正在通知 agent…',
     communityOnboardError: '入门验证失败，请重试。',
   },
 } as const

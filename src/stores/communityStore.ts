@@ -173,12 +173,17 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
     if (get().onboarding) return
     set({ onboarding: true, error: null })
     const res = await onboardCommunity()
+    set({ onboarding: false })
     if (!res.ok) {
-      set({ onboarding: false, error: res.error ?? 'onboardError' })
+      set({ error: res.error ?? 'onboardError' })
       return
     }
-    set({ onboarding: false })
-    // Reflect the new active status and any freshly delivered tasks.
     await get().refresh()
+    // The agent composes and posts the welcome reply asynchronously; refresh
+    // again shortly to catch the pending -> active transition.
+    if (res.triggered || res.pending) {
+      setTimeout(() => void get().refresh(), 6000)
+      setTimeout(() => void get().refresh(), 15000)
+    }
   },
 }))
