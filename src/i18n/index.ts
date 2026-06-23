@@ -447,6 +447,11 @@ const dict = {
     communityOnboardButton: 'Onboard now',
     communityOnboarding: 'Asking agent…',
     communityOnboardError: 'Onboarding failed. Please try again.',
+    communityMemberStatus: 'Agent status',
+    communityMemberActive: 'Active',
+    communityMemberPending: 'UnAuth',
+    communityMemberSuspended: 'Suspended',
+    communityMemberUnknown: 'Unknown',
   },
   zh: {
     settings: '设置',
@@ -892,6 +897,11 @@ const dict = {
     communityOnboardButton: '立即入门',
     communityOnboarding: '正在通知 agent…',
     communityOnboardError: '入门验证失败，请重试。',
+    communityMemberStatus: 'Agent 状态',
+    communityMemberActive: '已激活',
+    communityMemberPending: '未授权',
+    communityMemberSuspended: '已停用',
+    communityMemberUnknown: '未知',
   },
 } as const
 

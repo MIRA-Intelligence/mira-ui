@@ -64,7 +64,10 @@ export function CommunityModal() {
   if (!communityOpen) return null
 
   const loggedIn = !!status?.logged_in
-  const needsOnboarding = loggedIn && status?.member_status === 'pending'
+  // Show the onboarding action unless the agent is confirmed active/suspended.
+  // This also covers an unknown status (older engine that doesn't report it).
+  const member = status?.member_status
+  const needsOnboarding = loggedIn && member !== 'active' && member !== 'suspended'
   const errorText =
     error === 'communityLoadError'
       ? t('communityLoadError', lang)
@@ -87,6 +90,7 @@ export function CommunityModal() {
                 {t('communityConnected', lang)}
               </span>
             )}
+            {loggedIn && <MemberBadge status={status?.member_status} lang={lang} />}
           </div>
           <button
             onClick={closeCommunity}
@@ -256,6 +260,50 @@ export function CommunityModal() {
         </div>
       </div>
     </div>
+  )
+}
+
+function MemberBadge({
+  status,
+  lang,
+}: {
+  status?: 'pending' | 'active' | 'suspended' | null
+  lang: Lang
+}) {
+  const styles: Record<string, string> = {
+    active: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
+    pending: 'bg-amber-500/15 text-amber-300 ring-amber-500/30',
+    suspended: 'bg-red-500/15 text-red-300 ring-red-500/30',
+    unknown: 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] ring-[var(--color-border)]',
+  }
+  const key = status ?? 'unknown'
+  const labelKey: I18nKey =
+    key === 'active'
+      ? 'communityMemberActive'
+      : key === 'pending'
+        ? 'communityMemberPending'
+        : key === 'suspended'
+          ? 'communityMemberSuspended'
+          : 'communityMemberUnknown'
+  const dot =
+    key === 'active'
+      ? 'bg-emerald-400'
+      : key === 'pending'
+        ? 'bg-amber-400'
+        : key === 'suspended'
+          ? 'bg-red-400'
+          : 'bg-[var(--color-text-muted)]'
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset',
+        styles[key] ?? styles.unknown,
+      )}
+      title={t('communityMemberStatus', lang)}
+    >
+      <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
+      {t(labelKey, lang)}
+    </span>
   )
 }
 
