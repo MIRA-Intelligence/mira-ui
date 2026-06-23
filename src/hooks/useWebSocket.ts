@@ -4,6 +4,7 @@ import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager, setEn
 import type { LocalEngineBootstrapState } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import { fetchRuntimeConfig } from '@/services/runtimeConfig'
+import { getProfileState } from '@/services/profile'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -41,7 +42,21 @@ async function syncOnConnect() {
   }
 
   await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+
+  // First-run profile: auto-open the wizard once per session if not set up yet.
+  if (!onboardingChecked) {
+    onboardingChecked = true
+    try {
+      const profile = await getProfileState(apiUrl)
+      if (profile.needs_onboarding) useUiStore.getState().openOnboarding()
+    } catch {
+      // best-effort; never block startup on profile detection
+    }
+  }
 }
+
+// Module-level so reconnects within a session don't re-prompt after a skip.
+let onboardingChecked = false
 
 export function useWebSocket() {
   const handleWsMessage = useAgentStore((s) => s.handleWsMessage)

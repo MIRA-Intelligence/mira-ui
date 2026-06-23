@@ -709,6 +709,20 @@ export function SettingsModal() {
                 </div>
               </Section>
 
+              <Section title={t('onboardingProfileSection', curLang)}>
+                <p className="text-[11px] text-[var(--color-text-muted)] mb-2 leading-relaxed">
+                  {t('onboardingProfileSectionHint', curLang)}
+                </p>
+                <ActionButton
+                  onClick={() => {
+                    closeSettings()
+                    useUiStore.getState().openOnboarding()
+                  }}
+                >
+                  {t('onboardingEditProfile', curLang)}
+                </ActionButton>
+              </Section>
+
               <Section title={t('workspace', curLang)}>
                 <Label text={t('workspacePath', curLang)} />
                 <input

@@ -9,6 +9,7 @@ import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { CommunityModal } from '@/components/community/CommunityModal'
+import { OnboardingModal } from '@/components/onboarding/OnboardingModal'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
@@ -234,6 +235,7 @@ export function AppLayout() {
       <LocalEngineUpdateModal />
       <SkillsPluginsModal />
       <CommunityModal />
+      <OnboardingModal />
       <NewProjectModal />
       <FeedbackDialog />
     </div>
