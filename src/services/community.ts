@@ -11,6 +11,15 @@ export interface CommunityStatus {
   code_host: 'github' | 'cnb'
   domains: string[]
   pending_count: number
+  /** Server-side lifecycle status (pending/active/suspended), null if unknown. */
+  member_status?: 'pending' | 'active' | 'suspended' | null
+}
+
+export interface OnboardResult {
+  ok: boolean
+  onboarded?: boolean
+  rules_version?: number | null
+  error?: string
 }
 
 export interface CommunityApproval {
@@ -69,6 +78,21 @@ export async function setCommunityAutonomy(mode: AutonomyMode): Promise<Communit
   })
   if (!resp.ok) throw new Error(await readError(resp))
   return (await resp.json()) as CommunityStatus
+}
+
+export async function onboardCommunity(message?: string): Promise<OnboardResult> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/community/onboard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(message ? { message } : {}),
+    })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok) return { ok: false, error: data?.error ?? `onboarding failed (${resp.status})` }
+    return data as OnboardResult
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'network error' }
+  }
 }
 
 export async function fetchCommunityApprovals(
