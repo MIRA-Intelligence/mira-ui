@@ -1,7 +1,9 @@
 import { execFile, spawn } from 'child_process'
-import { access, mkdir, readFile, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
+import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
+import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -337,6 +339,16 @@ export class LocalEngineManager {
     }
   }
 
+  private async commandFailureDetail(
+    result: EngineCommandResult,
+    fallback: string,
+    logPath?: string | null,
+  ): Promise<string> {
+    const direct = result.stderr || result.stdout
+    if (direct) return direct
+    return await this.readLogTail(logPath) || fallback
+  }
+
   private async probePortHolder(port: number): Promise<{ pid: number; command: string } | null> {
     // Best-effort identification of whichever process is squatting on the
     // engine port when health checks fail. Treat any error as "unknown" so
@@ -532,9 +544,27 @@ export class LocalEngineManager {
     })
 
     const argumentList = args.map(psLiteral).join(', ')
+    const tempPrefix = path.join(tmpdir(), `mira-engine-elevated-${randomUUID()}`)
+    const scriptPath = `${tempPrefix}.ps1`
+    const stdoutPath = `${tempPrefix}.out`
+    const stderrPath = `${tempPrefix}.err`
+    const elevatedScript = [
+      "$ErrorActionPreference = 'Continue'",
+      `$stdoutPath = ${psLiteral(stdoutPath)}`,
+      `$stderrPath = ${psLiteral(stderrPath)}`,
+      'try {',
+      `  & ${psLiteral(executablePath)} @(${argumentList}) 1> $stdoutPath 2> $stderrPath`,
+      '  if ($null -ne $LASTEXITCODE) { $exitCode = [int]$LASTEXITCODE } else { $exitCode = 0 }',
+      '} catch {',
+      '  $_ | Out-File -FilePath $stderrPath -Encoding UTF8 -Append',
+      '  $exitCode = 1',
+      '}',
+      'exit $exitCode',
+    ].join('\r\n')
+    await writeFile(scriptPath, elevatedScript, 'utf8')
     const script = [
-      `$process = Start-Process -FilePath ${psLiteral(executablePath)}`,
-      `-ArgumentList @(${argumentList})`,
+      `$process = Start-Process -FilePath 'powershell.exe'`,
+      `-ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ${psLiteral(scriptPath)})`,
       '-Verb RunAs -Wait -PassThru;',
       'exit $process.ExitCode',
     ].join(' ')
@@ -553,9 +583,47 @@ export class LocalEngineManager {
 
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      const timeoutMs = options?.timeoutMs ?? REPAIR_TIMEOUT_MS
       const timeout = setTimeout(() => {
+        timedOut = true
         child.kill('SIGTERM')
-      }, options?.timeoutMs ?? REPAIR_TIMEOUT_MS)
+      }, timeoutMs)
+
+      const readCapture = async (target: string): Promise<string> => {
+        try {
+          return (await readFile(target, 'utf8')).trim()
+        } catch {
+          return ''
+        }
+      }
+
+      const cleanup = async () => {
+        await Promise.all(
+          [scriptPath, stdoutPath, stderrPath].map((target) => unlink(target).catch(() => undefined)),
+        )
+      }
+
+      const finish = async (code: number, extraStderr = '') => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        const [capturedStdout, capturedStderr] = await Promise.all([
+          readCapture(stdoutPath),
+          readCapture(stderrPath),
+        ])
+        await cleanup()
+        const timeoutMessage = timedOut ? `elevated command timed out after ${timeoutMs}ms` : ''
+        resolve({
+          ok: code === 0 && !timedOut,
+          code,
+          stdout: [stdout.trim(), capturedStdout].filter(Boolean).join('\n'),
+          stderr: [stderr.trim(), capturedStderr, extraStderr, timeoutMessage].filter(Boolean).join('\n'),
+          command,
+          executablePath: resolvedExecutable,
+        })
+      }
 
       child.stdout.on('data', (chunk) => {
         stdout += chunk.toString()
@@ -564,26 +632,10 @@ export class LocalEngineManager {
         stderr += chunk.toString()
       })
       child.on('error', (err) => {
-        clearTimeout(timeout)
-        resolve({
-          ok: false,
-          code: 1,
-          stdout: stdout.trim(),
-          stderr: `${stderr}\n${err.message}`.trim(),
-          command,
-          executablePath: resolvedExecutable,
-        })
+        void finish(1, err.message)
       })
       child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve({
-          ok: code === 0,
-          code: code ?? 1,
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          command,
-          executablePath: resolvedExecutable,
-        })
+        void finish(code ?? 1)
       })
     })
   }
@@ -844,16 +896,21 @@ export class LocalEngineManager {
           })
         }
       }
+      const failureDetail = await this.commandFailureDetail(
+        install,
+        'Local engine service update failed.',
+        status.payload?.log_file ?? logPath,
+      )
       this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'update',
-        message: install.stderr || install.stdout || 'Local engine service update failed.',
+        message: failureDetail,
         executablePath: install.executablePath,
         serviceInstalled: false,
         serviceRunning: false,
         healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
-        error: install.stderr || install.stdout || 'install-service failed',
+        error: failureDetail,
       })
     }
 
@@ -934,16 +991,21 @@ export class LocalEngineManager {
 
     const install = await this.installService(port)
     if (!install.ok) {
+      const failureDetail = await this.commandFailureDetail(
+        install,
+        'Local engine service repair failed.',
+        status.payload?.log_file,
+      )
       this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'repair',
-        message: install.stderr || install.stdout || 'Local engine service repair failed.',
+        message: failureDetail,
         executablePath: install.executablePath,
         serviceInstalled: false,
         serviceRunning: false,
         healthUrl,
-        error: install.stderr || install.stdout || 'install-service failed',
+        error: failureDetail,
       })
     }
 
@@ -1144,15 +1206,20 @@ export class LocalEngineManager {
         })
         const install = await this.installService(port)
         if (!install.ok) {
+          const failureDetail = await this.commandFailureDetail(
+            install,
+            'Local engine service install failed.',
+            status.payload?.log_file,
+          )
           this.recordWindowsBootstrapFailure()
           return this.setState({
             phase: 'error',
             operation: 'install',
-            message: install.stderr || 'Local engine service install failed.',
+            message: failureDetail,
             executablePath: install.executablePath,
             serviceInstalled: false,
             serviceRunning,
-            error: install.stderr || install.stdout || 'install-service failed',
+            error: failureDetail,
           })
         }
 
