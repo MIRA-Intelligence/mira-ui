@@ -15,5 +15,19 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     globals: false,
     clearMocks: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/**/*.d.ts',
+        'src/test/**',
+        'src/main.tsx',
+        'src/vite-env.d.ts',
+        'src/types/**',
+      ],
+    },
   },
 })
