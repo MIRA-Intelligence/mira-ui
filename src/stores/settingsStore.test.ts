@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useSettingsStore } from './settingsStore'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
@@ -43,6 +43,11 @@ describe('settingsStore', () => {
     localStorage.removeItem?.('mira-ui-settings')
     localStorage.removeItem?.('medpilot-ui-settings')
     useSettingsStore.setState(initialState, true)
+  })
+
+  afterEach(() => {
+    // Avoid leaking the partial localStorage stub into other test files.
+    vi.unstubAllGlobals()
   })
 
   it('defaults to light theme with quiet optional history and prerelease updates off', () => {
