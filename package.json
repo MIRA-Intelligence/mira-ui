@@ -21,7 +21,8 @@
     "dist:bundle:mac": "npm run build:desktop && node ./scripts/build-bundle.mjs --mac",
     "dist:bundle:win": "npm run build:desktop && node ./scripts/build-bundle.mjs --win",
     "test": "node ./node_modules/vitest/vitest.mjs run",
-    "test:watch": "node ./node_modules/vitest/vitest.mjs"
+    "test:watch": "node ./node_modules/vitest/vitest.mjs",
+    "test:coverage": "node ./node_modules/vitest/vitest.mjs run --coverage"
   },
   "build": {
     "appId": "com.projectmira.miraui",
@@ -90,6 +91,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.4.0",
+    "@vitest/coverage-v8": "^4.1.9",
     "autoprefixer": "^10.4.0",
     "electron": "^36.0.0",
     "electron-builder": "^26.0.0",
