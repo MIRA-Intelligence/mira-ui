@@ -412,6 +412,12 @@ const dict = {
     feedbackPendingNotice: '{count} feedback report(s) pending retry',
     feedbackPromoText: 'Join our Feishu group to get the latest updates and chat with the team:',
     feedbackPromoCta: 'Open invite link',
+    errorTimeout: 'The request timed out — the model or a tool took too long to respond. Please try again.',
+    errorNetwork: 'A network error occurred while reaching the model or a tool. Check your connection/proxy and try again.',
+    errorAuth: 'Authentication failed. Check the provider API key/credentials in Settings.',
+    errorRateLimit: 'The provider rate-limited the request or the quota is exhausted. Please wait a moment and retry.',
+    errorContextWindow: "The conversation exceeded the model's context window. Start a new session or shorten the input.",
+    errorUnknown: 'Something went wrong while handling your message: {detail}',
   },
   zh: {
     settings: '设置',
@@ -822,6 +828,12 @@ const dict = {
     feedbackPendingNotice: '{count} 条反馈待重试',
     feedbackPromoText: '加入飞书反馈群，获取产品最新动态、第一时间与团队交流：',
     feedbackPromoCta: '打开邀请链接',
+    errorTimeout: '请求超时——模型或工具响应时间过长，请重试。',
+    errorNetwork: '连接模型或工具时发生网络错误，请检查网络/代理后重试。',
+    errorAuth: '鉴权失败，请在「设置」中检查 Provider 的 API Key / 凭据。',
+    errorRateLimit: '触发了限流或配额已耗尽，请稍候再试。',
+    errorContextWindow: '对话已超出模型的上下文窗口，请新建会话或精简输入。',
+    errorUnknown: '处理消息时出现问题：{detail}',
   },
 } as const
 
