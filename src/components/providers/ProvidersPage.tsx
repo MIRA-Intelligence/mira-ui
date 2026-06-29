@@ -332,7 +332,7 @@ export function ProvidersPage() {
           {!selected || !selectedSettings || !selectedDraft ? (
             <p className="text-sm text-[var(--color-text-muted)]">{t('providersEmptyDetail', lang)}</p>
           ) : (
-            <div className="max-w-2xl space-y-5">
+            <div className="max-w-5xl space-y-6">
               <div className="flex items-center gap-3">
                 <ProviderIcon provider={selected} displayName={selectedSettings.display_name} size={32} />
                 <div>
@@ -363,115 +363,121 @@ export function ProvidersPage() {
                 </div>
               </div>
 
-              {selectedSettings.is_oauth ? (
-                <p className="text-[11px] text-[var(--color-text-muted)]">
-                  {t('providersOauthNote', lang, { provider: selectedSettings.display_name })}
-                </p>
-              ) : (
-                <>
-                  <div>
-                    <FieldLabel text={t('providersApiKey', lang)} />
-                    <input
-                      type="password"
-                      value={selectedDraft.apiKey}
-                      onChange={(e) => updateDraft(selected, { apiKey: e.target.value })}
-                      placeholder={
-                        selectedSettings.api_key_configured
-                          ? t('providersApiKeyKeep', lang)
-                          : t('providersApiKeyPlaceholder', lang)
-                      }
-                      className={inputClass}
-                    />
-                    {selectedSettings.api_key_preview && (
-                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                        {t('providersApiKeySaved', lang, { preview: selectedSettings.api_key_preview })}
-                      </p>
-                    )}
-                  </div>
+              {/* Credentials (left) + curated models (right) so a fetched list
+                  fills the otherwise-empty right column instead of stacking. */}
+              <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+                <div className="space-y-5">
+                  {selectedSettings.is_oauth ? (
+                    <p className="text-[11px] text-[var(--color-text-muted)]">
+                      {t('providersOauthNote', lang, { provider: selectedSettings.display_name })}
+                    </p>
+                  ) : (
+                    <>
+                      <div>
+                        <FieldLabel text={t('providersApiKey', lang)} />
+                        <input
+                          type="password"
+                          value={selectedDraft.apiKey}
+                          onChange={(e) => updateDraft(selected, { apiKey: e.target.value })}
+                          placeholder={
+                            selectedSettings.api_key_configured
+                              ? t('providersApiKeyKeep', lang)
+                              : t('providersApiKeyPlaceholder', lang)
+                          }
+                          className={inputClass}
+                        />
+                        {selectedSettings.api_key_preview && (
+                          <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
+                            {t('providersApiKeySaved', lang, { preview: selectedSettings.api_key_preview })}
+                          </p>
+                        )}
+                      </div>
 
-                  <div>
-                    <FieldLabel text={t('providersApiBase', lang)} />
-                    <input
-                      value={selectedDraft.apiBase}
-                      onChange={(e) => updateDraft(selected, { apiBase: e.target.value })}
-                      placeholder={
-                        selectedSettings.default_api_base
-                          ? t('providersApiBaseDefault', lang, { apiBase: selectedSettings.default_api_base })
-                          : t('providersApiBaseProviderDefault', lang)
-                      }
-                      className={inputClass}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Curated model list */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <FieldLabel text={t('providersModels', lang)} className="mb-0" />
-                  <div className="flex items-center gap-2">
-                    {!selectedSettings.is_oauth && (
-                      <SmallButton disabled={testing} onClick={() => void handleTest(selected)}>
-                        {testing ? t('providersTesting', lang) : t('providersTest', lang)}
-                      </SmallButton>
-                    )}
-                    <SmallButton disabled={fetchingModels} onClick={() => void handleFetchModels(selected)}>
-                      {fetchingModels ? t('providersFetching', lang) : t('providersFetchModels', lang)}
-                    </SmallButton>
-                  </div>
+                      <div>
+                        <FieldLabel text={t('providersApiBase', lang)} />
+                        <input
+                          value={selectedDraft.apiBase}
+                          onChange={(e) => updateDraft(selected, { apiBase: e.target.value })}
+                          placeholder={
+                            selectedSettings.default_api_base
+                              ? t('providersApiBaseDefault', lang, { apiBase: selectedSettings.default_api_base })
+                              : t('providersApiBaseProviderDefault', lang)
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+                    </>
+                  )}
                 </div>
 
-                {selectedDraft.models.length === 0 ? (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mb-2">{t('providersNoModels', lang)}</p>
-                ) : (
-                  <ul className="space-y-1 mb-2">
-                    {selectedDraft.models.map((model) => (
-                      <li
-                        key={model}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-1.5"
-                      >
-                        <span className="text-sm text-[var(--color-text-primary)] font-mono truncate">{model}</span>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {active?.provider === selected && active?.model === model ? (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/15 text-[var(--color-accent)]">
-                              {t('providersDefaultBadge', lang)}
-                            </span>
-                          ) : (
+                {/* Curated model list */}
+                <div className="lg:border-l lg:border-[var(--color-border)] lg:pl-8">
+                  <div className="flex items-center justify-between mb-2">
+                    <FieldLabel text={t('providersModels', lang)} className="mb-0" />
+                    <div className="flex items-center gap-2">
+                      {!selectedSettings.is_oauth && (
+                        <SmallButton disabled={testing} onClick={() => void handleTest(selected)}>
+                          {testing ? t('providersTesting', lang) : t('providersTest', lang)}
+                        </SmallButton>
+                      )}
+                      <SmallButton disabled={fetchingModels} onClick={() => void handleFetchModels(selected)}>
+                        {fetchingModels ? t('providersFetching', lang) : t('providersFetchModels', lang)}
+                      </SmallButton>
+                    </div>
+                  </div>
+
+                  {selectedDraft.models.length === 0 ? (
+                    <p className="text-[11px] text-[var(--color-text-muted)] mb-2">{t('providersNoModels', lang)}</p>
+                  ) : (
+                    <ul className="space-y-1 mb-2 max-h-[420px] overflow-y-auto pr-1">
+                      {selectedDraft.models.map((model) => (
+                        <li
+                          key={model}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-1.5"
+                        >
+                          <span className="text-sm text-[var(--color-text-primary)] font-mono truncate">{model}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {active?.provider === selected && active?.model === model ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/15 text-[var(--color-accent)]">
+                                {t('providersDefaultBadge', lang)}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => updateActive({ provider: selected, model })}
+                                className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                              >
+                                {t('providersSetDefault', lang)}
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => updateActive({ provider: selected, model })}
-                              className="text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                              onClick={() => removeModel(selected, model)}
+                              className="text-[11px] text-[var(--color-text-muted)] hover:text-red-400"
                             >
-                              {t('providersSetDefault', lang)}
+                              {t('providersRemove', lang)}
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => removeModel(selected, model)}
-                            className="text-[11px] text-[var(--color-text-muted)] hover:text-red-400"
-                          >
-                            {t('providersRemove', lang)}
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
 
-                <div className="flex items-center gap-2">
-                  <input
-                    value={newModel}
-                    onChange={(e) => setNewModel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addModel(selected, newModel)
-                      }
-                    }}
-                    placeholder={t('providersModelPlaceholder', lang)}
-                    className={cn(inputClass, 'h-9')}
-                  />
-                  <SmallButton onClick={() => addModel(selected, newModel)}>{t('providersAddModel', lang)}</SmallButton>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={newModel}
+                      onChange={(e) => setNewModel(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          addModel(selected, newModel)
+                        }
+                      }}
+                      placeholder={t('providersModelPlaceholder', lang)}
+                      className={cn(inputClass, 'h-9')}
+                    />
+                    <SmallButton onClick={() => addModel(selected, newModel)}>{t('providersAddModel', lang)}</SmallButton>
+                  </div>
                 </div>
               </div>
             </div>
