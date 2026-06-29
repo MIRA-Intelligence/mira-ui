@@ -8,12 +8,40 @@ export interface RuntimeProviderSettings {
   api_key_configured: boolean
   api_key_preview: string | null
   api_base: string | null
+  models: string[]
+  configured: boolean
   display_name: string
   api_key_required: boolean
   api_base_required: boolean
   default_api_base: string | null
   is_oauth: boolean
   is_local: boolean
+}
+
+// ``team`` profile roles bindable to a provider + model on the providers page.
+export type TeamRole = 'supervisor' | 'student' | 'critic'
+export const TEAM_ROLES: TeamRole[] = ['supervisor', 'student', 'critic']
+
+export interface RuntimeRoleBindings {
+  supervisor_provider: string
+  supervisor_model: string | null
+  student_provider: string
+  student_model: string | null
+  critic_provider: string
+  critic_model: string | null
+}
+
+export interface ProviderModelsResult {
+  provider: string
+  api_base: string | null
+  models: string[]
+  cached: boolean
+}
+
+export interface ProviderTestResult {
+  ok: boolean
+  message: string
+  model_count?: number
 }
 
 export interface RuntimeConfigPayload {
@@ -39,6 +67,13 @@ export interface RuntimeConfigPayload {
     setup_message?: string | null
     setup_code?: RuntimeSetupCode | null
     setup_subject?: string | null
+    // Present only when connected to a team-profile-capable engine.
+    supervisor_provider?: string
+    supervisor_model?: string | null
+    student_provider?: string
+    student_model?: string | null
+    critic_provider?: string
+    critic_model?: string | null
   }
   providers: Record<string, RuntimeProviderSettings>
 }
@@ -92,6 +127,60 @@ export async function saveRuntimeConfig(payload: {
   providers: Partial<Record<string, { api_key?: string; api_base?: string | null }>>
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
+}
+
+// Persist provider credentials, curated model lists, and team-role bindings
+// owned by the Providers page. Only the fields present are written by the
+// backend (which diffs against the live config), so callers send just what
+// changed.
+export async function saveProvidersConfig(payload: {
+  runtime?: Partial<{
+    provider: string
+    model: string
+  } & RuntimeRoleBindings>
+  providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[] }>>
+}, apiUrl?: string): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig(payload, apiUrl)
+}
+
+export async function fetchProviderModels(
+  provider: string,
+  options?: { refresh?: boolean; apiUrl?: string },
+): Promise<ProviderModelsResult> {
+  const base = resolveApiUrl(options?.apiUrl)
+  const query = options?.refresh ? '?refresh=1' : ''
+  const resp = await fetch(`${base}/providers/${encodeURIComponent(provider)}/models${query}`)
+  if (!resp.ok) {
+    throw new Error(await readRuntimeConfigError(resp, 'Failed to fetch provider models'))
+  }
+  const data = await resp.json() as Partial<ProviderModelsResult>
+  return {
+    provider: data.provider ?? provider,
+    api_base: data.api_base ?? null,
+    models: Array.isArray(data.models) ? data.models : [],
+    cached: Boolean(data.cached),
+  }
+}
+
+export async function testProvider(
+  provider: string,
+  credentials?: { api_key?: string; api_base?: string | null },
+  apiUrl?: string,
+): Promise<ProviderTestResult> {
+  const resp = await fetch(`${resolveApiUrl(apiUrl)}/providers/${encodeURIComponent(provider)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials ?? {}),
+  })
+  if (!resp.ok) {
+    throw new Error(await readRuntimeConfigError(resp, 'Failed to test provider'))
+  }
+  const data = await resp.json() as Partial<ProviderTestResult>
+  return {
+    ok: Boolean(data.ok),
+    message: typeof data.message === 'string' ? data.message : '',
+    model_count: typeof data.model_count === 'number' ? data.model_count : undefined,
+  }
 }
 
 export async function updateProjectsRoot(projectsRoot: string, apiUrl?: string): Promise<RuntimeConfigPayload> {

@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  fetchProviderModels,
   fetchRuntimeConfig,
+  saveProvidersConfig,
   saveRuntimeConfig,
+  testProvider,
   updateProjectsRoot,
 } from './runtimeConfig'
 
@@ -87,5 +90,56 @@ describe('runtimeConfig service', () => {
     await updateProjectsRoot('/new', API)
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(init.body)).toEqual({ projects_root: '/new' })
+  })
+
+  it('fetchProviderModels GETs the provider models endpoint and normalizes the result', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ provider: 'deepseek', api_base: 'https://x', models: ['a', 'b'], cached: true }))
+    const out = await fetchProviderModels('deepseek', { apiUrl: API })
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/providers/deepseek/models`)
+    expect(out).toEqual({ provider: 'deepseek', api_base: 'https://x', models: ['a', 'b'], cached: true })
+  })
+
+  it('fetchProviderModels appends refresh=1 when requested', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ models: [] }))
+    await fetchProviderModels('openai', { refresh: true, apiUrl: API })
+    expect(fetchMock).toHaveBeenCalledWith(`${API}/providers/openai/models?refresh=1`)
+  })
+
+  it('fetchProviderModels throws the JSON error on failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'bad key' }, false, 502))
+    await expect(fetchProviderModels('deepseek', { apiUrl: API })).rejects.toThrow('bad key')
+  })
+
+  it('testProvider POSTs credentials and returns the parsed result', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, message: 'good', model_count: 3 }))
+    const out = await testProvider('deepseek', { api_key: 'sk', api_base: null }, API)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(`${API}/providers/deepseek/test`)
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ api_key: 'sk', api_base: null })
+    expect(out).toEqual({ ok: true, message: 'good', model_count: 3 })
+  })
+
+  it('testProvider returns ok:false bodies without throwing', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: false, message: 'unauthorized' }))
+    const out = await testProvider('deepseek', {}, API)
+    expect(out).toEqual({ ok: false, message: 'unauthorized', model_count: undefined })
+  })
+
+  it('saveProvidersConfig POSTs provider + runtime updates to /config', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ persisted: true }))
+    await saveProvidersConfig(
+      {
+        runtime: { provider: 'deepseek', model: 'deepseek/deepseek-chat' },
+        providers: { deepseek: { api_key: 'sk', api_base: null, models: ['deepseek/deepseek-chat'] } },
+      },
+      API,
+    )
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(`${API}/config`)
+    expect(JSON.parse(init.body)).toMatchObject({
+      runtime: { provider: 'deepseek' },
+      providers: { deepseek: { models: ['deepseek/deepseek-chat'] } },
+    })
   })
 })

@@ -76,6 +76,7 @@
     }
   },
   "dependencies": {
+    "@lobehub/icons-static-svg": "^1.91.0",
     "clsx": "^2.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

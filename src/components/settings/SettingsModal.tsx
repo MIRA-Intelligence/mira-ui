@@ -197,6 +197,7 @@ function latestStoredProfile(
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings } = store
+  const openProviders = useUiStore((s) => s.openProviders)
   const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.engineStatus === 'setup_required' || store.localEnginePhase === 'error'
 
   const [draft, setDraft] = useState<SettingsDraft>(() => createDraft(store))
@@ -382,19 +383,11 @@ export function SettingsModal() {
 
       if (draft.deploymentMode === 'localBundle') {
         const trimmedModel = draft.model.trim()
-        const trimmedApiBase = draft.apiBase.trim()
-        const trimmedApiKey = draft.apiKey.trim()
-        const providerSnapshot = runtimeProviders[draft.provider]
-        const providerName = providerLabel(draft.provider, runtimeProviders)
 
+        // Provider credentials and model lists are managed on the dedicated
+        // Providers page; Settings only persists the runtime knobs below.
         if (!trimmedModel) {
           throw new Error(t('settingsRequiresModel', curLang))
-        }
-        if (providerSnapshot?.api_base_required && !trimmedApiBase) {
-          throw new Error(t('settingsProviderRequiresApiBase', curLang, { provider: providerName }))
-        }
-        if (providerSnapshot?.api_key_required && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
-          throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
         }
         const rawTemperature = draft.temperature.trim()
         let temperatureValue: number | null
@@ -429,14 +422,6 @@ export function SettingsModal() {
 
         store.setDeploymentMode('localBundle')
         store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
-        const providerUpdates = draft.provider === 'auto'
-          ? {}
-          : {
-              [draft.provider]: {
-                ...(trimmedApiKey ? { api_key: trimmedApiKey } : {}),
-                api_base: trimmedApiBase || null,
-              },
-            }
         const payload = await saveRuntimeConfig({
           ...(customProjectDirsAllowed ? { projects_root: effectiveWorkspacePath } : {}),
           runtime: {
@@ -448,7 +433,7 @@ export function SettingsModal() {
             max_tool_iterations: Number(draft.maxToolIterations),
             restrict_to_workspace: draft.restrictToWorkspace,
           },
-          providers: providerUpdates,
+          providers: {},
         })
 
         const localWorkspaceChanged = workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))
@@ -874,78 +859,28 @@ export function SettingsModal() {
               </Section>
 
               <Section title="Local Runtime Config">
-                <Label text="Provider" />
-                <select
-                  value={draft.provider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                  className={selectClass}
-                >
-                  {providerOptions.map((provider) => (
-                    <option key={provider.value} value={provider.value}>
-                      {provider.label}
-                    </option>
-                  ))}
-                </select>
-
-                <Label text="Model" className="mt-3" />
-                <input
-                  value={draft.model}
-                  onChange={(e) => setDraft((current) => ({ ...current, model: e.target.value }))}
-                  className={inputClass}
-                  placeholder="anthropic/claude-sonnet-4-5"
-                />
-
-                <Label text="API Base" className="mt-3" />
-                <input
-                  value={draft.apiBase}
-                  onChange={(e) => setDraft((current) => ({ ...current, apiBase: e.target.value }))}
-                  className={inputClass}
-                  placeholder={
-                    selectedProvider?.default_api_base
-                      ? t('settingsLeaveEmptyUseDefault', curLang, { apiBase: selectedProvider.default_api_base })
-                      : t('settingsLeaveEmptyProviderDefaults', curLang)
-                  }
-                />
-                {selectedProvider?.api_base_required && (
-                  <p className="text-[11px] text-amber-300 mt-1">
-                    {t('settingsProviderNeedsApiBaseHint', curLang, { provider: selectedProvider.display_name })}
-                  </p>
-                )}
-
-                {draft.provider !== 'auto' && !selectedProvider?.is_oauth && (
-                  <>
-                    <Label text="API Key" className="mt-3" />
-                    <input
-                      type="password"
-                      value={draft.apiKey}
-                      onChange={(e) => setDraft((current) => ({ ...current, apiKey: e.target.value }))}
-                      className={inputClass}
-                      placeholder={selectedProvider?.api_key_configured ? t('settingsLeaveBlankKeepKey', curLang) : t('settingsPasteProviderKey', curLang)}
-                    />
-                    {selectedProvider?.api_key_required && (
-                      <p className="text-[11px] text-amber-300 mt-1">
-                        {t('settingsProviderNeedsApiKeyHint', curLang, { provider: selectedProvider.display_name })}
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                        {providerLabel(draft.provider, runtimeProviders)}
                       </p>
-                    )}
-                    {selectedProvider?.api_key_preview && (
-                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                        Saved key preview: {selectedProvider.api_key_preview}
+                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1 break-all">
+                        {draft.model || t('settingsAutoDetectHint', curLang)}
                       </p>
-                    )}
-                  </>
-                )}
-                {draft.provider === 'auto' && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
-                    {t('settingsAutoDetectHint', curLang)}
-                  </p>
-                )}
-                {selectedProvider?.is_oauth && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
-                    {t('settingsOauthHint', curLang, { provider: selectedProvider.display_name })}
-                  </p>
-                )}
+                    </div>
+                    <ActionButton
+                      onClick={() => {
+                        closeSettings()
+                        openProviders()
+                      }}
+                    >
+                      {t('manageProviders', curLang)}
+                    </ActionButton>
+                  </div>
+                </div>
 
-                <Label text="Reasoning Effort" className="mt-3" />
+                <Label text="Reasoning Effort" className="mt-4" />
                 <select
                   value={draft.reasoningEffort ?? ''}
                   onChange={(e) => setDraft((current) => ({

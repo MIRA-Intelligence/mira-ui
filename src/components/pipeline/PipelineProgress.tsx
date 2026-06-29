@@ -75,6 +75,7 @@ export function PipelineProgress() {
   const lang = useSettingsStore((s) => s.language)
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
+  const openProviders = useUiStore((s) => s.openProviders)
   const task = tasks.find((t) => t.id === selectedTaskId)
   const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
@@ -144,6 +145,19 @@ export function PipelineProgress() {
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M13 2 3 14h9l-1 8 10-12h-9z" />
+        </svg>
+      </button>
+      <button
+        onClick={openProviders}
+        className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+        aria-label={t('providers', lang)}
+        title={t('providers', lang)}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
         </svg>
       </button>
     </div>
