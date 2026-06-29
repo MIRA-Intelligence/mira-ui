@@ -32,6 +32,15 @@ export interface RuntimeRoleBindings {
   critic_model: string | null
 }
 
+// A user-defined, provider-agnostic per-model parameter rule. ``pattern``
+// matches the model name (glob or substring); ``params`` maps request args to
+// values, where ``null`` means "drop this parameter".
+export type ModelParamValue = number | string | boolean | null
+export interface ModelParamRule {
+  pattern: string
+  params: Record<string, ModelParamValue>
+}
+
 export interface ProviderModelsResult {
   provider: string
   api_base: string | null
@@ -77,6 +86,8 @@ export interface RuntimeConfigPayload {
     critic_model?: string | null
   }
   providers: Record<string, RuntimeProviderSettings>
+  // User-defined per-model parameter rules. Empty when none are configured.
+  model_params?: ModelParamRule[]
 }
 
 function resolveApiUrl(apiUrl?: string): string {
@@ -138,10 +149,24 @@ export async function saveProvidersConfig(payload: {
   runtime?: Partial<{
     provider: string
     model: string
+    reasoning_effort: ReasoningEffort
+    temperature: number | null
+    max_tool_iterations: number
+    restrict_to_workspace: boolean
   } & RuntimeRoleBindings>
   providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }>>
+  model_params?: ModelParamRule[]
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
+}
+
+// Persist the full set of model-parameter rules (replace semantics). The
+// backend validates and writes ``providers.model_params`` in config.json.
+export async function saveModelParams(
+  rules: ModelParamRule[],
+  apiUrl?: string,
+): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig({ model_params: rules }, apiUrl)
 }
 
 export async function fetchProviderModels(

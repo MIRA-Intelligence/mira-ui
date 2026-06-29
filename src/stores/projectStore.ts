@@ -83,7 +83,7 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'skipped',
 ])
 const MODE_SET = new Set(['manual', 'auto'] as const)
-const AGENT_PROFILE_SET = new Set(['engineer', 'research'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'research', 'team'] as const)
 const CONTRACT_VERSION_SET = new Set([1, 2] as const)
 
 function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {

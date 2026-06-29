@@ -7,3 +7,4 @@ bundled-engine/
 *.tsbuildinfo
 .cursor/
 coverage/
+.gstack/

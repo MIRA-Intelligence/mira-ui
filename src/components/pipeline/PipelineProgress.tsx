@@ -26,9 +26,10 @@ const STAGES: { key: PipelineStage; icon: string; labelKey: I18nKey }[] = [
   { key: 'result', icon: '📝', labelKey: 'result' },
 ]
 
-const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' }> = [
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' | 'teamMode' }> = [
   { key: 'engineer', labelKey: 'engineerMode' },
   { key: 'research', labelKey: 'researchMode' },
+  { key: 'team', labelKey: 'teamMode' },
 ]
 
 const CONTRACT_MODES: { key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }[] = [
@@ -81,22 +82,22 @@ export function PipelineProgress() {
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
   const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
   const effectiveContractVersion = task?.contractVersion ?? contractVersion
+  const profileIndex = Math.max(0, PROFILE_OPTIONS.findIndex((p) => p.key === agentProfile))
   const agentProfileSlider = (
     <div className="shrink-0">
       <div
         className={cn(
-          'relative grid w-32 grid-cols-2 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 transition-opacity',
+          'relative grid w-48 grid-cols-3 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 transition-opacity',
           !canSwitchAgentProfile && 'opacity-60',
         )}
         title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
       >
         <span
           aria-hidden
-          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-full bg-[var(--color-accent)]/20 transition-transform duration-200 ease-out"
+          className="pointer-events-none absolute top-0.5 bottom-0.5 rounded-full bg-[var(--color-accent)]/20 transition-[left] duration-200 ease-out"
           style={{
-            left: '0.125rem',
-            width: 'calc(50% - 0.125rem)',
-            transform: agentProfile === 'research' ? 'translateX(100%)' : 'translateX(0%)',
+            left: `calc(${profileIndex} * (100% - 0.25rem) / ${PROFILE_OPTIONS.length} + 0.125rem)`,
+            width: `calc((100% - 0.25rem) / ${PROFILE_OPTIONS.length})`,
           }}
         />
 
@@ -110,7 +111,7 @@ export function PipelineProgress() {
             }}
             disabled={!canSwitchAgentProfile}
             className={cn(
-              'relative z-10 w-16 py-1 text-xs font-medium rounded-full transition-colors',
+              'relative z-10 w-full py-1 text-xs font-medium rounded-full transition-colors',
               agentProfile === profile.key
                 ? 'text-[var(--color-text-primary)]'
                 : 'text-[var(--color-text-muted)]',

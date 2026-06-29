@@ -2,7 +2,7 @@
 
 export type PipelineStage = 'research' | 'plan' | 'experiment' | 'result'
 export type AppMode = 'normal' | 'project'
-export type AgentProfile = 'engineer' | 'research'
+export type AgentProfile = 'engineer' | 'research' | 'team'
 export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
