@@ -33,6 +33,7 @@ function payload(): RuntimeConfigPayload {
     api_base: null,
     models: [],
     configured: false,
+    enabled: false,
     display_name: 'X',
     api_key_required: true,
     api_base_required: false,
@@ -62,7 +63,7 @@ function payload(): RuntimeConfigPayload {
     },
     providers: {
       auto: provider({ display_name: 'Auto-detect', api_key_required: false }),
-      deepseek: provider({ display_name: 'DeepSeek', configured: true, api_key_configured: true, api_key_preview: 'sk...ek', models: ['deepseek/deepseek-chat'] }),
+      deepseek: provider({ display_name: 'DeepSeek', configured: true, enabled: true, api_key_configured: true, api_key_preview: 'sk...ek', models: ['deepseek/deepseek-chat'] }),
       openai: provider({ display_name: 'OpenAI' }),
     },
   }
@@ -84,15 +85,35 @@ describe('ProvidersPage', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('loads providers and groups them by configured state', async () => {
+  it('loads providers and groups them by enabled state', async () => {
     useUiStore.getState().openProviders()
     render(<ProvidersPage />)
     await waitFor(() => expect(fetchRuntimeConfig).toHaveBeenCalled())
     // Both groups render their headers; DeepSeek (enabled) + OpenAI (disabled).
     expect(await screen.findByText(/Enabled \(1\)/)).toBeInTheDocument()
-    expect(screen.getByText(/Not configured \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Disabled \(1\)/)).toBeInTheDocument()
     expect(screen.getAllByText('DeepSeek').length).toBeGreaterThan(0)
     expect(screen.getAllByText('OpenAI').length).toBeGreaterThan(0)
+  })
+
+  it('toggles a provider on and persists the enabled flag', async () => {
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    await screen.findByText('Fetch from provider')
+
+    // Select the disabled OpenAI provider in the rail (its label also appears as
+    // <option> elements in the role dropdowns, so target the rail button).
+    const openaiRailButton = screen.getAllByText('OpenAI').find((el) => el.closest('button'))!
+    fireEvent.click(openaiRailButton)
+    const toggle = await screen.findByRole('switch')
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+    const arg = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0]
+    expect(arg.providers?.openai?.enabled).toBe(true)
   })
 
   it('fetches models and adds them to the curated list', async () => {

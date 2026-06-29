@@ -20,6 +20,7 @@ interface ProviderDraft {
   apiKey: string
   apiBase: string
   models: string[]
+  enabled: boolean
 }
 
 interface ActiveDraft {
@@ -47,6 +48,7 @@ function buildDrafts(payload: RuntimeConfigPayload): Record<string, ProviderDraf
       apiKey: '',
       apiBase: settings.api_base ?? '',
       models: [...(settings.models ?? [])],
+      enabled: Boolean(settings.enabled),
     }
   }
   return drafts
@@ -102,10 +104,10 @@ export function ProvidersPage() {
         setPayload(data)
         setDrafts(buildDrafts(data))
         setActive(buildActive(data))
-        const firstConfigured = Object.entries(data.providers)
+        const firstEnabled = Object.entries(data.providers)
           .filter(([name]) => name !== 'auto')
-          .sort((a, b) => Number(b[1].configured) - Number(a[1].configured))[0]
-        setSelected(firstConfigured ? firstConfigured[0] : null)
+          .sort((a, b) => Number(b[1].enabled) - Number(a[1].enabled))[0]
+        setSelected(firstEnabled ? firstEnabled[0] : null)
       } catch (error) {
         if (loadTokenRef.current !== token) return
         setFeedback({ text: error instanceof Error ? error.message : String(error), error: true })
@@ -120,16 +122,10 @@ export function ProvidersPage() {
     return Object.entries(payload.providers).filter(([name]) => name !== 'auto')
   }, [payload])
 
-  const isConfigured = (name: string): boolean => {
-    const original = payload?.providers[name]
+  const isEnabled = (name: string): boolean => {
     const draft = drafts[name]
-    if (!draft) return Boolean(original?.configured)
-    return Boolean(
-      original?.configured ||
-      draft.apiKey.trim() ||
-      draft.apiBase.trim() ||
-      draft.models.length > 0,
-    )
+    if (draft) return draft.enabled
+    return Boolean(payload?.providers[name]?.enabled)
   }
 
   const filtered = useMemo(() => {
@@ -139,8 +135,8 @@ export function ProvidersPage() {
       name.toLowerCase().includes(query) ||
       (settings.display_name ?? '').toLowerCase().includes(query),
     )
-    const enabled = list.filter(([name]) => isConfigured(name))
-    const disabled = list.filter(([name]) => !isConfigured(name))
+    const enabled = list.filter(([name]) => isEnabled(name))
+    const disabled = list.filter(([name]) => !isEnabled(name))
     return { enabled, disabled }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerEntries, search, drafts, payload])
@@ -225,18 +221,20 @@ export function ProvidersPage() {
     setSaving(true)
     setFeedback(null)
     try {
-      const providerUpdates: Record<string, { api_key?: string; api_base?: string | null; models?: string[] }> = {}
+      const providerUpdates: Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }> = {}
       for (const [name, draft] of Object.entries(drafts)) {
         const original = payload.providers[name]
         const apiKey = draft.apiKey.trim()
         const apiBase = draft.apiBase.trim() ? draft.apiBase.trim() : null
         const modelsChanged = JSON.stringify(draft.models) !== JSON.stringify(original?.models ?? [])
         const apiBaseChanged = apiBase !== (original?.api_base ?? null)
-        if (!apiKey && !modelsChanged && !apiBaseChanged) continue
+        const enabledChanged = draft.enabled !== Boolean(original?.enabled)
+        if (!apiKey && !modelsChanged && !apiBaseChanged && !enabledChanged) continue
         providerUpdates[name] = {
           ...(apiKey ? { api_key: apiKey } : {}),
           api_base: apiBase,
           models: draft.models,
+          ...(enabledChanged ? { enabled: draft.enabled } : {}),
         }
       }
 
@@ -350,11 +348,19 @@ export function ProvidersPage() {
                     href={providerDocsUrl(selected) ?? undefined}
                     target="_blank"
                     rel="noreferrer"
-                    className="ml-auto text-[11px] text-[var(--color-accent)] hover:underline"
+                    className="text-[11px] text-[var(--color-accent)] hover:underline"
                   >
                     {t('providersDocs', lang)}
                   </a>
                 )}
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="text-[11px] text-[var(--color-text-muted)]">{t('providersEnableToggle', lang)}</span>
+                  <Switch
+                    checked={selectedDraft.enabled}
+                    onChange={(value) => updateDraft(selected, { enabled: value })}
+                    label={selectedDraft.enabled ? t('providersEnableOff', lang) : t('providersEnableOn', lang)}
+                  />
+                </div>
               </div>
 
               {selectedSettings.is_oauth ? (
@@ -633,6 +639,29 @@ function SmallButton({ children, disabled, onClick }: { children: React.ReactNod
       )}
     >
       {children}
+    </button>
+  )
+}
+
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
+        checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]',
+      )}
+    >
+      <span
+        className={cn(
+          'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+          checked ? 'translate-x-4' : 'translate-x-0.5',
+        )}
+      />
     </button>
   )
 }

@@ -10,6 +10,7 @@ export interface RuntimeProviderSettings {
   api_base: string | null
   models: string[]
   configured: boolean
+  enabled: boolean
   display_name: string
   api_key_required: boolean
   api_base_required: boolean
@@ -138,7 +139,7 @@ export async function saveProvidersConfig(payload: {
     provider: string
     model: string
   } & RuntimeRoleBindings>
-  providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[] }>>
+  providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }>>
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
 }
