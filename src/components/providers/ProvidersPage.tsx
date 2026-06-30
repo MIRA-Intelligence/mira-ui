@@ -505,12 +505,14 @@ export function ProvidersPage() {
               entries={filtered.enabled}
               selected={selected}
               onSelect={setSelected}
+              enabledGroup
             />
             <ProviderGroup
               title={t('providersGroupDisabled', lang)}
               entries={filtered.disabled}
               selected={selected}
               onSelect={setSelected}
+              enabledGroup={false}
             />
           </div>
         </div>
@@ -855,11 +857,16 @@ function ProviderGroup({
   entries,
   selected,
   onSelect,
+  enabledGroup,
 }: {
   title: string
   entries: Array<[string, RuntimeConfigPayload['providers'][string]]>
   selected: string | null
   onSelect: (name: string) => void
+  // Whether this group lists enabled providers. The green "ready" dot is only
+  // meaningful for enabled providers — disabled ones (e.g. local vLLM/Ollama/
+  // OVMS that report ``configured`` without a key) must not show it.
+  enabledGroup: boolean
 }) {
   if (entries.length === 0) return null
   return (
@@ -880,7 +887,7 @@ function ProviderGroup({
             >
               <ProviderIcon provider={name} displayName={settings.display_name} size={22} />
               <span className="text-sm text-[var(--color-text-primary)] truncate flex-1">{settings.display_name}</span>
-              {settings.configured && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" />}
+              {enabledGroup && settings.configured && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" />}
             </button>
           </li>
         ))}
