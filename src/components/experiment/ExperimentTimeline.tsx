@@ -51,6 +51,16 @@ function ExpItem({ exp, isSelected, onSelect, lang }: {
         ].join(' ')}>
           {exp.title}
         </span>
+        {exp.guard_warnings && exp.guard_warnings.length > 0 && (
+          <span
+            role="img"
+            aria-label="guard-warning"
+            title={`${t('experimentGuardWarnings', lang)}\n${exp.guard_warnings.join('\n')}`}
+            className="ml-1 font-bold text-[var(--color-error)] cursor-help"
+          >
+            !
+          </span>
+        )}
         {exp.progress && exp.status === 'running' && (
           <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
             {t('epoch', lang)} {exp.progress.epoch}/{exp.progress.total_epochs}

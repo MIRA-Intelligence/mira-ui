@@ -166,6 +166,9 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
     snapshot: parseExperimentSnapshot(raw.snapshot),
+    guard_warnings: Array.isArray(raw.guard_warnings)
+      ? raw.guard_warnings.filter((w: unknown): w is string => typeof w === 'string')
+      : undefined,
   }
 }
 

@@ -86,6 +86,8 @@ export interface Experiment {
   progress?: ExperimentProgress
   parent?: string
   snapshot?: ExperimentSnapshot
+  /** Non-blocking guardrail warnings surfaced as a marker after the title. */
+  guard_warnings?: string[]
 }
 
 /* ── Research data (literature & references) ───── */
