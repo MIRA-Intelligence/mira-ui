@@ -87,6 +87,16 @@ function logDedupKey(entry: LogEntry): string {
   return `${entry.timestamp}|${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
 }
 
+// Timestamp-independent key. An optimistically-added message (e.g. the initial
+// project prompt) carries the client's timestamp, while the same message loaded
+// back from server history carries the engine's timestamp. Matching on
+// content/type/origin lets us dedupe the two so the prompt is not shown twice.
+function logSoftDedupKey(entry: LogEntry): string {
+  const fromUser = entry.metadata?._user ? 'user' : 'agent'
+  const fromAuto = entry.metadata?._auto ? 'auto' : 'manual'
+  return `${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
+}
+
 function ensurePlanPolling(projectId: string | null) {
   if (!projectId) return
   if (_pollTimers[projectId]) return
@@ -169,15 +179,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           },
         }
       }
+      // Server history is authoritative. Keep every server entry (deduped only
+      // on the exact key so genuinely repeated messages survive), then append
+      // any live entries the server does not yet know about. Live entries are
+      // matched against server history with a timestamp-independent soft key so
+      // an optimistic entry (client timestamp) collapses into its persisted
+      // server copy (engine timestamp) instead of duplicating.
       const merged: LogEntry[] = []
-      const seen = new Set<string>()
-      for (const entry of [...entries, ...existing]) {
+      const seenExact = new Set<string>()
+      const serverSoftKeys = new Set(entries.map(logSoftDedupKey))
+      for (const entry of entries) {
         const key = logDedupKey(entry)
-        if (seen.has(key)) continue
-        seen.add(key)
+        if (seenExact.has(key)) continue
+        seenExact.add(key)
         merged.push(entry)
       }
-      if (merged.length === existing.length) {
+      for (const entry of existing) {
+        if (serverSoftKeys.has(logSoftDedupKey(entry))) continue
+        const key = logDedupKey(entry)
+        if (seenExact.has(key)) continue
+        seenExact.add(key)
+        merged.push(entry)
+      }
+      if (
+        merged.length === existing.length
+        && merged.every((entry, idx) => entry === existing[idx])
+      ) {
         return state
       }
       return {
