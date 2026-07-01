@@ -11,6 +11,35 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 
+// Condense a log line into a short one-line activity label for the working
+// indicator (collapse whitespace, drop trailing noise, cap the length).
+function condenseActivity(text: string, max: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean
+}
+
+// Derive a human-readable "what Mira is doing right now" label from the most
+// recent trailing activity entry (tool call / progress). Returns null when the
+// tail is a finalized response or there is nothing actionable to show.
+function deriveActivityLabel(logs: AgentLogEntry[], lang: Parameters<typeof t>[1]): string | null {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const entry = logs[i]
+    if (entry.type !== 'tool_call' && entry.type !== 'progress') {
+      // Reached a finalized response / user message: no active task trailing.
+      break
+    }
+    const raw = (entry.content ?? '').trim()
+    if (!raw) continue
+    if (entry.type === 'tool_call') {
+      const name = raw.split('(')[0].trim() || raw
+      return t('activityToolCall', lang, { name: condenseActivity(name, 48) })
+    }
+    const line = raw.split('\n').map((s) => s.trim()).find(Boolean)
+    if (line) return condenseActivity(line, 80)
+  }
+  return null
+}
+
 // Build a project-description seed from a chat's transcript so promoting a
 // conversation into a research project carries the context forward.
 function buildPromotePrefill(logs: AgentLogEntry[]): string {
@@ -120,6 +149,9 @@ export function AgentPanel() {
   const lastEntry = logs[logs.length - 1]
   const isStreamingEntryLive = lastEntry?.type === 'response' && lastEntry.metadata?._streaming === true
   const showThinking = isStreaming && !isStreamingEntryLive
+  // Surface the current task (e.g. latest tool call) so the indicator proves
+  // Mira is actively working rather than a static "thinking" spinner.
+  const activityLabel = useMemo(() => deriveActivityLabel(logs, lang), [logs, lang])
 
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -400,7 +432,7 @@ export function AgentPanel() {
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:120ms]" />
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:240ms]" />
               </span>
-              <span>{t('miraThinking', lang)}</span>
+              <span>{activityLabel ? t('miraWorking', lang, { task: activityLabel }) : t('miraThinking', lang)}</span>
             </div>
           </div>
         )}

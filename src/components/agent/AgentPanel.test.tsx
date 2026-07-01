@@ -70,6 +70,35 @@ describe('AgentPanel keyboard behavior', () => {
     expect(screen.getByText('Mira is thinking...')).toBeInTheDocument()
   })
 
+  it('shows the current tool call in the working indicator while streaming', () => {
+    useAgentStore.setState({
+      streamingBySession: { 'PRJ-0001': true },
+      logsByProject: {
+        'PRJ-0001': [
+          {
+            id: 'user-1',
+            timestamp: new Date().toISOString(),
+            content: 'do it',
+            type: 'response',
+            metadata: { _user: true },
+          },
+          {
+            id: 'tool-1',
+            timestamp: new Date().toISOString(),
+            content: 'bg({"cmd": "python train.py"})',
+            type: 'tool_call',
+            metadata: {},
+          },
+        ],
+      },
+    })
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('Mira is working (Tool call: bg)')).toBeInTheDocument()
+    expect(screen.queryByText('Mira is thinking...')).toBeNull()
+  })
+
   it('sends quick chat messages on the active chat thread without a project', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     useChatStore.setState({
