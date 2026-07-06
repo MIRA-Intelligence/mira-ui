@@ -427,6 +427,7 @@ export interface ProjectFileInfo {
 /** File row in the explorer; includes project routing for workspace-wide views. */
 export interface ProjectFileEntry extends ProjectFileInfo {
   projectId: string
+  projectLabel?: string
   /** Path relative to the project root (used for API calls). */
   relativePath: string
 }

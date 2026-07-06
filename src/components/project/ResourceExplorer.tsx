@@ -86,7 +86,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         setFiles(toProjectScopedEntries(selectedTaskId, result.files))
         return
       }
-      const data = await fetchAllProjectFiles(tasks.map((t) => ({ id: t.id })))
+      const data = await fetchAllProjectFiles(tasks.map((t) => ({ id: t.id, label: t.label })))
       setFiles(data)
     } catch (err) {
       console.error('Failed to load files:', err)
@@ -357,16 +357,23 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         <div className="flex items-center gap-2 min-w-0">
           {isProjectMode && (
             <div
-              className="flex-1 min-w-0 px-2 py-1 text-[10px] font-mono truncate text-[var(--color-text-secondary)]"
-              title={selectedTaskId ?? undefined}
+              className="min-w-0 flex-[0_1_42%] px-2 py-1 text-[10px] font-mono truncate text-[var(--color-text-secondary)]"
+              title={selectedTask?.label || selectedTaskId || undefined}
             >
               {selectedTaskId
                 ? t('filesForProject', lang, {
-                    name: selectedTask?.title || selectedTask?.label || selectedTaskId,
+                    name: selectedTask?.label || selectedTaskId,
                   })
                 : t('selectProjectToSeeFiles', lang)}
             </div>
           )}
+          <input
+            type="text"
+            placeholder={t('filesFilterPlaceholder', lang)}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="min-w-[96px] flex-1 px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+          />
           <div className={cn('flex items-center shrink-0 gap-0.5', !isProjectMode && 'ml-auto')}>
             {canUpload ? (
               <label
@@ -445,16 +452,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         className="sr-only"
         onChange={(e) => void handleFileChange(e, 'references')}
       />
-
-      <div className="p-2 border-b border-[var(--color-border)] bg-[var(--color-bg-primary)]">
-        <input
-          type="text"
-          placeholder={t('filesFilterPlaceholder', lang)}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
-        />
-      </div>
 
       <div className="flex-1 overflow-y-auto p-2 min-h-0">
         {showProjectEmpty || showWorkspaceEmpty ? (

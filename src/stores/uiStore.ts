@@ -80,6 +80,8 @@ export interface OpenNewProjectOptions {
 
 interface UiState {
   sidebarCollapsed: boolean
+  /** Quick-chat center pane (home / file preview) collapsed to foreground the agent workbench. */
+  chatCenterCollapsed: boolean
   agentPanelCollapsed: boolean
   sidebarWidth: number
   agentPanelWidth: number
@@ -104,6 +106,10 @@ interface UiState {
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
   setSidebarWidth: (px: number) => void
+  toggleChatCenter: () => void
+  setChatCenterCollapsed: (v: boolean) => void
+  /** Collapse quick-chat home and expand the agent workbench (chat mode). */
+  focusQuickChatWorkbench: () => void
   toggleAgentPanel: () => void
   setAgentPanelCollapsed: (v: boolean) => void
   setAgentPanelWidth: (px: number) => void
@@ -131,6 +137,7 @@ function nextSystemMessageId(): string {
 
 export const useUiStore = create<UiState>((set) => ({
   sidebarCollapsed: false,
+  chatCenterCollapsed: false,
   agentPanelCollapsed: false,
   sidebarWidth: loadWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH),
   agentPanelWidth: loadWidth(AGENT_PANEL_WIDTH_KEY, AGENT_PANEL_WIDTH),
@@ -147,6 +154,17 @@ export const useUiStore = create<UiState>((set) => ({
   systemMessages: [],
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+  toggleChatCenter: () => set((s) => ({ chatCenterCollapsed: !s.chatCenterCollapsed })),
+  setChatCenterCollapsed: (v) => set({ chatCenterCollapsed: v }),
+  focusQuickChatWorkbench: () => {
+    saveWorkbenchTab('agent')
+    set({
+      chatCenterCollapsed: true,
+      agentPanelCollapsed: false,
+      workbenchTab: 'agent',
+      chatCenterPreviewFile: null,
+    })
+  },
   setSidebarWidth: (px) => {
     const w = clamp(px, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max)
     saveWidth(SIDEBAR_WIDTH_KEY, w)
@@ -168,7 +186,11 @@ export const useUiStore = create<UiState>((set) => ({
     saveWorkbenchTab(tab)
     set({ workbenchTab: tab })
   },
-  setChatCenterPreviewFile: (file) => set({ chatCenterPreviewFile: file }),
+  setChatCenterPreviewFile: (file) =>
+    set({
+      chatCenterPreviewFile: file,
+      ...(file ? { chatCenterCollapsed: false } : {}),
+    }),
   setAgentDraftPrompt: (text) => set({ agentDraftPrompt: text }),
   openNewProject: (options) =>
     set({

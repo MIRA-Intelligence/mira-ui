@@ -128,3 +128,38 @@ describe('uiStore.layout + modals', () => {
     expect(useUiStore.getState().updateBannerDismissed).toBe(false)
   })
 })
+
+describe('uiStore.quickChatLayout', () => {
+  beforeEach(() => {
+    useUiStore.setState(initialState, true)
+  })
+
+  it('focusQuickChatWorkbench collapses center and expands the agent workbench', () => {
+    useUiStore.setState({
+      chatCenterCollapsed: false,
+      agentPanelCollapsed: true,
+      workbenchTab: 'files',
+      chatCenterPreviewFile: { projectId: 'P', name: 'a', path: 'a', relativePath: 'a', size: 0, mtime: 0, is_dir: false },
+    })
+    useUiStore.getState().focusQuickChatWorkbench()
+    const s = useUiStore.getState()
+    expect(s.chatCenterCollapsed).toBe(true)
+    expect(s.agentPanelCollapsed).toBe(false)
+    expect(s.workbenchTab).toBe('agent')
+    expect(s.chatCenterPreviewFile).toBeNull()
+  })
+
+  it('setChatCenterPreviewFile expands center when previewing a file', () => {
+    useUiStore.setState({ chatCenterCollapsed: true })
+    useUiStore.getState().setChatCenterPreviewFile({
+      projectId: 'P',
+      name: 'out.csv',
+      path: 'out.csv',
+      relativePath: 'out.csv',
+      size: 1,
+      mtime: 1,
+      is_dir: false,
+    })
+    expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
+  })
+})

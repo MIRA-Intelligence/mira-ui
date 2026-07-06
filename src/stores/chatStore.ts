@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { newChatSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
+import { useUiStore } from '@/stores/uiStore'
 
 /**
  * A lightweight Quick Chat conversation (basic loop). Unlike a research
@@ -94,12 +95,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       selectedExpId: null,
       activeStage: 'research',
     })
+    useUiStore.getState().focusQuickChatWorkbench()
     return id
   },
 
   selectChat: (id) => {
     set({ activeChatId: id })
     useProjectStore.getState().setAppMode('normal')
+    useUiStore.getState().focusQuickChatWorkbench()
   },
 
   renameChat: (id, title) => {

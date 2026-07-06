@@ -15,6 +15,7 @@ import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateMod
 import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useChatStore } from '@/stores/chatStore'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
@@ -122,6 +123,9 @@ export function AppLayout() {
   const {
     sidebarCollapsed,
     toggleSidebar,
+    chatCenterCollapsed,
+    toggleChatCenter,
+    setChatCenterCollapsed,
     agentPanelCollapsed,
     toggleAgentPanel,
     sidebarWidth,
@@ -134,8 +138,11 @@ export function AppLayout() {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
   const appMode = useProjectStore((s) => s.appMode)
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const chatCenterPreviewFile = useUiStore((s) => s.chatCenterPreviewFile)
   const lang = useSettingsStore((s) => s.language)
   const isChat = appMode === 'normal'
+  const agentPanelExpanded = isChat && chatCenterCollapsed && !agentPanelCollapsed
   // Suppress width transitions while actively dragging a splitter so the panel
   // tracks the cursor 1:1 instead of easing behind it.
   const [resizing, setResizing] = useState(false)
@@ -146,6 +153,13 @@ export function AppLayout() {
   useEffect(() => {
     void flushPendingFeedback()
   }, [flushPendingFeedback])
+
+  // Quick-chat home fills the center when no thread is active (unless previewing a file).
+  useEffect(() => {
+    if (isChat && !activeChatId && !chatCenterPreviewFile && chatCenterCollapsed) {
+      setChatCenterCollapsed(false)
+    }
+  }, [isChat, activeChatId, chatCenterPreviewFile, chatCenterCollapsed, setChatCenterCollapsed])
 
   return (
     <div className="h-screen flex flex-col">
@@ -190,9 +204,33 @@ export function AppLayout() {
         )}
 
         {/* Center: project work area or quick-chat placeholder */}
-        <div className="flex-1 overflow-hidden min-w-0">
+        <div
+          className={cn(
+            'overflow-hidden min-w-0',
+            isChat && chatCenterCollapsed ? 'w-0 shrink-0' : 'flex-1',
+            !resizing && isChat && 'transition-[width,flex] duration-200 ease-in-out',
+          )}
+        >
           {isChat ? <ChatMainPlaceholder /> : <TaskDetail />}
         </div>
+
+        {isChat && (
+          <SplitterToggle
+            onToggle={toggleChatCenter}
+            onStart={() => {
+              setChatCenterCollapsed(false)
+              setResizing(true)
+            }}
+            onEnd={() => setResizing(false)}
+            onMove={() => {
+              // Center pane is flex-sized; drag expands it by uncollapsing first.
+            }}
+            className="border-l border-[var(--color-border)]"
+            ariaLabel={t('toggleChatCenter', lang)}
+          >
+            {chatCenterCollapsed ? <ChevronRight /> : <ChevronLeft />}
+          </SplitterToggle>
+        )}
 
         {/* Right workbench: files + agent (all modes) */}
         <SplitterToggle
@@ -212,11 +250,12 @@ export function AppLayout() {
         <div
           className={cn(
             'shrink-0 overflow-hidden',
-            !resizing && 'transition-[width] duration-200 ease-in-out',
+            agentPanelExpanded && 'flex-1 min-w-0',
+            !resizing && 'transition-[width,flex] duration-200 ease-in-out',
           )}
-          style={{ width: agentPanelCollapsed ? 0 : agentPanelWidth }}
+          style={{ width: agentPanelCollapsed ? 0 : agentPanelExpanded ? undefined : agentPanelWidth }}
         >
-          <div className="h-full" style={{ width: agentPanelWidth }}>
+          <div className="h-full" style={{ width: agentPanelExpanded ? '100%' : agentPanelWidth }}>
             <AgentWorkspacePanel />
           </div>
         </div>
