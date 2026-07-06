@@ -35,12 +35,11 @@ export function ChatMainPlaceholder() {
   const previewFile = useUiStore((s) => s.chatCenterPreviewFile)
   const setChatCenterPreviewFile = useUiStore((s) => s.setChatCenterPreviewFile)
   const setAgentDraftPrompt = useUiStore((s) => s.setAgentDraftPrompt)
-  const setWorkbenchTab = useUiStore((s) => s.setWorkbenchTab)
+  const focusQuickChatWorkbench = useUiStore((s) => s.focusQuickChatWorkbench)
   const openNewProject = useUiStore((s) => s.openNewProject)
   const tasks = useProjectStore((s) => s.tasks)
   const selectTask = useProjectStore((s) => s.selectTask)
   const createChat = useChatStore((s) => s.createChat)
-  const selectChat = useChatStore((s) => s.selectChat)
 
   const recentProjects = useMemo(
     () => tasks.slice(0, RECENT_PROJECT_LIMIT),
@@ -49,7 +48,7 @@ export function ChatMainPlaceholder() {
 
   const usePrompt = (key: (typeof PROMPT_KEYS)[number]) => {
     setAgentDraftPrompt(t(key, lang))
-    setWorkbenchTab('agent')
+    focusQuickChatWorkbench()
   }
 
   if (previewFile) {
@@ -117,7 +116,7 @@ export function ChatMainPlaceholder() {
         </header>
 
         <div className="flex flex-wrap justify-center gap-2">
-          <ActionButton onClick={() => { const id = createChat(); selectChat(id) }}>
+          <ActionButton onClick={() => createChat()}>
             {t('newChat', lang)}
           </ActionButton>
           <ActionButton onClick={() => openNewProject()}>

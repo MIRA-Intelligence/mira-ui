@@ -3,6 +3,7 @@ import type { ProjectFileEntry, ProjectFileInfo } from '@/types'
 
 export interface ProjectFilesSource {
   id: string
+  label?: string
 }
 
 const DEFAULT_CONCURRENCY = 5
@@ -34,7 +35,8 @@ export async function fetchAllProjectFiles(
         ...file,
         projectId: project.id,
         relativePath: file.path,
-        path: `${project.id}/${file.path}`,
+        projectLabel: project.label,
+        path: `${project.label || project.id}/${file.path}`,
       }))
     } catch {
       return []
