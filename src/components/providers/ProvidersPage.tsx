@@ -272,6 +272,40 @@ export function ProvidersPage() {
     setActive((current) => (current ? { ...current, ...patch } : current))
   }
 
+  // Switching a binding's provider must not leave a stale model from the old
+  // provider selected. The global ``provider`` acts as a forced override, so a
+  // mismatched pair (e.g. provider=nvidia + model=deepseek/…) would send the
+  // deepseek model to the NVIDIA gateway and fail. Keep the model only when it
+  // is still valid for the new provider; otherwise pick that provider's first
+  // curated model.
+  const changePrimaryProvider = (provider: string) => {
+    setActive((cur) => {
+      if (!cur) return cur
+      const opts = modelOptionsFor(provider)
+      const keep = provider === 'auto' || opts.length === 0 || opts.includes(cur.model)
+      return { ...cur, provider, model: keep ? cur.model : opts[0] }
+    })
+  }
+
+  const changeRoleProvider = (role: (typeof TEAM_ROLES)[number], provider: string) => {
+    setActive((cur) => {
+      if (!cur) return cur
+      const opts = modelOptionsFor(provider)
+      const curModel = cur[`${role}_model`]
+      // 'auto' inherits the model's own provider, so an empty (inherit primary)
+      // or existing value is fine. For a specific provider, an empty model would
+      // inherit the primary model (possibly a different provider's) — force a
+      // matching model instead.
+      const nextModel =
+        provider === 'auto' || (opts.length > 0 && opts.includes(curModel))
+          ? curModel
+          : opts.length > 0
+            ? opts[0]
+            : curModel
+      return { ...cur, [`${role}_provider`]: provider, [`${role}_model`]: nextModel }
+    })
+  }
+
   const handleFetchModels = async (name: string) => {
     setFetchingModels(true)
     setFeedback(null)
@@ -768,7 +802,7 @@ export function ProvidersPage() {
                 providerEntries={providerEntries}
                 modelOptions={modelOptionsFor(active.provider)}
                 includeAuto
-                onProviderChange={(provider) => updateActive({ provider })}
+                onProviderChange={changePrimaryProvider}
                 onModelChange={(model) => updateActive({ model })}
                 lang={lang}
               />
@@ -786,7 +820,7 @@ export function ProvidersPage() {
                     includeAuto
                     autoLabel={t('providersAutoDetect', lang)}
                     modelPlaceholder={t('providersRoleInherit', lang)}
-                    onProviderChange={(provider) => updateActive({ [`${role}_provider`]: provider } as Partial<ActiveDraft>)}
+                    onProviderChange={(provider) => changeRoleProvider(role, provider)}
                     onModelChange={(model) => updateActive({ [`${role}_model`]: model } as Partial<ActiveDraft>)}
                     lang={lang}
                   />

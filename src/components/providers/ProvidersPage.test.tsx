@@ -257,6 +257,38 @@ describe('ProvidersPage', () => {
     expect(arg.runtime).not.toHaveProperty('temperature')
   })
 
+  it('resets the primary model when the primary provider changes to avoid a mismatch', async () => {
+    // OpenAI has its own curated model so the switch can pick a valid one.
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue({
+      ...payload(),
+      providers: {
+        ...payload().providers,
+        openai: {
+          ...payload().providers.openai,
+          configured: true,
+          enabled: true,
+          api_key_configured: true,
+          models: ['openai/gpt-5.5'],
+        },
+      },
+    })
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    await screen.findByText('Fetch from provider')
+
+    // The primary provider select currently reflects deepseek; switch it to openai.
+    const primarySelect = (screen.getAllByRole('combobox') as HTMLSelectElement[]).find(
+      (s) => s.value === 'deepseek',
+    )!
+    fireEvent.change(primarySelect, { target: { value: 'openai' } })
+
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+    const arg = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0]
+    // The stale deepseek model must not survive the provider switch.
+    expect(arg.runtime).toMatchObject({ provider: 'openai', model: 'openai/gpt-5.5' })
+  })
+
   it('assigns a curated model to a role via the split-button dropdown', async () => {
     useUiStore.getState().openProviders()
     render(<ProvidersPage />)
