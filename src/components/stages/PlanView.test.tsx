@@ -71,4 +71,76 @@ describe('PlanView', () => {
     })
     expect(screen.getByRole('button', { name: 'Submit answers' })).not.toBeDisabled()
   })
+
+  it('submits a custom free-text answer via the Other option (single)', () => {
+    const submitSpy = vi.fn()
+    useProjectStore.setState({ submitPlanAnswers: submitSpy })
+    const plan: ProjectTask['plan'] = {
+      phase: 'questions',
+      updatedAt: '2026-06-08T12:00:00Z',
+      questions: [{ id: 'q1', prompt: 'Pick one', kind: 'single', options: ['A', 'B'] }],
+      answers: {},
+    }
+
+    render(<PlanView task={makeTask(plan)} />)
+
+    // Submit is blocked until an answer is provided.
+    expect(screen.getByRole('button', { name: 'Submit answers' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other' }))
+    fireEvent.change(screen.getByPlaceholderText('Type a custom answer'), {
+      target: { value: 'my own approach' },
+    })
+
+    const submit = screen.getByRole('button', { name: 'Submit answers' })
+    expect(submit).not.toBeDisabled()
+    fireEvent.click(submit)
+    expect(submitSpy).toHaveBeenCalledWith({ q1: 'my own approach' })
+  })
+
+  it('includes a custom answer alongside chosen options via Other (multi)', () => {
+    const submitSpy = vi.fn()
+    useProjectStore.setState({ submitPlanAnswers: submitSpy })
+    const plan: ProjectTask['plan'] = {
+      phase: 'questions',
+      updatedAt: '2026-06-08T12:00:00Z',
+      questions: [{ id: 'q1', prompt: 'Pick some', kind: 'multi', options: ['A', 'B'] }],
+      answers: {},
+    }
+
+    render(<PlanView task={makeTask(plan)} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Other' }))
+    fireEvent.change(screen.getByPlaceholderText('Type a custom answer'), {
+      target: { value: 'extra option' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }))
+    expect(submitSpy).toHaveBeenCalledWith({ q1: ['A', 'extra option'] })
+  })
+
+  it('choosing a predefined single option clears a prior Other selection', () => {
+    const submitSpy = vi.fn()
+    useProjectStore.setState({ submitPlanAnswers: submitSpy })
+    const plan: ProjectTask['plan'] = {
+      phase: 'questions',
+      updatedAt: '2026-06-08T12:00:00Z',
+      questions: [{ id: 'q1', prompt: 'Pick one', kind: 'single', options: ['A', 'B'] }],
+      answers: {},
+    }
+
+    render(<PlanView task={makeTask(plan)} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other' }))
+    fireEvent.change(screen.getByPlaceholderText('Type a custom answer'), {
+      target: { value: 'ignored' },
+    })
+    // Switching to a concrete option hides the custom field and wins.
+    fireEvent.click(screen.getByRole('button', { name: 'B' }))
+    expect(screen.queryByPlaceholderText('Type a custom answer')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }))
+    expect(submitSpy).toHaveBeenCalledWith({ q1: 'B' })
+  })
 })

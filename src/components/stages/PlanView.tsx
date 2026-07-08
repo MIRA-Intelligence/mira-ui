@@ -42,28 +42,91 @@ export function PlanView({ task }: { task: ProjectTask }) {
     })
   }, [plan])
 
+  // ``answers`` holds only the selections that map to predefined options
+  // (single: the chosen option; multi: the chosen options). Free-text "Other"
+  // input is tracked separately so it can coexist with the option chips and be
+  // composed into the final answer on submit — mirroring Cursor's Plan mode.
   const [answers, setAnswers] = useState<AnswerMap>({})
+  const [otherOn, setOtherOn] = useState<Record<string, boolean>>({})
+  const [customText, setCustomText] = useState<Record<string, string>>({})
   const [feedback, setFeedback] = useState('')
   const [showFeedback, setShowFeedback] = useState(false)
   const [busy, setBusy] = useState(false)
 
+  const questions = plan?.questions ?? []
+
   // Sync local answers with the latest plan and reset transient state whenever
   // the plan content changes, including a new questions round that reuses q1-q5.
+  // Answers that don't match any predefined option are restored into the
+  // "Other" free-text field so a re-hydrated custom answer stays visible.
   useEffect(() => {
-    setAnswers(plan?.answers ?? {})
+    const init = plan?.answers ?? {}
+    const qs = plan?.questions ?? []
+    const nextAnswers: AnswerMap = {}
+    const nextOther: Record<string, boolean> = {}
+    const nextCustom: Record<string, string> = {}
+    for (const q of qs) {
+      const value = init[q.id]
+      const options = q.options ?? []
+      if (q.kind === 'multi') {
+        const arr = Array.isArray(value) ? value : []
+        nextAnswers[q.id] = arr.filter((v) => options.includes(v))
+        const extra = arr.filter((v) => !options.includes(v))
+        if (extra.length > 0) {
+          nextOther[q.id] = true
+          nextCustom[q.id] = extra.join(', ')
+        }
+      } else if (q.kind === 'single') {
+        if (typeof value === 'string' && value.trim() && !options.includes(value)) {
+          nextAnswers[q.id] = ''
+          nextOther[q.id] = true
+          nextCustom[q.id] = value
+        } else {
+          nextAnswers[q.id] = typeof value === 'string' ? value : ''
+        }
+      } else {
+        nextAnswers[q.id] = typeof value === 'string' ? value : ''
+      }
+    }
+    setAnswers(nextAnswers)
+    setOtherOn(nextOther)
+    setCustomText(nextCustom)
     setShowFeedback(false)
     setFeedback('')
     setBusy(false)
   }, [task.id, planSignature])
 
-  const questions = plan?.questions ?? []
+  // Merge the option selections with any "Other" free-text into the final
+  // answer value that is validated and submitted.
+  const composeAnswer = (q: PlanQuestion): string | string[] => {
+    const base = answers[q.id]
+    const custom = (customText[q.id] ?? '').trim()
+    if (q.kind === 'multi') {
+      const opts = Array.isArray(base) ? base : []
+      return otherOn[q.id] && custom ? [...opts, custom] : opts
+    }
+    if (q.kind === 'single') {
+      if (otherOn[q.id]) return custom
+      return typeof base === 'string' ? base : ''
+    }
+    return typeof base === 'string' ? base : ''
+  }
+
+  const composedAnswers = useMemo<AnswerMap>(() => {
+    const out: AnswerMap = {}
+    for (const q of questions) out[q.id] = composeAnswer(q)
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questions, answers, otherOn, customText])
+
   const allAnswered = useMemo(
-    () => questions.length > 0 && questions.every((q) => isAnswered(q, answers[q.id])),
-    [questions, answers],
+    () => questions.length > 0 && questions.every((q) => isAnswered(q, composedAnswers[q.id])),
+    [questions, composedAnswers],
   )
 
   const setSingle = (qid: string, option: string) => {
     setAnswers((prev) => ({ ...prev, [qid]: option }))
+    setOtherOn((prev) => ({ ...prev, [qid]: false }))
   }
   const toggleMulti = (qid: string, option: string) => {
     setAnswers((prev) => {
@@ -74,6 +137,16 @@ export function PlanView({ task }: { task: ProjectTask }) {
       return { ...prev, [qid]: next }
     })
   }
+  const selectSingleOther = (qid: string) => {
+    setOtherOn((prev) => ({ ...prev, [qid]: true }))
+    setAnswers((prev) => ({ ...prev, [qid]: '' }))
+  }
+  const toggleMultiOther = (qid: string) => {
+    setOtherOn((prev) => ({ ...prev, [qid]: !prev[qid] }))
+  }
+  const setCustom = (qid: string, value: string) => {
+    setCustomText((prev) => ({ ...prev, [qid]: value }))
+  }
   const setText = (qid: string, value: string) => {
     setAnswers((prev) => ({ ...prev, [qid]: value }))
   }
@@ -81,7 +154,7 @@ export function PlanView({ task }: { task: ProjectTask }) {
   const handleSubmitAnswers = () => {
     if (!allAnswered || busy) return
     setBusy(true)
-    submitPlanAnswers(answers)
+    submitPlanAnswers(composedAnswers)
   }
 
   const handleApprove = () => {
@@ -214,7 +287,35 @@ export function PlanView({ task }: { task: ProjectTask }) {
                             </button>
                           )
                         })}
+                        {/* "Other" lets the user supply a custom answer instead
+                            of picking from the LLM's suggestions. */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            q.kind === 'multi'
+                              ? toggleMultiOther(q.id)
+                              : selectSingleOther(q.id)
+                          }
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                            otherOn[q.id]
+                              ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)] border-[var(--color-accent)]/40'
+                              : 'text-[var(--color-text-secondary)] border-[var(--color-border)] border-dashed hover:bg-[var(--color-bg-hover)]'
+                          }`}
+                        >
+                          {t('planOther', lang)}
+                        </button>
                       </div>
+                      {otherOn[q.id] && (
+                        <div className="pl-5 mt-2">
+                          <input
+                            type="text"
+                            value={customText[q.id] ?? ''}
+                            onChange={(e) => setCustom(q.id, e.target.value)}
+                            placeholder={t('planOtherPlaceholder', lang)}
+                            className="w-full bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+                          />
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
