@@ -70,6 +70,7 @@ describe('StatusBar', () => {
           reasoning_effort: 'medium',
           temperature: 0.1,
           max_tool_iterations: 32,
+          auto_max_rounds: 100,
           restrict_to_workspace: true,
         },
         providers: {},

@@ -56,6 +56,7 @@ const REASONING_OPTIONS: Exclude<ReasoningEffort, null>[] = ['low', 'medium', 'h
 interface RuntimeForm {
   reasoningEffort: ReasoningEffort
   maxToolIterations: string
+  autoMaxRounds: string
   restrictToWorkspace: boolean
 }
 
@@ -64,6 +65,7 @@ function buildRuntimeForm(payload: RuntimeConfigPayload): RuntimeForm {
   return {
     reasoningEffort: r.reasoning_effort,
     maxToolIterations: String(r.max_tool_iterations),
+    autoMaxRounds: String(r.auto_max_rounds),
     restrictToWorkspace: r.restrict_to_workspace,
   }
 }
@@ -385,8 +387,13 @@ export function ProvidersPage() {
         if (!Number.isInteger(maxIter) || maxIter < 1) {
           throw new Error(t('runtimeMaxIterInvalid', lang))
         }
+        const maxRounds = Number(runtimeForm.autoMaxRounds.trim())
+        if (!Number.isInteger(maxRounds) || maxRounds < 1) {
+          throw new Error(t('runtimeMaxRoundsInvalid', lang))
+        }
         runtime.reasoning_effort = runtimeForm.reasoningEffort
         runtime.max_tool_iterations = maxIter
+        runtime.auto_max_rounds = maxRounds
         runtime.restrict_to_workspace = runtimeForm.restrictToWorkspace
       }
 
@@ -1005,6 +1012,17 @@ function RuntimeSettingsEditor({
           inputMode="numeric"
           className={inputClass}
         />
+      </div>
+
+      <div>
+        <FieldLabel text={t('runtimeMaxRounds', lang)} />
+        <input
+          value={form.autoMaxRounds}
+          onChange={(e) => update({ autoMaxRounds: e.target.value })}
+          inputMode="numeric"
+          className={inputClass}
+        />
+        <p className="text-[11px] text-[var(--color-text-muted)] mt-1">{t('runtimeMaxRoundsHint', lang)}</p>
       </div>
 
       <div className="flex items-center justify-between gap-3">

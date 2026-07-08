@@ -31,6 +31,7 @@ function runtimePayload(workspace: string, configPath: string): RuntimeConfigPay
       reasoning_effort: null,
       temperature: 0.1,
       max_tool_iterations: 200,
+      auto_max_rounds: 100,
       restrict_to_workspace: false,
     },
     providers: {},

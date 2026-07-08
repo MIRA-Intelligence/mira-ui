@@ -72,6 +72,7 @@ export interface RuntimeConfigPayload {
     reasoning_effort: ReasoningEffort
     temperature: number | null
     max_tool_iterations: number
+    auto_max_rounds: number
     restrict_to_workspace: boolean
     setup_required?: boolean
     setup_message?: string | null
@@ -134,6 +135,7 @@ export async function saveRuntimeConfig(payload: {
     reasoning_effort: ReasoningEffort
     temperature: number | null
     max_tool_iterations: number
+    auto_max_rounds: number
     restrict_to_workspace: boolean
   }
   providers: Partial<Record<string, { api_key?: string; api_base?: string | null }>>
@@ -152,6 +154,7 @@ export async function saveProvidersConfig(payload: {
     reasoning_effort: ReasoningEffort
     temperature: number | null
     max_tool_iterations: number
+    auto_max_rounds: number
     restrict_to_workspace: boolean
   } & RuntimeRoleBindings>
   providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }>>

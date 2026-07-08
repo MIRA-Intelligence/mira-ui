@@ -53,6 +53,7 @@ function payload(): RuntimeConfigPayload {
       reasoning_effort: null,
       temperature: 0.1,
       max_tool_iterations: 200,
+      auto_max_rounds: 100,
       restrict_to_workspace: false,
       supervisor_provider: 'auto',
       supervisor_model: null,
@@ -238,6 +239,8 @@ describe('ProvidersPage', () => {
 
     // Max tool iterations is seeded from the loaded config (200); change it.
     fireEvent.change(screen.getByDisplayValue('200'), { target: { value: '150' } })
+    // Auto-mode max rounds is seeded from the loaded config (100); change it.
+    fireEvent.change(screen.getByDisplayValue('100'), { target: { value: '50' } })
     // Flip the workspace-restriction switch on.
     fireEvent.click(screen.getByRole('switch', { name: 'Restrict tool access to workspace' }))
 
@@ -246,6 +249,7 @@ describe('ProvidersPage', () => {
     const arg = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0]
     expect(arg.runtime).toMatchObject({
       max_tool_iterations: 150,
+      auto_max_rounds: 50,
       restrict_to_workspace: true,
       reasoning_effort: null,
     })
