@@ -18,10 +18,10 @@ function condenseActivity(text: string, max: number): string {
   return clean.length > max ? `${clean.slice(0, max)}…` : clean
 }
 
-// Derive a human-readable "what Mira is doing right now" label from the most
-// recent trailing activity entry (tool call / progress). Returns null when the
-// tail is a finalized response or there is nothing actionable to show.
-function deriveActivityLabel(logs: AgentLogEntry[], lang: Parameters<typeof t>[1]): string | null {
+// Derive the operation Mira is running right now from the most recent trailing
+// activity entry. Keep the actual tool-call summary (including useful args)
+// instead of reducing it to just the tool name.
+function deriveActivityLabel(logs: AgentLogEntry[]): string | null {
   for (let i = logs.length - 1; i >= 0; i--) {
     const entry = logs[i]
     if (entry.type !== 'tool_call' && entry.type !== 'progress') {
@@ -30,12 +30,7 @@ function deriveActivityLabel(logs: AgentLogEntry[], lang: Parameters<typeof t>[1
     }
     const raw = (entry.content ?? '').trim()
     if (!raw) continue
-    if (entry.type === 'tool_call') {
-      const name = raw.split('(')[0].trim() || raw
-      return t('activityToolCall', lang, { name: condenseActivity(name, 48) })
-    }
-    const line = raw.split('\n').map((s) => s.trim()).find(Boolean)
-    if (line) return condenseActivity(line, 80)
+    return condenseActivity(raw, 80)
   }
   return null
 }
@@ -151,7 +146,7 @@ export function AgentPanel() {
   const showThinking = isStreaming && !isStreamingEntryLive
   // Surface the current task (e.g. latest tool call) so the indicator proves
   // Mira is actively working rather than a static "thinking" spinner.
-  const activityLabel = useMemo(() => deriveActivityLabel(logs, lang), [logs, lang])
+  const activityLabel = useMemo(() => deriveActivityLabel(logs), [logs])
 
   const [collapsedProgressGroups, setCollapsedProgressGroups] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -426,13 +421,15 @@ export function AgentPanel() {
 
         {showThinking && (
           <div className="px-4 py-2" role="status" aria-live="polite">
-            <div className="inline-flex max-w-full items-center gap-2 rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
-              <span className="flex items-center gap-1" aria-hidden="true">
+            <div className="inline-flex max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-[var(--color-bg-tertiary)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+              <span className="flex shrink-0 items-center gap-1" aria-hidden="true">
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce" />
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:120ms]" />
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] animate-bounce [animation-delay:240ms]" />
               </span>
-              <span>{activityLabel ? t('miraWorking', lang, { task: activityLabel }) : t('miraThinking', lang)}</span>
+              <span className="min-w-0 truncate whitespace-nowrap">
+                {activityLabel ? t('miraRunningStep', lang, { step: activityLabel }) : t('miraThinking', lang)}
+              </span>
             </div>
           </div>
         )}

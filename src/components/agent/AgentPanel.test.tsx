@@ -95,7 +95,80 @@ describe('AgentPanel keyboard behavior', () => {
 
     render(<AgentPanel />)
 
-    expect(screen.getByText('Mira is working (Tool call: bg)')).toBeInTheDocument()
+    const currentStep = screen.getByText('Mira is running: bg({"cmd": "python train.py"})')
+    expect(currentStep).toBeInTheDocument()
+    expect(currentStep).toHaveClass('truncate', 'whitespace-nowrap')
+    expect(screen.queryByText('Mira is thinking...')).toBeNull()
+  })
+
+  it('condenses and truncates a long current step to one line', () => {
+    const rawStep = `python(  "${'x'.repeat(100)}"  )\nnext line`
+    const condensedStep = rawStep.replace(/\s+/g, ' ').trim()
+    useAgentStore.setState({
+      streamingBySession: { 'PRJ-0001': true },
+      logsByProject: {
+        'PRJ-0001': [
+          {
+            id: 'progress-1',
+            timestamp: new Date().toISOString(),
+            content: rawStep,
+            type: 'progress',
+            metadata: { _tool_hint: true },
+          },
+        ],
+      },
+    })
+
+    render(<AgentPanel />)
+
+    const currentStep = screen.getByText(`Mira is running: ${condensedStep.slice(0, 80)}…`)
+    expect(currentStep).toHaveClass('truncate', 'whitespace-nowrap')
+  })
+
+  it('shows the latest valid tool progress in a normal conversation', () => {
+    useChatStore.setState({
+      chats: [{ id: 'chat-test', title: '', createdAt: 0, updatedAt: 0 }],
+      activeChatId: 'chat-test',
+      workspaceKey: 'ws',
+    })
+    useProjectStore.setState({
+      appMode: 'normal',
+      selectedTaskId: null,
+      mode: 'manual',
+      agentProfile: 'research',
+    })
+    useAgentStore.setState({
+      streamingBySession: { 'chat-test': true },
+      logsByProject: {
+        'chat-test': [
+          {
+            id: 'user-1',
+            timestamp: new Date().toISOString(),
+            content: 'inspect this',
+            type: 'response',
+            metadata: { _user: true },
+          },
+          {
+            id: 'progress-1',
+            timestamp: new Date().toISOString(),
+            content: 'exec("python inspect.py")',
+            type: 'progress',
+            metadata: { _tool_hint: true },
+          },
+          {
+            id: 'progress-2',
+            timestamp: new Date().toISOString(),
+            content: '   ',
+            type: 'progress',
+            metadata: {},
+          },
+        ],
+      },
+    })
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('Mira is running: exec("python inspect.py")')).toBeInTheDocument()
     expect(screen.queryByText('Mira is thinking...')).toBeNull()
   })
 
