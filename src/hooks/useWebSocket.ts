@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { wsClient } from '@/services/websocket'
-import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager } from '@/services/desktop'
+import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager, setEngineModeHint } from '@/services/desktop'
 import type { LocalEngineBootstrapState } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import { fetchRuntimeConfig } from '@/services/runtimeConfig'
@@ -12,7 +12,14 @@ import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 
 async function syncOnConnect() {
-  const { workspacePath, apiUrl, setRuntimeConfig, setRuntimeConfigLoaded, setRuntimeConfigError } = useSettingsStore.getState()
+  const {
+    workspacePath,
+    apiUrl,
+    setRuntimeConfig,
+    setRuntimeConfigLoaded,
+    setRuntimeConfigError,
+    setWorkspacePath,
+  } = useSettingsStore.getState()
   try {
     const payload = await fetchRuntimeConfig(apiUrl)
     const nextWorkspacePath = payload.runtime.workspace || payload.projects_root
@@ -26,6 +33,7 @@ async function syncOnConnect() {
     setRuntimeConfig(payload)
     setRuntimeConfigLoaded(true)
     setRuntimeConfigError(null)
+    setWorkspacePath(nextWorkspacePath)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     setRuntimeConfigError(message)
@@ -45,6 +53,13 @@ export function useWebSocket() {
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
+
+  // Mirror the active deployment mode to the main process so the next app
+  // launch can pre-warm (or skip) the local engine based on what the user
+  // last used. Runs on mount (seeding the persisted hint) and on every toggle.
+  useEffect(() => {
+    void setEngineModeHint(deploymentMode)
+  }, [deploymentMode])
 
   useEffect(() => {
     let disposed = false
@@ -128,6 +143,7 @@ export function useWebSocket() {
           status: probe.status,
           message: probe.status === 'compatible' ? null : probe.message,
           version: probe.version,
+          uptimeSeconds: probe.uptimeSeconds,
         })
 
         if (probe.status !== 'compatible') {

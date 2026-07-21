@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAgentStore } from './agentStore'
+import { useProjectStore } from './projectStore'
 
 const initialAgentState = useAgentStore.getState()
+const initialProjectState = useProjectStore.getState()
 
 describe('agentStore hydrateLogs', () => {
   beforeEach(() => {
@@ -85,6 +87,119 @@ describe('agentStore hydrateLogs', () => {
         metadata: {},
       },
     ])
+  })
+
+  it('does not duplicate the optimistic initial prompt when server history uses a different timestamp', () => {
+    // Optimistic user message added on project creation (client timestamp).
+    useAgentStore.setState({
+      logsByProject: {
+        liqa2: [
+          {
+            id: 'user-1751386752345',
+            timestamp: '2026-07-01T08:19:12.345Z',
+            content: 'New research project initialized.\n\n## Research Description\n...',
+            type: 'response',
+            metadata: { _user: true },
+          },
+        ],
+      },
+    })
+
+    // Same message loaded back from the engine with the server timestamp.
+    const history = [
+      {
+        id: 'history-liqa2-0-user',
+        timestamp: '2026-07-01T16:19:12',
+        content: 'New research project initialized.\n\n## Research Description\n...',
+        type: 'response' as const,
+        metadata: { _user: true },
+      },
+    ]
+
+    useAgentStore.getState().hydrateLogs('liqa2', history)
+
+    const logs = useAgentStore.getState().logsByProject['liqa2']
+    expect(logs).toHaveLength(1)
+    expect(logs[0].id).toBe('history-liqa2-0-user')
+  })
+
+  it('keeps genuinely repeated messages in server history', () => {
+    const history = [
+      {
+        id: 'history-PRJ-0007-0-user',
+        timestamp: '2026-04-08T10:00:00.000Z',
+        content: 'continue',
+        type: 'response' as const,
+        metadata: { _user: true },
+      },
+      {
+        id: 'history-PRJ-0007-1-user',
+        timestamp: '2026-04-08T10:05:00.000Z',
+        content: 'continue',
+        type: 'response' as const,
+        metadata: { _user: true },
+      },
+    ]
+
+    useAgentStore.getState().hydrateLogs('PRJ-0007', history)
+    expect(useAgentStore.getState().logsByProject['PRJ-0007']).toEqual(history)
+  })
+})
+
+describe('agentStore plan refreshes', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    useAgentStore.setState(initialAgentState, true)
+    useProjectStore.setState(initialProjectState, true)
+  })
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
+  })
+
+  it('forces plan entry when a project response advertises pending questions', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-0001',
+      content: 'Plan questions are ready',
+      metadata: { _plan_phase: 'questions' },
+    })
+
+    expect(refreshPlan).toHaveBeenCalledWith('PRJ-0001', { enterPlan: true })
+  })
+
+  it('refreshes custom project ids from project metadata', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+
+    useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'brain-age-inference',
+      content: 'Plan questions are ready',
+      metadata: { _plan_phase: 'questions', project_id: 'brain-age-inference' },
+    })
+
+    expect(refreshPlan).toHaveBeenCalledWith('brain-age-inference', { enterPlan: true })
+  })
+
+  it('clears thinking state when auto-run reports a terminal stop reason', () => {
+    const refreshPlan = vi.fn().mockResolvedValue(undefined)
+    useProjectStore.setState({ refreshPlan })
+    const store = useAgentStore.getState()
+    store.markSessionPending('PRJ-0001')
+
+    store.handleWsMessage({
+      type: 'progress',
+      session_id: 'PRJ-0001',
+      content: 'auto-run stop reason: queue exhausted, no replan condition met',
+    })
+
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-0001')).toBe(false)
+    expect(refreshPlan).toHaveBeenCalledWith('PRJ-0001')
   })
 })
 

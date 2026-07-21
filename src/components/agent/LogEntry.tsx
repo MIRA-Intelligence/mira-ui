@@ -4,12 +4,35 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as LogEntryType } from '@/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { useSettingsStore } from '@/stores/settingsStore'
-import { t } from '@/i18n'
+import { useSettingsStore, type Language } from '@/stores/settingsStore'
+import { t, type I18nKey } from '@/i18n'
 
 interface LogEntryProps {
   entry: LogEntryType
   defaultCollapsed?: boolean
+}
+
+const ERROR_CODE_KEYS: Record<string, I18nKey> = {
+  timeout: 'errorTimeout',
+  network: 'errorNetwork',
+  auth: 'errorAuth',
+  rate_limit: 'errorRateLimit',
+  context_window: 'errorContextWindow',
+  unknown: 'errorUnknown',
+}
+
+/**
+ * Localize a backend error entry from its structured `error_code` metadata,
+ * falling back to the server-provided English `content` when the code is
+ * absent (older engines) or unrecognized.
+ */
+function localizeError(entry: LogEntryType, lang: Language): string {
+  const code = entry.metadata?.error_code
+  if (typeof code !== 'string') return entry.content
+  const key = ERROR_CODE_KEYS[code]
+  if (!key) return entry.content
+  const detail = typeof entry.metadata?.error_detail === 'string' ? entry.metadata.error_detail : ''
+  return t(key, lang, { detail })
 }
 
 function MarkdownContent({ content }: { content: string }) {
@@ -122,6 +145,8 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
     )
   }
 
+  const errorText = entry.type === 'error' ? localizeError(entry, lang) : entry.content
+
   return (
     <div className="px-4 py-2">
       <div className="text-xs text-[var(--color-text-muted)] mb-1 font-mono">
@@ -130,12 +155,17 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
       <div
         className={cn(
           'text-sm leading-relaxed break-words',
+          // Markdown responses manage their own block layout; forcing
+          // ``whitespace-pre-wrap`` there turns every soft newline in the
+          // source into a hard break and inflates line spacing. Only preserve
+          // raw whitespace for plain/error text.
+          entry.type !== 'response' && 'whitespace-pre-wrap',
           entry.type === 'error'
             ? 'text-red-400'
             : 'text-[var(--color-text-secondary)]',
         )}
       >
-        {entry.type === 'response' ? <MarkdownContent content={entry.content} /> : entry.content}
+        {entry.type === 'response' ? <MarkdownContent content={entry.content} /> : errorText}
       </div>
     </div>
   )

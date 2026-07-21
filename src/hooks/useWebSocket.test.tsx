@@ -16,6 +16,7 @@ vi.mock('@/services/desktop', () => ({
   hasDesktopEngineManager: vi.fn(() => true),
   bootstrapLocalEngine: vi.fn(),
   getBootstrapState: vi.fn(),
+  setEngineModeHint: vi.fn(),
 }))
 
 vi.mock('@/services/engine', () => ({
@@ -82,6 +83,7 @@ describe('useWebSocket', () => {
       status: 'setup_required',
       message: 'Local engine is running, but model access is still unconfigured.',
       version: '0.2.0',
+      uptimeSeconds: null,
     })
 
     render(<HookHarness />)

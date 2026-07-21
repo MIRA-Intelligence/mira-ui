@@ -3,7 +3,8 @@ import type { IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
-  bootstrapLocalEngine: () => ipcRenderer.invoke('engine:bootstrap'),
+  bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
+  setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),
@@ -12,6 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   doctorLocalEngine: () => ipcRenderer.invoke('engine:doctor'),
   upgradeLocalEngine: (packageName = 'mira-engine') => ipcRenderer.invoke('engine:upgrade', packageName),
   repairLocalEngineService: () => ipcRenderer.invoke('engine:repair-service'),
+  selectDataPath: (kind: 'file' | 'directory') => ipcRenderer.invoke('dialog:select-data-path', kind),
+  selectDirectory: () => ipcRenderer.invoke('project:select-directory'),
 
   // App auto-update (v1: GitHub-release version-check + open release page).
   getAppVersion: () => ipcRenderer.invoke('update:get-app-version'),

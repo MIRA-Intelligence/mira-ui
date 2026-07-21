@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
@@ -6,7 +6,6 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { wsClient } from '@/services/websocket'
 import { uploadProjectFiles, validateDataPath } from '@/services/api'
-import { fetchRuntimeConfig } from '@/services/runtimeConfig'
 import { cn } from '@/lib/utils'
 import type {
   AgentProfile,
@@ -21,9 +20,10 @@ import { t } from '@/i18n'
 
 const GOAL_OPERATORS: AutomationGoalOperator[] = ['>', '>=', '<', '<=', '==']
 const DEFAULT_GOAL: AutomationGoal = { metric: '', operator: '>', value: Number.NaN }
-const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' }> = [
+const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 'researchMode' | 'teamMode' }> = [
   { key: 'engineer', labelKey: 'engineerMode' },
   { key: 'research', labelKey: 'researchMode' },
+  { key: 'team', labelKey: 'teamMode' },
 ]
 const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }> = [
   { key: 1, labelKey: 'contractCompat' },
@@ -81,6 +81,22 @@ function dedupePaths(paths: string[]): string[] {
   return result
 }
 
+function slugifyProjectId(value: string): string {
+  let text = value.trim().toLowerCase()
+  text = text.replace(/[\\/:]/g, '-')
+  text = text.split(/\s+/).filter(Boolean).join('-')
+  while (text.includes('--')) text = text.replace(/--/g, '-')
+  text = text.replace(/^[._-]+|[._-]+$/g, '')
+  return text.slice(0, 128) || 'project'
+}
+
+function joinProjectPath(parent: string, projectId: string): string {
+  const base = parent.trim().replace(/[\\/]+$/, '')
+  if (!base) return projectId
+  const separator = base.includes('\\') && !base.includes('/') ? '\\' : '/'
+  return `${base}${separator}${projectId}`
+}
+
 function detectPreferredReplyLanguage(text: string): 'zh' | 'en' {
   const hanCount = (text.match(/[\u3400-\u9fff]/g) ?? []).length
   const latinCount = (text.match(/[A-Za-z]/g) ?? []).length
@@ -91,7 +107,7 @@ function detectPreferredReplyLanguage(text: string): 'zh' | 'en' {
 
 function buildAgentMessage(
   input: NewProjectInput,
-  workspacePath: string,
+  projectDir: string,
   projectId: string,
   uploadedDataPaths: string[],
   uploadedReferencePaths: string[],
@@ -105,7 +121,7 @@ function buildAgentMessage(
     `New research project initialized.`,
     ``,
     `**Project ID**: ${projectId}`,
-    `**Workspace**: ${workspacePath}/${projectId}`,
+    `**Project Directory**: ${projectDir}`,
     ``,
     `## Research Description`,
     input.description,
@@ -116,7 +132,7 @@ function buildAgentMessage(
     for (const path of uploadedDataPaths) {
       lines.push(`- ${path}`)
     }
-    lines.push('', `These files are saved under ${workspacePath}/${projectId}/data.`)
+    lines.push('', `These files are saved under ${projectDir}/data.`)
   }
 
   if (uploadedReferencePaths.length > 0) {
@@ -126,7 +142,7 @@ function buildAgentMessage(
     }
     lines.push(
       '',
-      `These files are saved under ${workspacePath}/${projectId}/references.`,
+      `These files are saved under ${projectDir}/references.`,
       'Prioritize reading and analyzing these reference materials before external literature search.',
     )
   }
@@ -158,8 +174,8 @@ function buildAgentMessage(
   }
 
   const modeInstruction = runMode === 'manual'
-    ? 'After completing the research survey, STOP and report your findings.'
-    : 'After completing the research survey, continue automatically into the next pending experiment until stop conditions are met.'
+    ? 'After completing the research survey, enter interactive Plan mode: call set_plan with phase="questions", then STOP and wait for the user before creating or running experiments.'
+    : 'After completing the research survey, enter interactive Plan mode: call set_plan with phase="questions", then STOP and wait for the user; after the plan is approved, continue automatically through the approved experiments until stop conditions are met.'
 
   const literatureReview = input.literatureReview ?? {
     enabled: true,
@@ -173,7 +189,7 @@ function buildAgentMessage(
 
   const referenceInstruction = literatureReview.enabled
     ? uploadedReferencePaths.length > 0
-      ? `Before external search, first read and synthesize local materials under ${workspacePath}/${projectId}/references. Then search only these external literature sources: ${selectedSourceLabels.join(', ')}.`
+      ? `Before external search, first read and synthesize local materials under ${projectDir}/references. Then search only these external literature sources: ${selectedSourceLabels.join(', ')}.`
       : `Search these external literature sources and synthesize reliable references: ${selectedSourceLabels.join(', ')}.`
     : uploadedReferencePaths.length > 0 || input.references
       ? 'Literature research is disabled. Do not search external literature libraries. Only use uploaded/provided references if they are directly needed.'
@@ -199,7 +215,7 @@ function buildAgentMessage(
     lines.push(
       'Enabled: no',
       'Skip external literature search. Keep task_plan.json research.references empty unless user-provided references or uploaded PDFs/ZIPs are used.',
-      'Move directly to project planning and experiments after creating task_plan.json.',
+      'Move directly to interactive project planning after creating task_plan.json.',
     )
   }
 
@@ -207,7 +223,7 @@ function buildAgentMessage(
     '',
     literatureReview.enabled
       ? `Please begin by creating a task_plan.json, then start with the **Research** phase. ${referenceInstruction} Add references and notes to task_plan.json research section. ${modeInstruction} ${languageInstruction}`
-      : `Please begin by creating a task_plan.json. ${referenceInstruction} Do not perform a Research & Literature survey unless explicitly requested later. ${runMode === 'manual' ? 'After planning the first actionable experiment, STOP and report the plan.' : 'Continue automatically into the first pending experiment until stop conditions are met.'} ${languageInstruction}`,
+      : `Please begin by creating a task_plan.json. ${referenceInstruction} Do not perform a Research & Literature survey unless explicitly requested later. Enter interactive Plan mode immediately: call set_plan with phase="questions", then STOP and wait for the user before creating or running experiments. ${runMode === 'auto' ? 'After the plan is approved, continue automatically through the approved experiments until stop conditions are met.' : 'After the plan is approved, follow manual mode and wait for user confirmation before executing experiments.'} ${languageInstruction}`,
   )
 
   return lines.join('\n')
@@ -216,6 +232,13 @@ function buildAgentMessage(
 type PathCheckState = {
   status: 'idle' | 'testing' | 'success' | 'error'
   message: string
+}
+
+type DataSourceMode = 'serverPath' | 'upload'
+
+function getFileDisplayPath(file: File): string {
+  const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
+  return relativePath || file.name
 }
 
 export function NewProjectModal() {
@@ -235,7 +258,10 @@ export function NewProjectModal() {
   const connected = useAgentStore((s) => s.connected)
   // Block runtime switching while ANY session is mid-stream, not just one.
   const isStreaming = useAgentStore((s) => Object.values(s.streamingBySession).some(Boolean))
-  const { workspacePath, language: lang, deploymentMode } = useSettingsStore()
+  const { workspacePath, language: lang, deploymentMode, runtimeConfig } = useSettingsStore()
+  const projectLocation = runtimeConfig?.project_location
+  const customProjectDirAllowed = projectLocation?.custom_dir_allowed ?? true
+  const defaultProjectParentDir = projectLocation?.default_parent_dir || workspacePath
   const selectedTask = tasks.find((task) => task.id === selectedTaskId)
   const hasRunningExperiment = !!selectedTask?.experiments.some((exp) => exp.status === 'running')
   const canSwitchRuntime = !isStreaming && !hasRunningExperiment
@@ -245,10 +271,13 @@ export function NewProjectModal() {
   const folderInputRef = useRef<HTMLInputElement | null>(null)
   const pathCheckSeqRef = useRef(0)
   const pathCheckTimerRef = useRef<number | null>(null)
+  const [projectName, setProjectName] = useState('')
+  const [projectParentDir, setProjectParentDir] = useState(defaultProjectParentDir)
   const [description, setDescription] = useState('')
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [selectedReferenceFiles, setSelectedReferenceFiles] = useState<File[]>([])
   const [serverDataPath, setServerDataPath] = useState('')
+  const [dataSourceMode, setDataSourceMode] = useState<DataSourceMode>('serverPath')
   const [pathCheck, setPathCheck] = useState<PathCheckState>({ status: 'idle', message: '' })
   const [creating, setCreating] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -264,7 +293,18 @@ export function NewProjectModal() {
   const [maxExperiments, setMaxExperiments] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
 
-  const canCreate = description.trim().length > 0 && connected && projectsLoaded && !creating
+  const projectIdPreview = slugifyProjectId(projectName)
+  const projectDirPreview = customProjectDirAllowed
+    ? joinProjectPath(projectParentDir || defaultProjectParentDir, projectIdPreview)
+    : ''
+  const canCreate = (
+    projectName.trim().length > 0
+    && description.trim().length > 0
+    && connected
+    && projectsLoaded
+    && !creating
+    && (!customProjectDirAllowed || (projectParentDir || defaultProjectParentDir).trim().length > 0)
+  )
 
   const clearPathCheckTimer = () => {
     if (pathCheckTimerRef.current !== null) {
@@ -310,12 +350,14 @@ export function NewProjectModal() {
   }
 
   useEffect(() => {
-    const folderInput = folderInputRef.current
-    if (folderInput) {
-      folderInput.setAttribute('webkitdirectory', '')
-      folderInput.setAttribute('directory', '')
-    }
     return () => clearPathCheckTimer()
+  }, [])
+
+  const setFolderInputRef = useCallback((node: HTMLInputElement | null) => {
+    folderInputRef.current = node
+    if (!node) return
+    node.setAttribute('webkitdirectory', '')
+    node.setAttribute('directory', '')
   }, [])
 
   // Seed the description when opened with a prefill (e.g. promoting a Quick
@@ -327,10 +369,21 @@ export function NewProjectModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newProjectOpen, newProjectPrefill])
 
+  useEffect(() => {
+    if (!newProjectOpen) return
+    setProjectParentDir(defaultProjectParentDir)
+  }, [newProjectOpen, defaultProjectParentDir])
+
   if (!newProjectOpen) return null
 
   const handleDataFilesAdded = (files: FileList | File[]) => {
-    setSelectedFiles((prev) => mergeSelectedFiles(prev, files))
+    const incomingFiles = Array.from(files)
+    if (incomingFiles.length === 0) return
+    setDataSourceMode('upload')
+    setSelectedFiles((prev) => mergeSelectedFiles(prev, incomingFiles))
+    setServerDataPath('')
+    clearPathCheckTimer()
+    setPathCheck({ status: 'idle', message: '' })
     setUploadError('')
   }
 
@@ -354,7 +407,28 @@ export function NewProjectModal() {
     setSelectedReferenceFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
+  const useNativePathPicker = deploymentMode === 'localBundle' && Boolean(window.electronAPI?.selectDataPath)
+  const allowDataUpload = deploymentMode === 'remoteManual'
+  const dataPathPlaceholderKey = deploymentMode === 'localBundle'
+    ? 'localDataPathPlaceholder'
+    : 'remoteDataPathPlaceholder'
+
+  const applySelectedServerPath = (path: string) => {
+    setDataSourceMode('serverPath')
+    setServerDataPath(path)
+    setSelectedFiles([])
+    setUploadError('')
+    void runPathValidation(path)
+  }
+
   const handleDataBrowse = () => {
+    if (useNativePathPicker) {
+      void window.electronAPI?.selectDataPath?.('file').then((path) => {
+        if (path) applySelectedServerPath(path)
+      })
+      return
+    }
+    if (!allowDataUpload) return
     dataFileInputRef.current?.click()
   }
 
@@ -363,12 +437,26 @@ export function NewProjectModal() {
   }
 
   const handleBrowseFolder = () => {
+    if (useNativePathPicker) {
+      void window.electronAPI?.selectDataPath?.('directory').then((path) => {
+        if (path) applySelectedServerPath(path)
+      })
+      return
+    }
+    if (!allowDataUpload) return
     folderInputRef.current?.click()
+  }
+
+  const handleBrowseProjectParent = async () => {
+    const api = typeof window !== 'undefined' ? window.electronAPI : undefined
+    if (!api?.selectDirectory) return
+    const selected = await api.selectDirectory()
+    if (selected) setProjectParentDir(selected)
   }
 
   const handleDataDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
-    if (e.dataTransfer.files?.length) {
+    if (allowDataUpload && e.dataTransfer.files?.length) {
       handleDataFilesAdded(e.dataTransfer.files)
     }
   }
@@ -449,6 +537,11 @@ export function NewProjectModal() {
       : undefined
 
     const input: NewProjectInput = {
+      projectId: slugifyProjectId(projectName),
+      displayName: projectName.trim(),
+      projectParentDir: customProjectDirAllowed
+        ? (projectParentDir.trim() || defaultProjectParentDir)
+        : undefined,
       description: description.trim(),
       title: title.trim() || undefined,
       dataPath: serverDataPath.trim() || undefined,
@@ -464,17 +557,10 @@ export function NewProjectModal() {
     }
 
     try {
-      let effectiveWorkspacePath = workspacePath.trim()
-      if (deploymentMode === 'remoteManual') {
-        const payload = await fetchRuntimeConfig()
-        const settingsStore = useSettingsStore.getState()
-        effectiveWorkspacePath = payload.runtime.workspace || payload.projects_root
-        settingsStore.setRuntimeConfig(payload)
-        settingsStore.setRuntimeConfigLoaded(true)
-        settingsStore.setRuntimeConfigError(null)
-      }
-
       const projectId = await createProject(input)
+      const createdTask = useProjectStore.getState().tasks.find((task) => task.id === projectId)
+      const effectiveProjectDir = createdTask?.projectDir
+        || (input.projectParentDir ? joinProjectPath(input.projectParentDir, projectId) : projectId)
       let uploadedDataPaths: string[] = []
       let uploadedReferencePaths: string[] = []
 
@@ -488,7 +574,11 @@ export function NewProjectModal() {
           ...referencesUpload.extracted.map((item) => item.path),
         ])
       } catch (err) {
-        await deleteTask(projectId, false)
+        try {
+          await deleteTask(projectId, true)
+        } catch {
+          // Preserve the upload error shown to the user; cleanup can be retried from the queue.
+        }
         setUploadError(err instanceof Error ? err.message : t('uploadDataFilesFailed', lang))
         setCreating(false)
         return
@@ -501,7 +591,7 @@ export function NewProjectModal() {
       } = useProjectStore.getState()
       const agentMsg = buildAgentMessage(
         input,
-        effectiveWorkspacePath,
+        effectiveProjectDir,
         projectId,
         uploadedDataPaths,
         uploadedReferencePaths,
@@ -533,10 +623,13 @@ export function NewProjectModal() {
       }
 
       // Reset form
+      setProjectName('')
+      setProjectParentDir(defaultProjectParentDir)
       setDescription('')
       setSelectedFiles([])
       setSelectedReferenceFiles([])
       setServerDataPath('')
+      setDataSourceMode('serverPath')
       setPathCheck({ status: 'idle', message: '' })
       setTitle('')
       setReferences('')
@@ -578,6 +671,57 @@ export function NewProjectModal() {
 
         {/* Body — scrollable */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+          {/* Project identity */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-[var(--color-text-secondary)] flex items-center gap-1">
+              {t('projectName', lang)}
+              <span className="text-red-400">*</span>
+            </label>
+            <input
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder={t('projectNamePlaceholder', lang)}
+              className="w-full bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+            />
+          </div>
+
+          {customProjectDirAllowed ? (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {t('projectLocation', lang)}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  value={projectParentDir}
+                  onChange={(e) => setProjectParentDir(e.target.value)}
+                  placeholder={t('projectLocationPlaceholder', lang)}
+                  className="flex-1 min-w-0 bg-[var(--color-input-bg)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
+                />
+                {typeof window !== 'undefined' && window.electronAPI?.selectDirectory && (
+                  <button
+                    type="button"
+                    onClick={() => { void handleBrowseProjectParent() }}
+                    className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                  >
+                    {t('browseFolder', lang)}
+                  </button>
+                )}
+              </div>
+              {projectName.trim().length > 0 && (
+                <p className="text-[11px] text-[var(--color-text-muted)]">{projectDirPreview}</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                {t('projectLocation', lang)}
+              </label>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                {t('managedProjectLocation', lang)}
+              </p>
+            </div>
+          )}
 
           {/* Research Description — required */}
           <div className="space-y-1.5">
@@ -668,7 +812,9 @@ export function NewProjectModal() {
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('dataSourceFiles', lang)}</label>
             <div
-              onDragOver={(e) => e.preventDefault()}
+              onDragOver={(e) => {
+                if (allowDataUpload) e.preventDefault()
+              }}
               onDrop={handleDataDrop}
               className="rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-input-bg)] px-3 py-2.5"
             >
@@ -683,7 +829,7 @@ export function NewProjectModal() {
                 }}
               />
               <input
-                ref={folderInputRef}
+                ref={setFolderInputRef}
                 type="file"
                 multiple
                 className="hidden"
@@ -696,6 +842,9 @@ export function NewProjectModal() {
                 <input
                   value={serverDataPath}
                   onChange={(e) => {
+                    setDataSourceMode('serverPath')
+                    if (selectedFiles.length > 0) setSelectedFiles([])
+                    setUploadError('')
                     setServerDataPath(e.target.value)
                     schedulePathValidation(e.target.value)
                   }}
@@ -706,7 +855,7 @@ export function NewProjectModal() {
                       void runPathValidation(serverDataPath)
                     }
                   }}
-                  placeholder={t('dataPathPlaceholder', lang)}
+                  placeholder={t(dataPathPlaceholderKey, lang)}
                   className="flex-1 min-w-0 bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-xs rounded-lg px-2.5 py-1.5 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)]"
                 />
                 <span
@@ -727,31 +876,40 @@ export function NewProjectModal() {
                     pathCheck.status === 'idle' && 'bg-[var(--color-text-muted)]/60 shadow-[0_0_4px_rgba(148,163,184,0.35)]',
                   )}
                 />
-                <button
-                  type="button"
-                  onClick={handleDataBrowse}
-                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
-                >
-                  {t('browse', lang)}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleBrowseFolder}
-                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
-                >
-                  {t('browseFolder', lang)}
-                </button>
+                {(useNativePathPicker || allowDataUpload) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleDataBrowse}
+                      className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                    >
+                      {useNativePathPicker ? t('browseFilePath', lang) : t('browseUploadFiles', lang)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleBrowseFolder}
+                      className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors shrink-0"
+                    >
+                      {useNativePathPicker ? t('browseFolderPath', lang) : t('browseUploadFolder', lang)}
+                    </button>
+                  </>
+                )}
               </div>
-              {selectedFiles.length > 0 && (
-                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  {t('filesSelected', lang, { count: selectedFiles.length })}
+              {allowDataUpload && (
+                <p className="mt-1.5 text-[11px] text-[var(--color-text-muted)]">
+                  {t('remoteDataSourceHint', lang)}
                 </p>
               )}
-              {selectedFiles.length > 0 && (
+              {selectedFiles.length > 0 && dataSourceMode === 'upload' && (
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  {t('filesSelectedForUpload', lang, { count: selectedFiles.length })}
+                </p>
+              )}
+              {selectedFiles.length > 0 && dataSourceMode === 'upload' && (
                 <div className="mt-2 max-h-28 overflow-y-auto space-y-1">
                   {selectedFiles.map((file, idx) => (
-                    <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
-                      <span className="truncate">{file.name}</span>
+                    <div key={`${getFileDisplayPath(file)}-${file.lastModified}-${idx}`} className="flex items-center justify-between gap-2 text-xs text-[var(--color-text-secondary)]">
+                      <span className="truncate">{getFileDisplayPath(file)}</span>
                       <button
                         type="button"
                         onClick={() => removeSelectedDataFile(idx)}

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -428,6 +428,68 @@ describe('LocalEngineManager', () => {
     expect(installSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the local engine service log when an elevated Windows update has no captured output', async () => {
+    const restorePlatform = mockProcessPlatform('win32')
+    try {
+      const executable = process.env.MIRA_ENGINE_PATH as string
+      await writeFile(
+        path.join(path.dirname(executable), 'mira-engine.manifest.json'),
+        JSON.stringify({ sha256: 'bundled-sha' }),
+        'utf8',
+      )
+      const logPath = path.join(tempDir, '.mira', 'logs', 'agent-service.log')
+      await mkdir(path.dirname(logPath), { recursive: true })
+      await writeFile(
+        logPath,
+        [
+          '{"event":"install_service"}',
+          '{"event":"windows_service_stage_wrapper_failed","error":"wrapper is locked"}',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+        const url = String(input)
+        if (url.endsWith('/health')) return new Response(null, { status: 503 })
+        return new Response(null, { status: 404 })
+      })
+      vi.spyOn(LocalEngineManager.prototype, 'status').mockResolvedValue({
+        result: {
+          ok: true,
+          code: 0,
+          stdout: '{}',
+          stderr: '',
+          command: [executable, 'status'],
+          executablePath: executable,
+        },
+        payload: {
+          installed: true,
+          running: true,
+          port: 18790,
+          log_file: logPath,
+          engine_manifest: { sha256: 'old-sha' },
+        },
+      })
+      vi.spyOn(LocalEngineManager.prototype, 'installService').mockResolvedValue({
+        ok: false,
+        code: 1,
+        stdout: '',
+        stderr: '',
+        command: [executable, 'install-service'],
+        executablePath: executable,
+      })
+
+      const state = await new LocalEngineManager().bootstrapLocalEngine()
+
+      expect(state.phase).toBe('error')
+      expect(state.operation).toBe('update')
+      expect(state.message).toContain('windows_service_stage_wrapper_failed')
+      expect(state.message).toContain('wrapper is locked')
+    } finally {
+      restorePlatform()
+    }
+  })
+
   it('treats a running matching launchd service as ready when bootstrap reports already-loaded failure', async () => {
     const executable = process.env.MIRA_ENGINE_PATH as string
     await writeFile(
@@ -496,4 +558,60 @@ describe('LocalEngineManager', () => {
     expect(state.version).toBe('0.4.0')
     expect(state.error).toBeNull()
   })
+
+  it('pauses automatic Windows bootstrap after repeated service failures and allows force retry', async () => {
+    const restorePlatform = mockProcessPlatform('win32')
+    try {
+      const executable = process.env.MIRA_ENGINE_PATH as string
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 503 }))
+      vi.spyOn(LocalEngineManager.prototype, 'status').mockResolvedValue({
+        result: {
+          ok: true,
+          code: 0,
+          stdout: '{}',
+          stderr: '',
+          command: [executable, 'status'],
+          executablePath: executable,
+        },
+        payload: {
+          installed: false,
+          running: false,
+          port: 18790,
+          engine_manifest: { sha256: 'old-sha' },
+        },
+      })
+      const installSpy = vi.spyOn(LocalEngineManager.prototype, 'installService').mockResolvedValue({
+        ok: false,
+        code: 1,
+        stdout: '',
+        stderr: 'service install failed',
+        command: [executable, 'install-service'],
+        executablePath: executable,
+      })
+
+      const manager = new LocalEngineManager()
+      const internals = manager as unknown as {
+        windowsBootstrapFailures: number[]
+        windowsBootstrapCooldownUntil: number
+      }
+      await manager.bootstrapLocalEngine()
+      await manager.bootstrapLocalEngine()
+      await manager.bootstrapLocalEngine()
+      expect(installSpy).toHaveBeenCalledTimes(3)
+      expect(internals.windowsBootstrapFailures).toHaveLength(3)
+      expect(internals.windowsBootstrapCooldownUntil).toBeGreaterThan(Date.now())
+
+      const blocked = await manager.bootstrapLocalEngine()
+      expect(blocked.phase).toBe('error')
+      expect(blocked.message).toContain('paused')
+      expect(installSpy).toHaveBeenCalledTimes(3)
+
+      const forced = await manager.bootstrapLocalEngine({ force: true })
+      expect(forced.phase).toBe('error')
+      expect(installSpy).toHaveBeenCalledTimes(4)
+    } finally {
+      restorePlatform()
+    }
+  })
+
 })

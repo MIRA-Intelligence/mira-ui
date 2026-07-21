@@ -128,14 +128,17 @@ npm run dist:all
 
 `MiraUI-bundle` is the local-first desktop flavor. It ships a bundled `mira-engine`, installs the local engine service from the desktop installer, and exposes the local runtime config inside the UI.
 
-By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. Windows bundle builds also download a WinSW service wrapper so the engine runs as `MiraEngine` without a foreground console window. You can override the sources with:
+By default the bundle build script downloads the platform-specific `mira-engine` asset directly from the `MIRA-Intelligence/mira` GitHub Releases feed. Windows uses the PyInstaller one-dir release zip (`mira-engine-windows-x86_64.zip`) and installs the launcher from `bundled-engine/win32/mira-engine/mira-engine.exe`; macOS/Linux keep a single bundled executable. Windows bundle builds also download a WinSW service wrapper so the engine runs as `MiraEngine` without a foreground console window. You can override the sources with:
 
 ```bash
 # Use a specific mira release asset
 export MIRA_ENGINE_RELEASE_TAG=v0.2.0rc8
 
-# Or inject a locally built binary
+# Or inject a locally built binary on macOS/Linux
 export MIRA_ENGINE_LOCAL_BINARY=/absolute/path/to/mira-engine
+
+# Windows only: inject a locally built PyInstaller one-dir payload
+export MIRA_ENGINE_LOCAL_DIR=/absolute/path/to/dist/mira-engine
 
 # Windows only: inject a local WinSW wrapper
 export MIRA_WINSW_LOCAL_BINARY=/absolute/path/to/WinSW-x64.exe

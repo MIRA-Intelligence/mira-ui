@@ -2,8 +2,10 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
+import { RevisionsPanel } from '../experiment/RevisionsPanel'
 import { ResearchView } from '../stages/ResearchView'
 import { ResultView } from '../stages/ResultView'
+import { PlanView } from '../stages/PlanView'
 import { t } from '@/i18n'
 
 export function TaskDetail() {
@@ -23,6 +25,10 @@ export function TaskDetail() {
     return <ResearchView data={task.research} coreQuestion={task.coreQuestion} />
   }
 
+  if (activeStage === 'plan') {
+    return <PlanView task={task} />
+  }
+
   if (activeStage === 'result') {
     return <ResultView data={task.result} task={task} />
   }
@@ -30,6 +36,10 @@ export function TaskDetail() {
   // activeStage === 'experiment'
   if (selectedExpId === '__knowledge__') {
     return <KnowledgePanel knowledge={task.knowledge} coreQuestion={task.coreQuestion} />
+  }
+
+  if (selectedExpId === '__revisions__') {
+    return <RevisionsPanel revisions={task.revisions ?? []} />
   }
 
   const experiment = task.experiments.find((e) => e.id === selectedExpId)

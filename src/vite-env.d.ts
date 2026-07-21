@@ -12,7 +12,7 @@ interface ImportMeta {
 interface Window {
   electronAPI?: {
     platform: string
-    bootstrapLocalEngine?: () => Promise<{
+    bootstrapLocalEngine?: (options?: { force?: boolean }) => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
       executablePath: string | null
@@ -24,6 +24,7 @@ interface Window {
       lastCommand: string[] | null
       error: string | null
     }>
+    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual') => Promise<boolean>
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
@@ -99,6 +100,8 @@ interface Window {
       command: string[]
       executablePath: string | null
     }>
+    selectDataPath?: (kind: 'file' | 'directory') => Promise<string | null>
+    selectDirectory?: () => Promise<string | null>
     upgradeLocalEngine?: (packageName?: string) => Promise<{
       ok: boolean
       code: number

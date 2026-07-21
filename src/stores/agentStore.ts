@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
-import { isProjectSessionId } from '@/lib/sessions'
+import { isChatSessionId, isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 
 export interface SessionUsage {
@@ -49,6 +49,31 @@ function readUsageFromMetadata(meta: Record<string, unknown> | undefined):
   return { tokensUsed, maxTokens }
 }
 
+function shouldEnterPlanFromMetadata(meta: Record<string, unknown> | undefined): boolean {
+  const phase = meta?._plan_phase
+  return phase === 'questions' || phase === 'draft'
+}
+
+function isTerminalProgressMessage(msg: WsResponse): boolean {
+  if (msg.type !== 'progress') return false
+  return msg.content.trim().toLowerCase().startsWith('auto-run stop reason:')
+}
+
+function readMetadataString(meta: Record<string, unknown> | undefined, key: string): string | null {
+  const value = meta?.[key]
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function resolveProjectRefreshId(msg: WsResponse, sessionId: string): string | null {
+  const metadataProjectId = readMetadataString(msg.metadata, 'project_id')
+  if (metadataProjectId) return metadataProjectId
+  if (isProjectSessionId(sessionId)) return sessionId
+  if (sessionId === '_unknown' || isChatSessionId(sessionId)) return null
+  if (readMetadataString(msg.metadata, 'project_dir')) return sessionId
+  if (shouldEnterPlanFromMetadata(msg.metadata)) return sessionId
+  return null
+}
+
 let logIdCounter = 0
 
 const PLAN_POLL_INTERVAL = 3000
@@ -62,37 +87,51 @@ function logDedupKey(entry: LogEntry): string {
   return `${entry.timestamp}|${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
 }
 
-function ensurePlanPolling(sessionId: string) {
-  // Plans only exist for research projects; chat threads have no task_plan.
-  if (!isProjectSessionId(sessionId)) return
-  if (_pollTimers[sessionId]) return
-  _pollTimers[sessionId] = setInterval(() => {
-    useProjectStore.getState().refreshPlan(sessionId)
+// Timestamp-independent key. An optimistically-added message (e.g. the initial
+// project prompt) carries the client's timestamp, while the same message loaded
+// back from server history carries the engine's timestamp. Matching on
+// content/type/origin lets us dedupe the two so the prompt is not shown twice.
+function logSoftDedupKey(entry: LogEntry): string {
+  const fromUser = entry.metadata?._user ? 'user' : 'agent'
+  const fromAuto = entry.metadata?._auto ? 'auto' : 'manual'
+  return `${entry.type}|${fromUser}|${fromAuto}|${entry.content}`
+}
+
+function ensurePlanPolling(projectId: string | null) {
+  if (!projectId) return
+  if (_pollTimers[projectId]) return
+  _pollTimers[projectId] = setInterval(() => {
+    useProjectStore.getState().refreshPlan(projectId)
   }, PLAN_POLL_INTERVAL)
 }
 
-function stopPlanPolling(sessionId: string) {
-  const timer = _pollTimers[sessionId]
+function stopPlanPolling(projectId: string | null) {
+  if (!projectId) return
+  const timer = _pollTimers[projectId]
   if (timer) {
     clearInterval(timer)
-    delete _pollTimers[sessionId]
+    delete _pollTimers[projectId]
   }
 }
 
-function clearResponseRefreshTimers(sessionId: string) {
-  const timers = _responseRefreshTimers[sessionId]
+function clearResponseRefreshTimers(projectId: string | null) {
+  if (!projectId) return
+  const timers = _responseRefreshTimers[projectId]
   if (!timers || timers.length === 0) return
   for (const timer of timers) {
     clearTimeout(timer)
   }
-  delete _responseRefreshTimers[sessionId]
+  delete _responseRefreshTimers[projectId]
 }
 
-function scheduleResponseRefreshes(sessionId: string) {
-  if (!isProjectSessionId(sessionId)) return
-  clearResponseRefreshTimers(sessionId)
-  _responseRefreshTimers[sessionId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
-    void useProjectStore.getState().refreshPlan(sessionId)
+function scheduleResponseRefreshes(projectId: string | null, enterPlan: boolean) {
+  if (!projectId) return
+  clearResponseRefreshTimers(projectId)
+  _responseRefreshTimers[projectId] = PLAN_RESPONSE_REFRESH_DELAYS.map((delayMs) => setTimeout(() => {
+    void useProjectStore.getState().refreshPlan(
+      projectId,
+      enterPlan ? { enterPlan: true } : undefined,
+    )
   }, delayMs))
 }
 
@@ -140,15 +179,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           },
         }
       }
+      // Server history is authoritative. Keep every server entry (deduped only
+      // on the exact key so genuinely repeated messages survive), then append
+      // any live entries the server does not yet know about. Live entries are
+      // matched against server history with a timestamp-independent soft key so
+      // an optimistic entry (client timestamp) collapses into its persisted
+      // server copy (engine timestamp) instead of duplicating.
       const merged: LogEntry[] = []
-      const seen = new Set<string>()
-      for (const entry of [...entries, ...existing]) {
+      const seenExact = new Set<string>()
+      const serverSoftKeys = new Set(entries.map(logSoftDedupKey))
+      for (const entry of entries) {
         const key = logDedupKey(entry)
-        if (seen.has(key)) continue
-        seen.add(key)
+        if (seenExact.has(key)) continue
+        seenExact.add(key)
         merged.push(entry)
       }
-      if (merged.length === existing.length) {
+      for (const entry of existing) {
+        if (serverSoftKeys.has(logSoftDedupKey(entry))) continue
+        const key = logDedupKey(entry)
+        if (seenExact.has(key)) continue
+        seenExact.add(key)
+        merged.push(entry)
+      }
+      if (
+        merged.length === existing.length
+        && merged.every((entry, idx) => entry === existing[idx])
+      ) {
         return state
       }
       return {
@@ -226,9 +282,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
 
     const usageUpdate = readUsageFromMetadata(msg.metadata)
+    const enterPlan = shouldEnterPlanFromMetadata(msg.metadata)
+    const projectRefreshId = resolveProjectRefreshId(msg, sessionId)
+    const terminalProgress = isTerminalProgressMessage(msg)
 
     set((state) => {
-      const streaming = msg.type === 'progress' || msg.type === 'tool_call'
+      const streaming = (msg.type === 'progress' && !terminalProgress) || msg.type === 'tool_call'
       const next: Partial<AgentState> = {
         streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, streaming),
       }
@@ -270,14 +329,26 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return next as AgentState
     })
 
-    if (msg.type === 'progress' || msg.type === 'tool_call') {
-      clearResponseRefreshTimers(sessionId)
-      ensurePlanPolling(sessionId)
+    if (terminalProgress) {
+      stopPlanPolling(projectRefreshId)
+      if (projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(projectRefreshId)
+        scheduleResponseRefreshes(projectRefreshId, false)
+      }
+    } else if (msg.type === 'progress' || msg.type === 'tool_call') {
+      clearResponseRefreshTimers(projectRefreshId)
+      ensurePlanPolling(projectRefreshId)
+      if (enterPlan && projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(projectRefreshId, { enterPlan: true })
+      }
     } else if (msg.type === 'response') {
-      stopPlanPolling(sessionId)
-      if (isProjectSessionId(sessionId)) {
-        void useProjectStore.getState().refreshPlan(sessionId)
-        scheduleResponseRefreshes(sessionId)
+      stopPlanPolling(projectRefreshId)
+      if (projectRefreshId) {
+        void useProjectStore.getState().refreshPlan(
+          projectRefreshId,
+          enterPlan ? { enterPlan: true } : undefined,
+        )
+        scheduleResponseRefreshes(projectRefreshId, enterPlan)
       }
     }
   },

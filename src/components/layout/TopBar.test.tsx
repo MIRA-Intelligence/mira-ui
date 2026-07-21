@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 
 import { TopBar } from './TopBar'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialProjectState = useProjectStore.getState()
 const originalElectronApi = window.electronAPI
@@ -10,6 +11,7 @@ const originalElectronApi = window.electronAPI
 describe('TopBar', () => {
   beforeEach(() => {
     useProjectStore.setState(initialProjectState, true)
+    useSettingsStore.setState({ engineStartedAt: null })
     useProjectStore.setState({
       tasks: [{
         id: 'PRJ-0001',
@@ -25,7 +27,6 @@ describe('TopBar', () => {
         startedAt: new Date().toISOString(),
       }],
       selectedTaskId: 'PRJ-0001',
-      startedAt: Date.now(),
     })
     window.electronAPI = originalElectronApi
   })
@@ -53,5 +54,17 @@ describe('TopBar', () => {
     const header = container.querySelector('header')
 
     expect(header?.getAttribute('data-drag-region')).toBe('none')
+  })
+
+  it('shows a placeholder when no engine is running', () => {
+    useSettingsStore.setState({ engineStartedAt: null })
+    const { container } = render(<TopBar />)
+    expect(container.textContent).toContain('T+ --:--:--')
+  })
+
+  it('renders the engine running time from the engine boot timestamp', () => {
+    useSettingsStore.setState({ engineStartedAt: Date.now() - 65_000 })
+    const { container } = render(<TopBar />)
+    expect(container.textContent).toMatch(/T\+ 00:01:0\d/)
   })
 })

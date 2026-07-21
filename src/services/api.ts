@@ -114,6 +114,7 @@ export async function submitFeedbackReport(payload: FeedbackPayload): Promise<{ 
 export interface RemoteProject {
   id: string
   display_name?: string
+  project_dir?: string
   title?: string
   status?: string
   core_question?: string
@@ -123,6 +124,37 @@ export interface RemoteProject {
   contract_version?: ContractVersion
   has_plan: boolean
   has_meta?: boolean
+}
+
+export async function createRemoteProject(payload: {
+  projectId?: string
+  displayName?: string
+  projectParentDir?: string
+  projectDir?: string
+  runMode?: 'manual' | 'auto'
+  agentProfile?: AgentProfile
+  contractVersion?: ContractVersion
+  automationPolicy?: unknown
+}): Promise<RemoteProject> {
+  const body: Record<string, unknown> = {}
+  if (payload.projectId) body.project_id = payload.projectId
+  if (payload.displayName) body.display_name = payload.displayName
+  if (payload.projectParentDir) body.project_parent_dir = payload.projectParentDir
+  if (payload.projectDir) body.project_dir = payload.projectDir
+  if (payload.runMode) body.run_mode = payload.runMode
+  if (payload.agentProfile) body.agent_profile = payload.agentProfile
+  if (payload.contractVersion) body.contract_version = payload.contractVersion
+  if (payload.automationPolicy !== undefined) body.automation_policy = payload.automationPolicy
+
+  const resp = await fetch(`${getApiUrl()}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    throw new Error(await resp.text())
+  }
+  return await resp.json() as RemoteProject
 }
 
 export async function fetchProjects(): Promise<RemoteProject[] | null> {
@@ -177,7 +209,7 @@ export async function updateProjectRuntimePreferences(
   const data = await resp.json()
   return {
     runMode: (data?.run_mode === 'manual' || data?.run_mode === 'auto') ? data.run_mode : undefined,
-    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'research')
+    agentProfile: (data?.agent_profile === 'engineer' || data?.agent_profile === 'research' || data?.agent_profile === 'team')
       ? data.agent_profile
       : undefined,
     contractVersion: (data?.contract_version === 1 || data?.contract_version === 2)
@@ -197,18 +229,57 @@ export async function fetchSessionHistory(sessionId: string): Promise<LogEntry[]
   }
 }
 
-export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
+export interface DeleteProjectResult {
+  deleted: boolean
+  removed: boolean
+  reason?: string
+}
+
+function readErrorMessage(data: unknown, fallback: string): string {
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const error = record.error ?? record.reason
+  return typeof error === 'string' && error.trim().length > 0 ? error.trim() : fallback
+}
+
+export async function deleteProject(
+  sessionId: string,
+  options: { deleteFiles?: boolean } = {},
+): Promise<DeleteProjectResult> {
+  const deleteFiles = options.deleteFiles ?? true
+  const encoded = encodeURIComponent(sessionId)
+  const resp = deleteFiles
+    ? await fetch(`${getApiUrl()}/projects?session_id=${encoded}`, { method: 'DELETE' })
+    : await fetch(`${getApiUrl()}/projects/${encoded}/remove`, { method: 'POST' })
+
+  let data: unknown = null
   try {
-    const resp = await fetch(
-      `${getApiUrl()}/projects?session_id=${encodeURIComponent(sessionId)}`,
-      { method: 'DELETE' },
-    )
-    if (!resp.ok) return false
-    const data = await resp.json()
-    return !!data?.deleted
+    data = await resp.json()
   } catch {
-    return false
+    data = null
   }
+
+  if (!resp.ok) {
+    throw new Error(readErrorMessage(data, `project delete failed (${resp.status})`))
+  }
+
+  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {}
+  const result: DeleteProjectResult = {
+    deleted: record.deleted === true,
+    removed: record.removed === true || record.deleted === true,
+    reason: typeof record.reason === 'string' ? record.reason : undefined,
+  }
+
+  if (deleteFiles && !result.deleted) {
+    throw new Error(result.reason || 'project files were not deleted')
+  }
+  if (!deleteFiles && !result.removed) {
+    throw new Error(result.reason || 'project was not removed')
+  }
+  return result
+}
+
+export async function deleteProjectFiles(sessionId: string): Promise<boolean> {
+  return (await deleteProject(sessionId, { deleteFiles: true })).deleted
 }
 
 export interface UploadedProjectFile {
@@ -246,7 +317,8 @@ export async function uploadProjectFiles(
 
   const formData = new FormData()
   for (const file of files) {
-    formData.append('files', file, file.name)
+    const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
+    formData.append('files', file, relativePath || file.name)
   }
 
   const sid = encodeURIComponent(sessionId)

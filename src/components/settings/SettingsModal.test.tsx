@@ -50,7 +50,9 @@ function runtimePayload(workspace: string, configPath = `${workspace}/config.jso
       provider: 'custom',
       model: 'custom/test',
       reasoning_effort: null,
+      temperature: 0.1,
       max_tool_iterations: 200,
+      auto_max_rounds: 100,
       restrict_to_workspace: false,
     },
     providers: {},
@@ -84,6 +86,7 @@ describe('SettingsModal remote runtime config', () => {
       status: 'compatible',
       message: 'Engine is compatible.',
       version: '0.3.0',
+      uptimeSeconds: null,
     })
   })
 
@@ -122,6 +125,23 @@ describe('SettingsModal remote runtime config', () => {
       expect(state.wsUrl).toBe('wss://new.example/ws')
       expect(state.workspacePath).toBe('/new/workspace')
     })
+  })
+
+  it('no longer shows a separate Local Engine tab and exposes a Manage providers entry', async () => {
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/old/workspace', '/old/config.json'))
+
+    openRemoteSettings('https://old.example/api', 'wss://old.example/ws', '/old/workspace')
+    render(<SettingsModal />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+    })
+
+    // The two-tab structure (with a "Local Engine" tab) is gone.
+    expect(screen.queryByRole('tab')).toBeNull()
+    expect(screen.queryByText('Local Engine')).toBeNull()
+    // Provider/runtime config is reachable via the Providers page entry point.
+    expect(screen.getAllByText('Manage providers').length).toBeGreaterThan(0)
   })
 
   it('updates the engine workspace only when the workspace field was edited', async () => {

@@ -6,3 +6,5 @@ release-bundle/
 bundled-engine/
 *.tsbuildinfo
 .cursor/
+coverage/
+.gstack/

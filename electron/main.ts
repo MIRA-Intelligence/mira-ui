@@ -1,9 +1,12 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import type { OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
+import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 
-const engineManager = new LocalEngineManager()
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const engineManager = hasSingleInstanceLock ? new LocalEngineManager() : null
 let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
@@ -39,8 +42,10 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
-  ipcMain.handle('engine:bootstrap', async () => engineManager.bootstrapLocalEngine())
+function initializeApp() {
+  if (!engineManager) return
+
+  ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
   ipcMain.handle('engine:start', async () => engineManager.start())
@@ -51,19 +56,69 @@ app.whenReady().then(() => {
   ipcMain.handle('engine:upgrade', async (_event, packageName?: string) => {
     return engineManager.upgrade(packageName || 'mira-engine')
   })
+  ipcMain.handle('engine:set-mode-hint', async (_event, mode: unknown) => {
+    if (mode !== 'localBundle' && mode !== 'remoteManual') return false
+    await setLastDeploymentMode(mode)
+    return true
+  })
+  ipcMain.handle('dialog:select-data-path', async (_event, kind: 'file' | 'directory') => {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow
+    const options: OpenDialogOptions = {
+      properties: kind === 'directory' ? ['openDirectory'] : ['openFile'],
+    }
+    const result = win
+      ? await dialog.showOpenDialog(win, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
+  ipcMain.handle('project:select-directory', async () => {
+    const options: OpenDialogOptions = {
+      properties: ['openDirectory', 'createDirectory'],
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    if (result.canceled) return null
+    return result.filePaths[0] ?? null
+  })
   registerUpdateCheck(() => mainWindow)
-  void engineManager.bootstrapLocalEngine().catch(() => {})
+  // Pre-warm the bundled local engine only when the user's last session used
+  // local mode (or on first run, where the hint is absent and the bundle
+  // defaults to local). In remote mode we skip it so the app doesn't
+  // install/start a local service the user isn't connecting to — the renderer
+  // still drives the actual connection from its persisted deploymentMode.
+  void (async () => {
+    if ((await getLastDeploymentMode()) === 'remoteManual') return
+    await engineManager.bootstrapLocalEngine().catch(() => {})
+  })()
   createWindow()
   // Renderer carries the "include prereleases" preference; on first boot we
   // default to stable-only and let the renderer re-trigger via IPC after it
   // has hydrated its persisted setting.
   scheduleBootCheck({ includePrereleases: false })
-})
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) {
+      if (app.isReady()) createWindow()
+      return
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
-})
+  app.whenReady().then(initializeApp)
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+}

@@ -1,7 +1,9 @@
 import { execFile, spawn } from 'child_process'
-import { access, mkdir, readFile, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
+import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
 import { app } from 'electron'
+import { tmpdir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 
@@ -71,6 +73,9 @@ const HEALTH_POLL_FAST_WINDOW_MS = 5_000
 const COMMAND_TIMEOUT_MS = 120_000
 const REPAIR_TIMEOUT_MS = 180_000
 const INSTALL_RETRY_DELAY_MS = 3_000
+const WINDOWS_CRASH_LOOP_WINDOW_MS = 5 * 60_000
+const WINDOWS_CRASH_LOOP_COOLDOWN_MS = 10 * 60_000
+const WINDOWS_CRASH_LOOP_FAILURE_LIMIT = 3
 const BUNDLE_SETUP_PROVIDER = 'custom'
 const BUNDLE_SETUP_MODEL = 'custom/mira-ui-bundle-setup'
 const BUNDLE_SETUP_API_BASE = 'http://127.0.0.1:9/v1'
@@ -95,12 +100,19 @@ function engineExecutableName(): string {
   return process.platform === 'win32' ? 'mira-engine.exe' : 'mira-engine'
 }
 
-function bundledEngineCandidate(): string {
+function bundledEngineCandidates(): string[] {
   const platformDir = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux'
   const baseDir = app.isPackaged
     ? process.resourcesPath
     : path.resolve(app.getAppPath(), '..')
-  return path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName())
+  if (!baseDir) return []
+  if (process.platform === 'win32') {
+    return [
+      path.join(baseDir, 'bundled-engine', platformDir, 'mira-engine', engineExecutableName()),
+      path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName()),
+    ]
+  }
+  return [path.join(baseDir, 'bundled-engine', platformDir, engineExecutableName())]
 }
 
 function engineManifestCandidate(executablePath: string): string {
@@ -118,14 +130,15 @@ async function isExecutable(candidate: string): Promise<boolean> {
 }
 
 async function resolveExecutable(): Promise<string | null> {
+  for (const bundled of bundledEngineCandidates()) {
+    if (await isExecutable(bundled)) {
+      return bundled
+    }
+  }
+
   const fromEnv = process.env.MIRA_ENGINE_PATH?.trim()
   if (fromEnv && await isExecutable(fromEnv)) {
     return fromEnv
-  }
-
-  const bundled = bundledEngineCandidate()
-  if (await isExecutable(bundled)) {
-    return bundled
   }
 
   return null
@@ -165,6 +178,8 @@ function defaultState(): EngineBootstrapState {
 export class LocalEngineManager {
   private state: EngineBootstrapState = defaultState()
   private bootstrapPromise: Promise<EngineBootstrapState> | null = null
+  private windowsBootstrapFailures: number[] = []
+  private windowsBootstrapCooldownUntil = 0
 
   getState(): EngineBootstrapState {
     return { ...this.state, lastCommand: this.state.lastCommand ? [...this.state.lastCommand] : null }
@@ -173,6 +188,36 @@ export class LocalEngineManager {
   private setState(patch: Partial<EngineBootstrapState>): EngineBootstrapState {
     this.state = { ...this.state, ...patch }
     return this.getState()
+  }
+
+  private windowsCrashLoopCooldownState(): EngineBootstrapState | null {
+    if (process.platform !== 'win32') return null
+    const now = Date.now()
+    if (now >= this.windowsBootstrapCooldownUntil) return null
+    const seconds = Math.max(1, Math.ceil((this.windowsBootstrapCooldownUntil - now) / 1000))
+    return this.setState({
+      phase: 'error',
+      operation: 'bootstrap',
+      message: `Windows local engine auto-start is paused for ${seconds}s because repeated service start attempts failed. Use Repair service to force one manual attempt.`,
+      serviceRunning: false,
+      error: 'windows local engine crash-loop guard active',
+    })
+  }
+
+  private recordWindowsBootstrapFailure(): void {
+    if (process.platform !== 'win32') return
+    const now = Date.now()
+    const windowStart = now - WINDOWS_CRASH_LOOP_WINDOW_MS
+    this.windowsBootstrapFailures = this.windowsBootstrapFailures.filter((timestamp) => timestamp >= windowStart)
+    this.windowsBootstrapFailures.push(now)
+    if (this.windowsBootstrapFailures.length >= WINDOWS_CRASH_LOOP_FAILURE_LIMIT) {
+      this.windowsBootstrapCooldownUntil = now + WINDOWS_CRASH_LOOP_COOLDOWN_MS
+    }
+  }
+
+  private clearWindowsBootstrapFailures(): void {
+    this.windowsBootstrapFailures = []
+    this.windowsBootstrapCooldownUntil = 0
   }
 
   private configPath(): string {
@@ -292,6 +337,16 @@ export class LocalEngineManager {
     } catch {
       return ''
     }
+  }
+
+  private async commandFailureDetail(
+    result: EngineCommandResult,
+    fallback: string,
+    logPath?: string | null,
+  ): Promise<string> {
+    const direct = result.stderr || result.stdout
+    if (direct) return direct
+    return await this.readLogTail(logPath) || fallback
   }
 
   private async probePortHolder(port: number): Promise<{ pid: number; command: string } | null> {
@@ -489,9 +544,27 @@ export class LocalEngineManager {
     })
 
     const argumentList = args.map(psLiteral).join(', ')
+    const tempPrefix = path.join(tmpdir(), `mira-engine-elevated-${randomUUID()}`)
+    const scriptPath = `${tempPrefix}.ps1`
+    const stdoutPath = `${tempPrefix}.out`
+    const stderrPath = `${tempPrefix}.err`
+    const elevatedScript = [
+      "$ErrorActionPreference = 'Continue'",
+      `$stdoutPath = ${psLiteral(stdoutPath)}`,
+      `$stderrPath = ${psLiteral(stderrPath)}`,
+      'try {',
+      `  & ${psLiteral(executablePath)} @(${argumentList}) 1> $stdoutPath 2> $stderrPath`,
+      '  if ($null -ne $LASTEXITCODE) { $exitCode = [int]$LASTEXITCODE } else { $exitCode = 0 }',
+      '} catch {',
+      '  $_ | Out-File -FilePath $stderrPath -Encoding UTF8 -Append',
+      '  $exitCode = 1',
+      '}',
+      'exit $exitCode',
+    ].join('\r\n')
+    await writeFile(scriptPath, elevatedScript, 'utf8')
     const script = [
-      `$process = Start-Process -FilePath ${psLiteral(executablePath)}`,
-      `-ArgumentList @(${argumentList})`,
+      `$process = Start-Process -FilePath 'powershell.exe'`,
+      `-ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ${psLiteral(scriptPath)})`,
       '-Verb RunAs -Wait -PassThru;',
       'exit $process.ExitCode',
     ].join(' ')
@@ -510,9 +583,47 @@ export class LocalEngineManager {
 
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      const timeoutMs = options?.timeoutMs ?? REPAIR_TIMEOUT_MS
       const timeout = setTimeout(() => {
+        timedOut = true
         child.kill('SIGTERM')
-      }, options?.timeoutMs ?? REPAIR_TIMEOUT_MS)
+      }, timeoutMs)
+
+      const readCapture = async (target: string): Promise<string> => {
+        try {
+          return (await readFile(target, 'utf8')).trim()
+        } catch {
+          return ''
+        }
+      }
+
+      const cleanup = async () => {
+        await Promise.all(
+          [scriptPath, stdoutPath, stderrPath].map((target) => unlink(target).catch(() => undefined)),
+        )
+      }
+
+      const finish = async (code: number, extraStderr = '') => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        const [capturedStdout, capturedStderr] = await Promise.all([
+          readCapture(stdoutPath),
+          readCapture(stderrPath),
+        ])
+        await cleanup()
+        const timeoutMessage = timedOut ? `elevated command timed out after ${timeoutMs}ms` : ''
+        resolve({
+          ok: code === 0 && !timedOut,
+          code,
+          stdout: [stdout.trim(), capturedStdout].filter(Boolean).join('\n'),
+          stderr: [stderr.trim(), capturedStderr, extraStderr, timeoutMessage].filter(Boolean).join('\n'),
+          command,
+          executablePath: resolvedExecutable,
+        })
+      }
 
       child.stdout.on('data', (chunk) => {
         stdout += chunk.toString()
@@ -521,26 +632,10 @@ export class LocalEngineManager {
         stderr += chunk.toString()
       })
       child.on('error', (err) => {
-        clearTimeout(timeout)
-        resolve({
-          ok: false,
-          code: 1,
-          stdout: stdout.trim(),
-          stderr: `${stderr}\n${err.message}`.trim(),
-          command,
-          executablePath: resolvedExecutable,
-        })
+        void finish(1, err.message)
       })
       child.on('close', (code) => {
-        clearTimeout(timeout)
-        resolve({
-          ok: code === 0,
-          code: code ?? 1,
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-          command,
-          executablePath: resolvedExecutable,
-        })
+        void finish(code ?? 1)
       })
     })
   }
@@ -801,15 +896,21 @@ export class LocalEngineManager {
           })
         }
       }
+      const failureDetail = await this.commandFailureDetail(
+        install,
+        'Local engine service update failed.',
+        status.payload?.log_file ?? logPath,
+      )
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'update',
-        message: install.stderr || install.stdout || 'Local engine service update failed.',
+        message: failureDetail,
         executablePath: install.executablePath,
         serviceInstalled: false,
         serviceRunning: false,
         healthUrl: `http://${DEFAULT_HOST}:${port}/health`,
-        error: install.stderr || install.stdout || 'install-service failed',
+        error: failureDetail,
       })
     }
 
@@ -833,6 +934,7 @@ export class LocalEngineManager {
     if (!health.ok) {
       const start = await this.start()
       if (!start.ok) {
+        this.recordWindowsBootstrapFailure()
         return this.setState({
           phase: 'error',
           operation: 'update',
@@ -848,6 +950,7 @@ export class LocalEngineManager {
     }
 
     if (!health.ok) {
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'update',
@@ -860,6 +963,7 @@ export class LocalEngineManager {
       })
     }
 
+    this.clearWindowsBootstrapFailures()
     return this.setState({
       phase: 'ready',
       operation: null,
@@ -873,6 +977,7 @@ export class LocalEngineManager {
   }
 
   async repairLocalEngineService(): Promise<EngineBootstrapState> {
+    this.clearWindowsBootstrapFailures()
     this.setState({
       phase: 'repairing',
       operation: 'repair',
@@ -886,20 +991,27 @@ export class LocalEngineManager {
 
     const install = await this.installService(port)
     if (!install.ok) {
+      const failureDetail = await this.commandFailureDetail(
+        install,
+        'Local engine service repair failed.',
+        status.payload?.log_file,
+      )
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'repair',
-        message: install.stderr || install.stdout || 'Local engine service repair failed.',
+        message: failureDetail,
         executablePath: install.executablePath,
         serviceInstalled: false,
         serviceRunning: false,
         healthUrl,
-        error: install.stderr || install.stdout || 'install-service failed',
+        error: failureDetail,
       })
     }
 
     const start = await this.start()
     if (!start.ok) {
+      this.recordWindowsBootstrapFailure()
       return this.setState({
         phase: 'error',
         operation: 'repair',
@@ -948,7 +1060,14 @@ export class LocalEngineManager {
     })
   }
 
-  async bootstrapLocalEngine(): Promise<EngineBootstrapState> {
+  async bootstrapLocalEngine(options: { force?: boolean } = {}): Promise<EngineBootstrapState> {
+    if (!options.force) {
+      const cooldownState = this.windowsCrashLoopCooldownState()
+      if (cooldownState) return cooldownState
+    } else {
+      this.clearWindowsBootstrapFailures()
+    }
+
     if (this.bootstrapPromise) {
       return this.bootstrapPromise
     }
@@ -982,6 +1101,7 @@ export class LocalEngineManager {
       if (fastHealth.ok) {
         if (this.liveEngineMatchesBundle(fastHealth, fastExecutablePath, bundledManifest)) {
           if (process.platform !== 'win32') {
+            this.clearWindowsBootstrapFailures()
             return this.setState({
               phase: 'ready',
               operation: null,
@@ -1006,6 +1126,7 @@ export class LocalEngineManager {
             )
             if (updated) return updated
           } else {
+            this.clearWindowsBootstrapFailures()
             return this.setState({
               phase: 'ready',
               operation: null,
@@ -1085,14 +1206,20 @@ export class LocalEngineManager {
         })
         const install = await this.installService(port)
         if (!install.ok) {
+          const failureDetail = await this.commandFailureDetail(
+            install,
+            'Local engine service install failed.',
+            status.payload?.log_file,
+          )
+          this.recordWindowsBootstrapFailure()
           return this.setState({
             phase: 'error',
             operation: 'install',
-            message: install.stderr || 'Local engine service install failed.',
+            message: failureDetail,
             executablePath: install.executablePath,
             serviceInstalled: false,
             serviceRunning,
-            error: install.stderr || install.stdout || 'install-service failed',
+            error: failureDetail,
           })
         }
 
@@ -1111,6 +1238,7 @@ export class LocalEngineManager {
         })
         const started = await this.start()
         if (!started.ok) {
+          this.recordWindowsBootstrapFailure()
           return this.setState({
             phase: 'error',
             operation: 'start',
@@ -1135,6 +1263,7 @@ export class LocalEngineManager {
 
       const health = await this.waitForHealth(port, status.payload?.log_file)
       if (!health.ok) {
+        this.recordWindowsBootstrapFailure()
         return this.setState({
           phase: 'error',
           operation: serviceInstalled ? 'start' : 'install',
@@ -1147,6 +1276,7 @@ export class LocalEngineManager {
         })
       }
 
+      this.clearWindowsBootstrapFailures()
       return this.setState({
         phase: 'ready',
         operation: null,

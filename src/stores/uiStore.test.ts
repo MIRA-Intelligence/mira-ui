@@ -1,6 +1,7 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useUiStore } from './uiStore'
+import { AGENT_PANEL_WIDTH, SIDEBAR_WIDTH, useUiStore } from './uiStore'
+import { installLocalStorage } from '@/test/localStorage'
 
 const initialState = useUiStore.getState()
 
@@ -56,5 +57,74 @@ describe('uiStore.systemMessages', () => {
     const before = useUiStore.getState().systemMessages
     useUiStore.getState().clearExpiredSystemMessages()
     expect(useUiStore.getState().systemMessages).toBe(before)
+  })
+})
+
+describe('uiStore.layout + modals', () => {
+  beforeEach(() => {
+    installLocalStorage()
+    useUiStore.setState(initialState, true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('toggles and sets sidebar collapse', () => {
+    useUiStore.getState().toggleSidebar()
+    expect(useUiStore.getState().sidebarCollapsed).toBe(true)
+    useUiStore.getState().setSidebarCollapsed(false)
+    expect(useUiStore.getState().sidebarCollapsed).toBe(false)
+  })
+
+  it('toggles and sets the agent panel collapse', () => {
+    useUiStore.getState().toggleAgentPanel()
+    expect(useUiStore.getState().agentPanelCollapsed).toBe(true)
+    useUiStore.getState().setAgentPanelCollapsed(false)
+    expect(useUiStore.getState().agentPanelCollapsed).toBe(false)
+  })
+
+  it('clamps and persists the sidebar width', () => {
+    useUiStore.getState().setSidebarWidth(SIDEBAR_WIDTH.max + 1000)
+    expect(useUiStore.getState().sidebarWidth).toBe(SIDEBAR_WIDTH.max)
+    expect(localStorage.getItem('mira:ui:sidebarWidth')).toBe(String(SIDEBAR_WIDTH.max))
+  })
+
+  it('clamps a non-finite agent panel width to the minimum', () => {
+    useUiStore.getState().setAgentPanelWidth(Number.NaN)
+    expect(useUiStore.getState().agentPanelWidth).toBe(AGENT_PANEL_WIDTH.min)
+  })
+
+  it('opens and closes the new-project modal with prefill', () => {
+    useUiStore.getState().openNewProject({ prefill: 'seed', fromChatId: 'chat-1' })
+    expect(useUiStore.getState()).toMatchObject({
+      newProjectOpen: true,
+      newProjectPrefill: 'seed',
+      newProjectFromChatId: 'chat-1',
+    })
+    useUiStore.getState().closeNewProject()
+    expect(useUiStore.getState()).toMatchObject({
+      newProjectOpen: false,
+      newProjectPrefill: null,
+      newProjectFromChatId: null,
+    })
+  })
+
+  it('opens and closes the skills/plugins modal', () => {
+    useUiStore.getState().openSkillsPlugins()
+    expect(useUiStore.getState().skillsPluginsOpen).toBe(true)
+    useUiStore.getState().closeSkillsPlugins()
+    expect(useUiStore.getState().skillsPluginsOpen).toBe(false)
+  })
+
+  it('manages available update + banner dismissal', () => {
+    const info = { version: '9.9.9', notes: '', url: '' } as never
+    useUiStore.getState().setAvailableUpdate(info)
+    expect(useUiStore.getState().availableUpdate).toBe(info)
+    expect(useUiStore.getState().updateBannerDismissed).toBe(false)
+    useUiStore.getState().dismissUpdateBanner()
+    expect(useUiStore.getState().updateBannerDismissed).toBe(true)
+    useUiStore.getState().resetUpdateBannerDismissed()
+    expect(useUiStore.getState().updateBannerDismissed).toBe(false)
   })
 })
