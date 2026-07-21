@@ -17,7 +17,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -56,7 +56,7 @@ describe('probeEngineCompatibility', () => {
 
     expect(result.status).toBe('setup_required')
     expect(result.message).toContain('Custom requires API Base')
-    expect(result.version).toBe('0.3.2')
+    expect(result.version).toBe('0.3.3')
   })
 
   it('reports incompatible when runtime config API is unavailable', async () => {
@@ -67,7 +67,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -91,7 +91,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -127,7 +127,7 @@ describe('probeEngineCompatibility', () => {
     const result = await probeEngineCompatibility('http://127.0.0.1:18790/api')
 
     expect(result.status).toBe('compatible')
-    expect(result.version).toBe('0.3.2')
+    expect(result.version).toBe('0.3.3')
   })
 
   it('treats auto-detect provider as compatible when backend reports setup is complete', async () => {
@@ -138,7 +138,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -174,7 +174,7 @@ describe('probeEngineCompatibility', () => {
     const result = await probeEngineCompatibility('http://127.0.0.1:18790/api')
 
     expect(result.status).toBe('compatible')
-    expect(result.version).toBe('0.3.2')
+    expect(result.version).toBe('0.3.3')
   })
 
   it('localizes setup_required messages using backend setup codes', async () => {
@@ -186,7 +186,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -235,7 +235,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -271,7 +271,7 @@ describe('probeEngineCompatibility', () => {
     const result = await probeEngineCompatibility('http://127.0.0.1:18790/api')
 
     expect(result.status).toBe('compatible')
-    expect(result.version).toBe('0.3.2')
+    expect(result.version).toBe('0.3.3')
   })
 
   it('captures uptime_seconds reported by the engine /version endpoint', async () => {
@@ -282,7 +282,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1', uptime_seconds: 4242 }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1', uptime_seconds: 4242 }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
@@ -312,7 +312,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url.endsWith('/version')) {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: '0.3.3', api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
