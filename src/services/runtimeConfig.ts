@@ -8,12 +8,50 @@ export interface RuntimeProviderSettings {
   api_key_configured: boolean
   api_key_preview: string | null
   api_base: string | null
+  models: string[]
+  configured: boolean
+  enabled: boolean
   display_name: string
   api_key_required: boolean
   api_base_required: boolean
   default_api_base: string | null
   is_oauth: boolean
   is_local: boolean
+}
+
+// ``team`` profile roles bindable to a provider + model on the providers page.
+export type TeamRole = 'supervisor' | 'student' | 'critic'
+export const TEAM_ROLES: TeamRole[] = ['supervisor', 'student', 'critic']
+
+export interface RuntimeRoleBindings {
+  supervisor_provider: string
+  supervisor_model: string | null
+  student_provider: string
+  student_model: string | null
+  critic_provider: string
+  critic_model: string | null
+}
+
+// A user-defined, provider-agnostic per-model parameter rule. ``pattern``
+// matches the model name (glob or substring); ``params`` maps request args to
+// values, where ``null`` means "drop this parameter".
+export type ModelParamValue = number | string | boolean | null
+export interface ModelParamRule {
+  pattern: string
+  params: Record<string, ModelParamValue>
+}
+
+export interface ProviderModelsResult {
+  provider: string
+  api_base: string | null
+  models: string[]
+  cached: boolean
+}
+
+export interface ProviderTestResult {
+  ok: boolean
+  message: string
+  model_count?: number
 }
 
 export interface RuntimeConfigPayload {
@@ -34,13 +72,23 @@ export interface RuntimeConfigPayload {
     reasoning_effort: ReasoningEffort
     temperature: number | null
     max_tool_iterations: number
+    auto_max_rounds: number
     restrict_to_workspace: boolean
     setup_required?: boolean
     setup_message?: string | null
     setup_code?: RuntimeSetupCode | null
     setup_subject?: string | null
+    // Present only when connected to a team-profile-capable engine.
+    supervisor_provider?: string
+    supervisor_model?: string | null
+    student_provider?: string
+    student_model?: string | null
+    critic_provider?: string
+    critic_model?: string | null
   }
   providers: Record<string, RuntimeProviderSettings>
+  // User-defined per-model parameter rules. Empty when none are configured.
+  model_params?: ModelParamRule[]
 }
 
 function resolveApiUrl(apiUrl?: string): string {
@@ -87,11 +135,81 @@ export async function saveRuntimeConfig(payload: {
     reasoning_effort: ReasoningEffort
     temperature: number | null
     max_tool_iterations: number
+    auto_max_rounds: number
     restrict_to_workspace: boolean
   }
   providers: Partial<Record<string, { api_key?: string; api_base?: string | null }>>
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
+}
+
+// Persist provider credentials, curated model lists, and team-role bindings
+// owned by the Providers page. Only the fields present are written by the
+// backend (which diffs against the live config), so callers send just what
+// changed.
+export async function saveProvidersConfig(payload: {
+  runtime?: Partial<{
+    provider: string
+    model: string
+    reasoning_effort: ReasoningEffort
+    temperature: number | null
+    max_tool_iterations: number
+    auto_max_rounds: number
+    restrict_to_workspace: boolean
+  } & RuntimeRoleBindings>
+  providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }>>
+  model_params?: ModelParamRule[]
+}, apiUrl?: string): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig(payload, apiUrl)
+}
+
+// Persist the full set of model-parameter rules (replace semantics). The
+// backend validates and writes ``providers.model_params`` in config.json.
+export async function saveModelParams(
+  rules: ModelParamRule[],
+  apiUrl?: string,
+): Promise<RuntimeConfigPayload> {
+  return postRuntimeConfig({ model_params: rules }, apiUrl)
+}
+
+export async function fetchProviderModels(
+  provider: string,
+  options?: { refresh?: boolean; apiUrl?: string },
+): Promise<ProviderModelsResult> {
+  const base = resolveApiUrl(options?.apiUrl)
+  const query = options?.refresh ? '?refresh=1' : ''
+  const resp = await fetch(`${base}/providers/${encodeURIComponent(provider)}/models${query}`)
+  if (!resp.ok) {
+    throw new Error(await readRuntimeConfigError(resp, 'Failed to fetch provider models'))
+  }
+  const data = await resp.json() as Partial<ProviderModelsResult>
+  return {
+    provider: data.provider ?? provider,
+    api_base: data.api_base ?? null,
+    models: Array.isArray(data.models) ? data.models : [],
+    cached: Boolean(data.cached),
+  }
+}
+
+export async function testProvider(
+  provider: string,
+  credentials?: { api_key?: string; api_base?: string | null },
+  apiUrl?: string,
+): Promise<ProviderTestResult> {
+  const resp = await fetch(`${resolveApiUrl(apiUrl)}/providers/${encodeURIComponent(provider)}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials ?? {}),
+  })
+  if (!resp.ok) {
+    throw new Error(await readRuntimeConfigError(resp, 'Failed to test provider'))
+  }
+  const data = await resp.json() as Partial<ProviderTestResult>
+  return {
+    ok: Boolean(data.ok),
+    message: typeof data.message === 'string' ? data.message : '',
+    model_count: typeof data.model_count === 'number' ? data.model_count : undefined,
+  }
 }
 
 export async function updateProjectsRoot(projectsRoot: string, apiUrl?: string): Promise<RuntimeConfigPayload> {

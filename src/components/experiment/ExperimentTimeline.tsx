@@ -51,6 +51,16 @@ function ExpItem({ exp, isSelected, onSelect, lang }: {
         ].join(' ')}>
           {exp.title}
         </span>
+        {exp.guard_warnings && exp.guard_warnings.length > 0 && (
+          <span
+            role="img"
+            aria-label="guard-warning"
+            title={`${t('experimentGuardWarnings', lang)}\n${exp.guard_warnings.join('\n')}`}
+            className="ml-1 font-bold text-[var(--color-error)] cursor-help"
+          >
+            !
+          </span>
+        )}
         {exp.progress && exp.status === 'running' && (
           <span className="block text-[10px] text-[var(--color-text-muted)] mt-0.5">
             {t('epoch', lang)} {exp.progress.epoch}/{exp.progress.total_epochs}
@@ -106,6 +116,21 @@ export function ExperimentTimeline() {
           />
         ))}
       </div>
+
+      {/* Plan revisions (ReAct adaptive replanning audit) */}
+      {(task.revisions?.length ?? 0) > 0 && (
+        <button
+          onClick={() => selectExperiment('__revisions__')}
+          className={`mx-1.5 mb-1.5 px-2.5 py-1.5 rounded-md text-xs text-left transition-colors ${
+            selectedExpId === '__revisions__'
+              ? 'bg-[var(--color-accent)]/12 text-[var(--color-accent)]'
+              : 'hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]'
+          }`}
+        >
+          <span className="text-[11px]">🔀 {t('planRevisions', lang)}</span>
+          <span className="text-[10px] text-[var(--color-text-muted)] ml-1">({task.revisions?.length ?? 0})</span>
+        </button>
+      )}
 
       {/* Knowledge count */}
       {task.knowledge.length > 0 && (

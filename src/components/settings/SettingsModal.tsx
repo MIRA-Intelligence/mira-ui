@@ -11,9 +11,7 @@ import {
 import { probeEngineCompatibility } from '@/services/engine'
 import {
   fetchRuntimeConfig,
-  saveRuntimeConfig,
   updateProjectsRoot,
-  type ReasoningEffort,
   type RuntimeConfigPayload,
 } from '@/services/runtimeConfig'
 import { useFeedbackStore } from '@/stores/feedbackStore'
@@ -26,34 +24,6 @@ import { useUiStore } from '@/stores/uiStore'
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
 
-const REASONING_OPTIONS: { value: Exclude<ReasoningEffort, null>; label: string }[] = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'adaptive', label: 'Adaptive' },
-]
-
-function providerLabel(
-  provider: string,
-  providers: RuntimeConfigPayload['providers'],
-): string {
-  return providers[provider]?.display_name ?? provider
-}
-
-function buildProviderOptions(
-  providers: RuntimeConfigPayload['providers'],
-  selectedProvider: string,
-): Array<{ value: string; label: string }> {
-  const entries = Object.entries(providers).map(([value, settings]) => ({
-    value,
-    label: settings.display_name || value,
-  }))
-  if (selectedProvider && !providers[selectedProvider]) {
-    return [{ value: selectedProvider, label: selectedProvider }, ...entries]
-  }
-  return entries
-}
-
 type SettingsDraft = {
   workspacePath: string
   theme: Theme
@@ -65,17 +35,7 @@ type SettingsDraft = {
   showToolCallHistory: boolean
   streamResponses: boolean
   receivePrereleases: boolean
-  provider: string
-  model: string
-  reasoningEffort: ReasoningEffort
-  temperature: string
-  maxToolIterations: string
-  restrictToWorkspace: boolean
-  apiBase: string
-  apiKey: string
 }
-
-type SettingsTab = 'connection' | 'localEngine'
 
 function remoteApiFallback(): string {
   const rawHost = typeof window !== 'undefined' ? window.location.hostname : ''
@@ -102,14 +62,6 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
     receivePrereleases: store.receivePrereleases ?? false,
-    provider: store.runtimeConfig?.runtime?.provider || 'auto',
-    model: 'anthropic/claude-sonnet-4-5',
-    reasoningEffort: null,
-    temperature: '0.1',
-    maxToolIterations: '200',
-    restrictToWorkspace: false,
-    apiBase: '',
-    apiKey: '',
   }
 }
 
@@ -122,25 +74,11 @@ function applyRuntimePayload(
   payload: RuntimeConfigPayload,
   endpoints?: { apiUrl: string; wsUrl: string },
 ): SettingsDraft {
-  const provider = typeof payload.runtime.provider === 'string' && payload.runtime.provider.trim().length > 0
-    ? payload.runtime.provider
-    : 'auto'
-  const providerSettings = payload.providers[provider]
-  const workspacePath = runtimeWorkspacePath(payload)
-
   return {
     ...draft,
-    workspacePath,
+    workspacePath: runtimeWorkspacePath(payload),
     apiUrl: endpoints?.apiUrl ?? draft.apiUrl,
     wsUrl: endpoints?.wsUrl ?? draft.wsUrl,
-    provider,
-    model: payload.runtime.model,
-    reasoningEffort: payload.runtime.reasoning_effort,
-    temperature: payload.runtime.temperature == null ? '' : String(payload.runtime.temperature),
-    maxToolIterations: String(payload.runtime.max_tool_iterations),
-    restrictToWorkspace: payload.runtime.restrict_to_workspace,
-    apiBase: providerSettings?.api_base ?? providerSettings?.default_api_base ?? '',
-    apiKey: '',
   }
 }
 
@@ -152,10 +90,7 @@ function resetWorkspaceScopedState() {
 // Runtime fields a background refresh would otherwise clobber. When the user
 // has already edited one (current differs from the seed snapshot taken at
 // open), keep their value instead of overwriting it with the late server read.
-const PRESERVED_DRAFT_FIELDS = [
-  'workspacePath', 'apiUrl', 'wsUrl', 'provider', 'model',
-  'reasoningEffort', 'temperature', 'maxToolIterations', 'restrictToWorkspace', 'apiBase', 'apiKey',
-] as const
+const PRESERVED_DRAFT_FIELDS = ['workspacePath', 'apiUrl', 'wsUrl'] as const
 
 function mergePreservingEdits(
   current: SettingsDraft,
@@ -197,15 +132,14 @@ function latestStoredProfile(
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings } = store
+  const openProviders = useUiStore((s) => s.openProviders)
   const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.engineStatus === 'setup_required' || store.localEnginePhase === 'error'
 
   const [draft, setDraft] = useState<SettingsDraft>(() => createDraft(store))
-  const [runtimeProviders, setRuntimeProviders] = useState<RuntimeConfigPayload['providers']>({})
   const [busy, setBusy] = useState(false)
   const [runtimeLoading, setRuntimeLoading] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
   const [feedbackError, setFeedbackError] = useState(false)
-  const [activeTab, setActiveTab] = useState<SettingsTab>('connection')
   const [workspaceEdited, setWorkspaceEdited] = useState(false)
 
   // Snapshot of the draft when the modal opened. A late background refresh
@@ -259,7 +193,6 @@ export function SettingsModal() {
         store.setRuntimeConfigLoaded(true)
         store.setRuntimeConfigError(null)
       }
-      setRuntimeProviders(payload.providers)
       setWorkspaceEdited(false)
       const endpoints = {
         apiUrl: targetApiUrl,
@@ -295,21 +228,13 @@ export function SettingsModal() {
     const nextDraft = createDraft(store)
     seedRef.current = nextDraft
     setDraft(nextDraft)
-    setActiveTab('connection')
     setBusy(false)
     setRuntimeLoading(false)
     setFeedbackError(false)
     setFeedback(null)
     setWorkspaceEdited(false)
-    setRuntimeProviders(store.runtimeConfig?.providers ?? {})
     void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true, true)
   }, [settingsOpen])
-
-  useEffect(() => {
-    if (draft.deploymentMode !== 'localBundle' && activeTab === 'localEngine') {
-      setActiveTab('connection')
-    }
-  }, [activeTab, draft.deploymentMode])
 
   if (!settingsOpen) return null
 
@@ -317,9 +242,6 @@ export function SettingsModal() {
     const storedRemote = mode === 'remoteManual'
       ? latestStoredProfile(store.engineProfiles, 'remoteManual')
       : null
-    if (storedRemote?.runtimeConfig) {
-      setRuntimeProviders(storedRemote.runtimeConfig.providers)
-    }
     setDraft((current) => {
       const base = storedRemote?.runtimeConfig
         ? applyRuntimePayload(current, storedRemote.runtimeConfig, {
@@ -339,23 +261,10 @@ export function SettingsModal() {
         workspacePath: storedRemote?.workspacePath ?? base.workspacePath,
       }
     })
-    if (mode !== 'localBundle') {
-      setActiveTab('connection')
-    }
     if (mode === 'localBundle') {
       void loadRuntimeConfig(mode, LOCAL_API_URL, false)
     }
     setWorkspaceEdited(false)
-  }
-
-  const handleProviderChange = (provider: string) => {
-    const snapshot = runtimeProviders[provider]
-    setDraft((current) => ({
-      ...current,
-      provider,
-      apiBase: snapshot?.api_base ?? snapshot?.default_api_base ?? '',
-      apiKey: '',
-    }))
   }
 
   const handleSave = async () => {
@@ -365,9 +274,7 @@ export function SettingsModal() {
     const previousApiUrl = store.apiUrl
     const previousWsUrl = store.wsUrl
     const previousWorkspacePath = store.workspacePath
-    const effectiveWorkspacePath = customProjectDirsAllowed
-      ? nextWorkspacePath
-      : (store.runtimeConfig?.projects_root ?? previousWorkspacePath)
+    const local = draft.deploymentMode === 'localBundle'
     setBusy(true)
     setFeedback(null)
     setFeedbackError(false)
@@ -380,147 +287,76 @@ export function SettingsModal() {
       store.setStreamResponses(draft.streamResponses)
       store.setReceivePrereleases(draft.receivePrereleases)
 
-      if (draft.deploymentMode === 'localBundle') {
-        const trimmedModel = draft.model.trim()
-        const trimmedApiBase = draft.apiBase.trim()
-        const trimmedApiKey = draft.apiKey.trim()
-        const providerSnapshot = runtimeProviders[draft.provider]
-        const providerName = providerLabel(draft.provider, runtimeProviders)
+      if (!local && (!nextApiUrl || !nextWsUrl)) {
+        throw new Error(t('settingsRemoteRequiresUrls', curLang))
+      }
 
-        if (!trimmedModel) {
-          throw new Error(t('settingsRequiresModel', curLang))
-        }
-        if (providerSnapshot?.api_base_required && !trimmedApiBase) {
-          throw new Error(t('settingsProviderRequiresApiBase', curLang, { provider: providerName }))
-        }
-        if (providerSnapshot?.api_key_required && !trimmedApiKey && !providerSnapshot?.api_key_configured) {
-          throw new Error(t('settingsProviderRequiresApiKey', curLang, { provider: providerName }))
-        }
-        const rawTemperature = draft.temperature.trim()
-        let temperatureValue: number | null
-        if (rawTemperature === '') {
-          temperatureValue = null
-        } else {
-          const parsedTemperature = Number(rawTemperature)
-          if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) {
-            throw new Error(t('settingsTemperatureInvalid', curLang))
-          }
-          temperatureValue = parsedTemperature
-        }
+      const targetApiUrl = local ? LOCAL_API_URL : nextApiUrl
+      const targetWsUrl = local ? LOCAL_WS_URL : nextWsUrl
 
-        // Skip the (slow) re-bootstrap when the engine is already running and
-        // connected — we only need it up to accept the POST below.
-        if (!localEngineAlreadyUp()) {
-          const localState = await bootstrapLocalEngine()
-          if (!localState) {
-            throw new Error(t('settingsDesktopBundleUnavailable', curLang))
-          }
-          store.setLocalEngineBootstrap({
-            phase: localState.phase,
-            message: localState.message,
-            executablePath: localState.executablePath,
-            version: localState.version,
-            operation: localState.operation,
-          })
-          if (localState.phase !== 'ready') {
-            throw new Error(localState.message)
-          }
+      // Local bundle: make sure the engine is running before we talk to it.
+      // Skip the (slow) re-bootstrap when it is already up and connected.
+      if (local && !localEngineAlreadyUp()) {
+        const localState = await bootstrapLocalEngine()
+        if (!localState) {
+          throw new Error(t('settingsDesktopBundleUnavailable', curLang))
         }
-
-        store.setDeploymentMode('localBundle')
-        store.setConnectionEndpoints(LOCAL_API_URL, LOCAL_WS_URL)
-        const providerUpdates = draft.provider === 'auto'
-          ? {}
-          : {
-              [draft.provider]: {
-                ...(trimmedApiKey ? { api_key: trimmedApiKey } : {}),
-                api_base: trimmedApiBase || null,
-              },
-            }
-        const payload = await saveRuntimeConfig({
-          ...(customProjectDirsAllowed ? { projects_root: effectiveWorkspacePath } : {}),
-          runtime: {
-            ...(customProjectDirsAllowed ? { workspace: effectiveWorkspacePath } : {}),
-            provider: draft.provider,
-            model: trimmedModel,
-            reasoning_effort: draft.reasoningEffort,
-            temperature: temperatureValue,
-            max_tool_iterations: Number(draft.maxToolIterations),
-            restrict_to_workspace: draft.restrictToWorkspace,
-          },
-          providers: providerUpdates,
+        store.setLocalEngineBootstrap({
+          phase: localState.phase,
+          message: localState.message,
+          executablePath: localState.executablePath,
+          version: localState.version,
+          operation: localState.operation,
         })
+        if (localState.phase !== 'ready') {
+          throw new Error(localState.message)
+        }
+      }
 
-        const localWorkspaceChanged = workspacePathChanged(previousWorkspacePath, runtimeWorkspacePath(payload))
-        if (localWorkspaceChanged) {
-          resetWorkspaceScopedState()
-        }
-        store.setRuntimeConfig(payload)
-        store.setRuntimeConfigLoaded(true)
-        store.setRuntimeConfigError(null)
-        setRuntimeProviders(payload.providers)
-        setWorkspaceEdited(false)
-        setDraft((current) => applyRuntimePayload(current, payload, {
-          apiUrl: LOCAL_API_URL,
-          wsUrl: LOCAL_WS_URL,
-        }))
+      const switchedEngine = store.deploymentMode !== draft.deploymentMode
+        || endpointChanged(previousApiUrl, previousWsUrl, targetApiUrl, targetWsUrl)
 
-        const probe = await probeEngineCompatibility(LOCAL_API_URL)
-        store.setEngineBootstrap({
-          status: probe.status,
-          message: probe.status === 'compatible' ? null : probe.message,
-          version: probe.version,
-          uptimeSeconds: probe.uptimeSeconds,
-        })
-        // The project list only changes when the workspace root moves; skip the
-        // expensive per-project plan/contract refetch otherwise.
-        if (localWorkspaceChanged) {
-          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
-        }
-      } else {
-        if (!nextApiUrl || !nextWsUrl) {
-          throw new Error(t('settingsRemoteRequiresUrls', curLang))
-        }
-        const switchedEngine = store.deploymentMode !== 'remoteManual'
-          || endpointChanged(previousApiUrl, previousWsUrl, nextApiUrl, nextWsUrl)
+      // Provider credentials, model lists, and runtime knobs all live on the
+      // dedicated Providers page now and persist to whichever engine is active,
+      // so local and remote behave identically. Settings only reads the config
+      // and (optionally) moves the workspace root.
+      let payload = await fetchRuntimeConfig(targetApiUrl)
+      const engineCustomDirsAllowed = payload.project_location?.custom_dir_allowed ?? true
+      const engineWorkspacePath = runtimeWorkspacePath(payload)
+      const shouldUpdateWorkspace = engineCustomDirsAllowed
+        && workspaceEdited
+        && workspacePathChanged(engineWorkspacePath, nextWorkspacePath)
+      if (shouldUpdateWorkspace) {
+        payload = await updateProjectsRoot(nextWorkspacePath, targetApiUrl)
+      }
 
-        let payload = await fetchRuntimeConfig(nextApiUrl)
-        const remoteCustomProjectDirsAllowed = payload.project_location?.custom_dir_allowed ?? true
-        const engineWorkspacePath = runtimeWorkspacePath(payload)
-        const shouldUpdateWorkspace = remoteCustomProjectDirsAllowed
-          && workspaceEdited
-          && workspacePathChanged(engineWorkspacePath, nextWorkspacePath)
-        if (shouldUpdateWorkspace) {
-          payload = await updateProjectsRoot(nextWorkspacePath, nextApiUrl)
-        }
+      const resolvedWorkspacePath = runtimeWorkspacePath(payload)
+      const workspaceChanged = switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)
+      if (workspaceChanged) {
+        resetWorkspaceScopedState()
+      }
+      store.setDeploymentMode(draft.deploymentMode)
+      store.setConnectionEndpoints(targetApiUrl, targetWsUrl)
+      store.setRuntimeConfig(payload)
+      store.setRuntimeConfigLoaded(true)
+      store.setRuntimeConfigError(null)
+      setWorkspaceEdited(false)
+      setDraft((current) => applyRuntimePayload(current, payload, {
+        apiUrl: targetApiUrl,
+        wsUrl: targetWsUrl,
+      }))
 
-        const resolvedWorkspacePath = runtimeWorkspacePath(payload)
-        const remoteWorkspaceChanged = switchedEngine || workspacePathChanged(previousWorkspacePath, resolvedWorkspacePath)
-        if (remoteWorkspaceChanged) {
-          resetWorkspaceScopedState()
-        }
-        store.setDeploymentMode('remoteManual')
-        store.setConnectionEndpoints(nextApiUrl, nextWsUrl)
-        store.setRuntimeConfig(payload)
-        store.setRuntimeConfigLoaded(true)
-        store.setRuntimeConfigError(null)
-        setRuntimeProviders(payload.providers)
-        setWorkspaceEdited(false)
-        setDraft((current) => applyRuntimePayload(current, payload, {
-          apiUrl: nextApiUrl,
-          wsUrl: nextWsUrl,
-        }))
-
-        const probe = await probeEngineCompatibility(nextApiUrl)
-        store.setEngineBootstrap({
-          status: probe.status,
-          message: probe.status === 'compatible' ? null : probe.message,
-          version: probe.version,
-          uptimeSeconds: probe.uptimeSeconds,
-        })
-        if (remoteWorkspaceChanged) {
-          await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
-        }
+      const probe = await probeEngineCompatibility(targetApiUrl)
+      store.setEngineBootstrap({
+        status: probe.status,
+        message: probe.status === 'compatible' ? null : probe.message,
+        version: probe.version,
+        uptimeSeconds: probe.uptimeSeconds,
+      })
+      // The project list only changes when the workspace root moves; skip the
+      // expensive per-project plan/contract refetch otherwise.
+      if (workspaceChanged) {
+        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
       }
 
       closeSettings()
@@ -655,8 +491,6 @@ export function SettingsModal() {
     }
   }
 
-  const selectedProvider = runtimeProviders[draft.provider]
-  const providerOptions = buildProviderOptions(runtimeProviders, draft.provider)
   const localMode = draft.deploymentMode === 'localBundle'
 
   return (
@@ -674,25 +508,8 @@ export function SettingsModal() {
             ✕
           </button>
         </div>
-        <div className="border-b border-[var(--color-border)] px-6">
-          <div className="flex items-end gap-6" role="tablist" aria-label="Settings sections">
-            <SettingsTabButton
-              label={t('general', curLang)}
-              active={activeTab === 'connection'}
-              onClick={() => setActiveTab('connection')}
-            />
-              <SettingsTabButton
-              label="Local Engine"
-              active={activeTab === 'localEngine'}
-              disabled={!localMode}
-              onClick={() => setActiveTab('localEngine')}
-            />
-          </div>
-        </div>
-
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {activeTab === 'connection' ? (
-            <div role="tabpanel" aria-label={t('general', curLang)} className="space-y-6">
+            <div className="space-y-6">
               <Section title="Deployment">
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
                   <div className="flex items-center justify-between gap-4">
@@ -705,6 +522,24 @@ export function SettingsModal() {
                       </p>
                     </div>
                     <DeploymentModeSwitch mode={draft.deploymentMode} onChange={handleSwitchMode} />
+                  </div>
+                </div>
+              </Section>
+
+              <Section title={t('manageProviders', curLang)}>
+                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed flex-1">
+                      {t('settingsProvidersHint', curLang)}
+                    </p>
+                    <ActionButton
+                      onClick={() => {
+                        closeSettings()
+                        openProviders()
+                      }}
+                    >
+                      {t('manageProviders', curLang)}
+                    </ActionButton>
                   </div>
                 </div>
               </Section>
@@ -832,170 +667,52 @@ export function SettingsModal() {
                   </div>
                 </Section>
               )}
-            </div>
-          ) : (
-            <div role="tabpanel" aria-label="Local Engine" className="space-y-6">
-              <Section title="Local Engine">
-                <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3 space-y-1">
-                  <p className="text-sm text-[var(--color-text-primary)]">
-                    Phase: <span className="font-medium">{store.localEnginePhase}</span>
-                  </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    {store.engineVersion ? `Version ${store.engineVersion}` : 'Version unknown'}
-                  </p>
-                  {store.localEngineExecutablePath && (
-                    <p className="text-[11px] text-[var(--color-text-muted)] break-all">
-                      Executable: {store.localEngineExecutablePath}
+
+              {localMode && (
+                <Section title="Local Engine">
+                  <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3 space-y-1">
+                    <p className="text-sm text-[var(--color-text-primary)]">
+                      Phase: <span className="font-medium">{store.localEnginePhase}</span>
                     </p>
-                  )}
-                  {showEngineWarning && (
-                    <p className="text-[11px] text-amber-300 leading-relaxed">
-                      {store.engineMessage || 'Local engine needs provider setup or an engine update.'}
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      {store.engineVersion ? `Version ${store.engineVersion}` : 'Version unknown'}
                     </p>
-                  )}
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <ActionButton disabled={busy} onClick={handleRepairEngine}>
-                    Repair service
-                  </ActionButton>
-                  <ActionButton disabled={busy} onClick={handleRestartEngine}>
-                    Restart local engine
-                  </ActionButton>
-                  <ActionButton disabled={busy} onClick={handleDoctorEngine}>
-                    Run doctor
-                  </ActionButton>
-                  <ActionButton disabled={busy} onClick={handleUpgradeEngine}>
-                    Upgrade local engine
-                  </ActionButton>
-                  <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle', LOCAL_API_URL, true)}>
-                    {runtimeLoading ? 'Refreshing...' : 'Refresh config'}
-                  </ActionButton>
-                </div>
-              </Section>
-
-              <Section title="Local Runtime Config">
-                <Label text="Provider" />
-                <select
-                  value={draft.provider}
-                  onChange={(e) => handleProviderChange(e.target.value)}
-                  className={selectClass}
-                >
-                  {providerOptions.map((provider) => (
-                    <option key={provider.value} value={provider.value}>
-                      {provider.label}
-                    </option>
-                  ))}
-                </select>
-
-                <Label text="Model" className="mt-3" />
-                <input
-                  value={draft.model}
-                  onChange={(e) => setDraft((current) => ({ ...current, model: e.target.value }))}
-                  className={inputClass}
-                  placeholder="anthropic/claude-sonnet-4-5"
-                />
-
-                <Label text="API Base" className="mt-3" />
-                <input
-                  value={draft.apiBase}
-                  onChange={(e) => setDraft((current) => ({ ...current, apiBase: e.target.value }))}
-                  className={inputClass}
-                  placeholder={
-                    selectedProvider?.default_api_base
-                      ? t('settingsLeaveEmptyUseDefault', curLang, { apiBase: selectedProvider.default_api_base })
-                      : t('settingsLeaveEmptyProviderDefaults', curLang)
-                  }
-                />
-                {selectedProvider?.api_base_required && (
-                  <p className="text-[11px] text-amber-300 mt-1">
-                    {t('settingsProviderNeedsApiBaseHint', curLang, { provider: selectedProvider.display_name })}
-                  </p>
-                )}
-
-                {draft.provider !== 'auto' && !selectedProvider?.is_oauth && (
-                  <>
-                    <Label text="API Key" className="mt-3" />
-                    <input
-                      type="password"
-                      value={draft.apiKey}
-                      onChange={(e) => setDraft((current) => ({ ...current, apiKey: e.target.value }))}
-                      className={inputClass}
-                      placeholder={selectedProvider?.api_key_configured ? t('settingsLeaveBlankKeepKey', curLang) : t('settingsPasteProviderKey', curLang)}
-                    />
-                    {selectedProvider?.api_key_required && (
-                      <p className="text-[11px] text-amber-300 mt-1">
-                        {t('settingsProviderNeedsApiKeyHint', curLang, { provider: selectedProvider.display_name })}
+                    {store.localEngineExecutablePath && (
+                      <p className="text-[11px] text-[var(--color-text-muted)] break-all">
+                        Executable: {store.localEngineExecutablePath}
                       </p>
                     )}
-                    {selectedProvider?.api_key_preview && (
-                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                        Saved key preview: {selectedProvider.api_key_preview}
+                    {showEngineWarning && (
+                      <p className="text-[11px] text-amber-300 leading-relaxed">
+                        {store.engineMessage || 'Local engine needs provider setup or an engine update.'}
                       </p>
                     )}
-                  </>
-                )}
-                {draft.provider === 'auto' && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
-                    {t('settingsAutoDetectHint', curLang)}
-                  </p>
-                )}
-                {selectedProvider?.is_oauth && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3">
-                    {t('settingsOauthHint', curLang, { provider: selectedProvider.display_name })}
-                  </p>
-                )}
-
-                <Label text="Reasoning Effort" className="mt-3" />
-                <select
-                  value={draft.reasoningEffort ?? ''}
-                  onChange={(e) => setDraft((current) => ({
-                    ...current,
-                    reasoningEffort: e.target.value ? e.target.value as Exclude<ReasoningEffort, null> : null,
-                  }))}
-                  className={selectClass}
-                >
-                  <option value="">Disabled</option>
-                  {REASONING_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-
-                <Label text="Temperature" className="mt-3" />
-                <input
-                  value={draft.temperature}
-                  onChange={(e) => setDraft((current) => ({ ...current, temperature: e.target.value }))}
-                  className={inputClass}
-                  inputMode="decimal"
-                  placeholder={t('settingsTemperaturePlaceholder', curLang)}
-                />
-                <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
-                  {t('settingsTemperatureHint', curLang)}
-                </p>
-
-                <Label text="Max Tool Iterations" className="mt-3" />
-                <input
-                  value={draft.maxToolIterations}
-                  onChange={(e) => setDraft((current) => ({ ...current, maxToolIterations: e.target.value }))}
-                  className={inputClass}
-                  inputMode="numeric"
-                />
-
-                <ToggleRow
-                  className="mt-4"
-                  label="Restrict tool access to workspace"
-                  checked={draft.restrictToWorkspace}
-                  onToggle={() => setDraft((current) => ({ ...current, restrictToWorkspace: !current.restrictToWorkspace }))}
-                />
-                {store.runtimeConfig?.config_path && (
-                  <p className="text-[11px] text-[var(--color-text-muted)] mt-3 break-all">
-                    Runtime config path: {store.runtimeConfig.config_path}
-                  </p>
-                )}
-              </Section>
+                    {store.runtimeConfig?.config_path && (
+                      <p className="text-[11px] text-[var(--color-text-muted)] break-all">
+                        Runtime config path: {store.runtimeConfig.config_path}
+                      </p>
+                    )}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <ActionButton disabled={busy} onClick={handleRepairEngine}>
+                      Repair service
+                    </ActionButton>
+                    <ActionButton disabled={busy} onClick={handleRestartEngine}>
+                      Restart local engine
+                    </ActionButton>
+                    <ActionButton disabled={busy} onClick={handleDoctorEngine}>
+                      Run doctor
+                    </ActionButton>
+                    <ActionButton disabled={busy} onClick={handleUpgradeEngine}>
+                      Upgrade local engine
+                    </ActionButton>
+                    <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle', LOCAL_API_URL, true)}>
+                      {runtimeLoading ? 'Refreshing...' : 'Refresh config'}
+                    </ActionButton>
+                  </div>
+                </Section>
+              )}
             </div>
-          )}
 
           {feedback && (
             <p className={cn('text-xs leading-relaxed', feedbackError ? 'text-red-300' : 'text-[var(--color-text-muted)]')}>
@@ -1045,31 +762,6 @@ function Label({ text, className }: { text: string; className?: string }) {
     <label className={cn('block text-sm text-[var(--color-text-secondary)] mb-1.5', className)}>
       {text}
     </label>
-  )
-}
-
-function SettingsTabButton(
-  { label, active, disabled, onClick }: { label: string; active: boolean; disabled?: boolean; onClick: () => void },
-) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        'relative -mb-px border-b-2 px-1 py-3 text-sm font-medium transition-colors',
-        active
-          ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-          : 'border-transparent text-[var(--color-text-secondary)]',
-        disabled
-          ? 'opacity-50 cursor-not-allowed'
-          : 'hover:text-[var(--color-text-primary)] hover:border-[var(--color-text-muted)]',
-      )}
-    >
-      {label}
-    </button>
   )
 }
 
@@ -1157,8 +849,6 @@ function ActionButton(
 
 const inputClass =
   'w-full h-10 bg-[var(--color-input-bg,var(--color-bg-primary))] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] transition-colors'
-
-const selectClass = inputClass
 
 function AppUpdatesSection(
   { lang, receivePrereleases, setReceivePrereleases }: {

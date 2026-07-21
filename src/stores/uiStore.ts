@@ -63,6 +63,7 @@ interface UiState {
   newProjectPrefill: string | null
   newProjectFromChatId: string | null
   skillsPluginsOpen: boolean
+  providersOpen: boolean
   // Set by useUpdateCheck when the main process detects a newer GitHub
   // release. Cleared by "Skip this version" / "Later". Transient — never
   // persisted; main process is the source of truth on every boot.
@@ -81,6 +82,8 @@ interface UiState {
   closeNewProject: () => void
   openSkillsPlugins: () => void
   closeSkillsPlugins: () => void
+  openProviders: () => void
+  closeProviders: () => void
   setAvailableUpdate: (info: UpdateInfo | null) => void
   dismissUpdateBanner: () => void
   resetUpdateBannerDismissed: () => void
@@ -104,6 +107,7 @@ export const useUiStore = create<UiState>((set) => ({
   newProjectPrefill: null,
   newProjectFromChatId: null,
   skillsPluginsOpen: false,
+  providersOpen: false,
   availableUpdate: null,
   updateBannerDismissed: false,
   systemMessages: [],
@@ -131,6 +135,8 @@ export const useUiStore = create<UiState>((set) => ({
     set({ newProjectOpen: false, newProjectPrefill: null, newProjectFromChatId: null }),
   openSkillsPlugins: () => set({ skillsPluginsOpen: true }),
   closeSkillsPlugins: () => set({ skillsPluginsOpen: false }),
+  openProviders: () => set({ providersOpen: true }),
+  closeProviders: () => set({ providersOpen: false }),
   setAvailableUpdate: (info) => set({ availableUpdate: info, updateBannerDismissed: false }),
   dismissUpdateBanner: () => set({ updateBannerDismissed: true }),
   resetUpdateBannerDismissed: () => set({ updateBannerDismissed: false }),

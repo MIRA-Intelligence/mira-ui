@@ -5,7 +5,8 @@ import { LocalEngineManager } from './engine/manager'
 import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 
-const engineManager = new LocalEngineManager()
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const engineManager = hasSingleInstanceLock ? new LocalEngineManager() : null
 let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
@@ -41,7 +42,9 @@ function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+function initializeApp() {
+  if (!engineManager) return
+
   ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
@@ -94,12 +97,28 @@ app.whenReady().then(() => {
   // default to stable-only and let the renderer re-trigger via IPC after it
   // has hydrated its persisted setting.
   scheduleBootCheck({ includePrereleases: false })
-})
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) {
+      if (app.isReady()) createWindow()
+      return
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+  })
 
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
-})
+  app.whenReady().then(initializeApp)
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit()
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+}

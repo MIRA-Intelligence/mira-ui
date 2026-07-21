@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type {
   ProjectTask, Experiment, ExperimentStatus, PipelineStage,
   NewProjectInput, Stats, TaskPlan, TaskPlanContract, ResearchData, ResultData, AppMode, AgentProfile, ContractVersion,
-  PlanData, PlanPhase, PlanQuestion, PlanQuestionKind, PlanDraft, PlanDraftExperiment,
+  PlanData, PlanPhase, PlanQuestion, PlanQuestionKind, PlanDraft, PlanDraftExperiment, PlanRevision,
 } from '@/types'
 import {
   createRemoteProject,
@@ -83,7 +83,7 @@ const EXPERIMENT_STATUS_SET: ReadonlySet<ExperimentStatus> = new Set([
   'skipped',
 ])
 const MODE_SET = new Set(['manual', 'auto'] as const)
-const AGENT_PROFILE_SET = new Set(['engineer', 'research'] as const)
+const AGENT_PROFILE_SET = new Set(['engineer', 'research', 'team'] as const)
 const CONTRACT_VERSION_SET = new Set([1, 2] as const)
 
 function normalizeRunMode(value: unknown, fallback: 'manual' | 'auto' = 'auto'): 'manual' | 'auto' {
@@ -166,6 +166,9 @@ function parseExperiment(raw: any, fallbackIdx: number): Experiment {
     progress: raw.progress ? safeClone(raw.progress) : undefined,
     parent: raw.parent as string | undefined,
     snapshot: parseExperimentSnapshot(raw.snapshot),
+    guard_warnings: Array.isArray(raw.guard_warnings)
+      ? raw.guard_warnings.filter((w: unknown): w is string => typeof w === 'string')
+      : undefined,
   }
 }
 
@@ -183,6 +186,25 @@ function parseResearch(raw: any): ResearchData {
   })) : []
   const notes = Array.isArray(raw.notes) ? raw.notes : []
   return { references: refs, notes, survey: raw.survey }
+}
+
+function parseRevisions(raw: any): PlanRevision[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const validActions = new Set<PlanRevision['action']>(['add', 'skip', 'remove', 'reprioritize'])
+  const out: PlanRevision[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const action = item.action as PlanRevision['action']
+    if (!validActions.has(action)) continue
+    out.push({
+      action,
+      target: typeof item.target === 'string' ? item.target : undefined,
+      rationale: typeof item.rationale === 'string' ? item.rationale : undefined,
+      sourceExperiment: typeof item.source_experiment === 'string' ? item.source_experiment : undefined,
+      at: typeof item.at === 'string' ? item.at : undefined,
+    })
+  }
+  return out.length > 0 ? out : undefined
 }
 
 function parseResult(raw: any): ResultData {
@@ -303,6 +325,7 @@ function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
     knowledge,
     research: parseResearch(raw.research),
     plan: parsePlan(raw.plan) ?? task.plan,
+    revisions: parseRevisions(raw.revisions) ?? task.revisions,
     result: parsedResult,
   }
 }
@@ -342,6 +365,7 @@ function pickActiveExperimentId(task: ProjectTask | undefined, fallbackId: strin
 function resolveSelectedExperimentId(task: ProjectTask | undefined, selectedExpId: string | null): string | null {
   if (!task) return null
   if (selectedExpId === '__knowledge__') return '__knowledge__'
+  if (selectedExpId === '__revisions__') return '__revisions__'
 
   const experimentIds = new Set(task.experiments.map((e) => e.id))
   if (selectedExpId && experimentIds.has(selectedExpId)) return selectedExpId

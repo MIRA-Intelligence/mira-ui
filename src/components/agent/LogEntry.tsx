@@ -154,7 +154,12 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
       </div>
       <div
         className={cn(
-          'text-sm leading-relaxed break-words whitespace-pre-wrap',
+          'text-sm leading-relaxed break-words',
+          // Markdown responses manage their own block layout; forcing
+          // ``whitespace-pre-wrap`` there turns every soft newline in the
+          // source into a hard break and inflates line spacing. Only preserve
+          // raw whitespace for plain/error text.
+          entry.type !== 'response' && 'whitespace-pre-wrap',
           entry.type === 'error'
             ? 'text-red-400'
             : 'text-[var(--color-text-secondary)]',

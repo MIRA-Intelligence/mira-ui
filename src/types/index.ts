@@ -2,7 +2,7 @@
 
 export type PipelineStage = 'research' | 'plan' | 'experiment' | 'result'
 export type AppMode = 'normal' | 'project'
-export type AgentProfile = 'engineer' | 'research'
+export type AgentProfile = 'engineer' | 'research' | 'team'
 export type ContractVersion = 1 | 2
 
 /* ── Experiment status ──────────────────────────── */
@@ -86,6 +86,8 @@ export interface Experiment {
   progress?: ExperimentProgress
   parent?: string
   snapshot?: ExperimentSnapshot
+  /** Non-blocking guardrail warnings surfaced as a marker after the title. */
+  guard_warnings?: string[]
 }
 
 /* ── Research data (literature & references) ───── */
@@ -140,6 +142,18 @@ export interface PlanData {
   updatedAt?: string
 }
 
+/* ── Plan revision audit (ReAct adaptive replanning) ── */
+
+export type PlanRevisionAction = 'add' | 'skip' | 'remove' | 'reprioritize'
+
+export interface PlanRevision {
+  action: PlanRevisionAction
+  target?: string
+  rationale?: string
+  sourceExperiment?: string
+  at?: string
+}
+
 /* ── Final result / deliverable ────────────────── */
 
 export interface ResultData {
@@ -171,6 +185,7 @@ export interface ProjectTask {
   knowledge: string[]
   research: ResearchData
   plan?: PlanData
+  revisions?: PlanRevision[]
   result: ResultData
   startedAt: string
 }
@@ -227,6 +242,13 @@ export interface TaskPlan {
     }
     feedback?: string
   }
+  revisions?: Array<{
+    action?: string
+    target?: string
+    rationale?: string
+    source_experiment?: string
+    at?: string
+  }>
   result?: {
     summary?: string
     output_path?: string

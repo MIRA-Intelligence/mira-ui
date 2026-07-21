@@ -72,6 +72,22 @@ describe('PipelineProgress agent profile switch', () => {
     expect(useProjectStore.getState().agentProfile).toBe('engineer')
   })
 
+  it('switches to the team (multi-agent) profile when idle', () => {
+    useProjectStore.setState({
+      tasks: [makeTask(false)],
+      selectedTaskId: 'PRJ-0001',
+      mode: 'auto',
+      agentProfile: 'research',
+      activeStage: 'research',
+    })
+    useAgentStore.setState({ streamingBySession: {} })
+
+    render(<PipelineProgress />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Team' }))
+    expect(useProjectStore.getState().agentProfile).toBe('team')
+  })
+
   it('disables switching profile while a run is active', () => {
     useProjectStore.setState({
       tasks: [makeTask(true)],
