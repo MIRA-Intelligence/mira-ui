@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import type { ChatThread } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
+import type { OrganizationFolder } from '@/services/api'
 
 interface ChatItemProps {
   chat: ChatThread
@@ -10,11 +11,14 @@ interface ChatItemProps {
   onSelect: (id: string) => void
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
+  folders?: OrganizationFolder[]
+  currentFolderId?: string | null
+  onMove?: (id: string, folderId: string | null) => void
 }
 
 interface MenuPos { x: number; y: number }
 
-export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete }: ChatItemProps) {
+export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete, folders = [], currentFolderId, onMove }: ChatItemProps) {
   const lang = useSettingsStore((s) => s.language)
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [editing, setEditing] = useState(false)
@@ -107,6 +111,25 @@ export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete }: Cha
               {a.label}
             </button>
           ))}
+          {onMove && (
+            <>
+              <div className="my-1 border-t border-[var(--color-border)]" />
+              <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                {t('moveToFolder', lang)}
+              </p>
+              {[{ id: null, name: t('uncategorized', lang) }, ...folders].map((folder) => (
+                <button
+                  key={folder.id ?? '__uncategorized__'}
+                  type="button"
+                  disabled={(currentFolderId ?? null) === folder.id}
+                  onClick={() => { setMenu(null); onMove(chat.id, folder.id) }}
+                  className="w-full truncate px-3 py-1.5 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
+                >
+                  {folder.name}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
     </>

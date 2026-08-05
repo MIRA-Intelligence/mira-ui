@@ -10,6 +10,11 @@ import { LogEntry } from './LogEntry'
 import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
+import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
+
+function createClientId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
 
 // Condense a log line into a short one-line activity label for the working
 // indicator (collapse whitespace, drop trailing noise, cap the length).
@@ -56,60 +61,211 @@ type RenderItem =
 function ChatComposer({
   sessionId,
   isStreaming,
+  isStopping,
   lang,
+  availableSkills,
   onSend,
   onStop,
 }: {
   sessionId: string | null
   isStreaming: boolean
+  isStopping: boolean
   lang: ReturnType<typeof useSettingsStore.getState>['language']
-  onSend: (text: string) => void
+  availableSkills: string[]
+  onSend: (text: string, selectedSkills: string[]) => void
   onStop: () => void
 }) {
   const [input, setInput] = useState('')
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([])
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
+  const [skillQuery, setSkillQuery] = useState('')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const resizeDragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null)
+  const sendShortcut = useSettingsStore((s) => s.sendShortcut ?? 'enter')
 
   useEffect(() => {
     setInput('')
+    setSelectedSkills([])
+    setSkillPickerOpen(false)
   }, [sessionId])
+
+  const resizeTextarea = () => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const currentHeight = textarea.getBoundingClientRect().height || 40
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, currentHeight, 40), 240)}px`
+  }
+
+  const beginResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizeDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: textarea.getBoundingClientRect().height || 40,
+    }
+  }
+
+  const continueResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = resizeDragRef.current
+    const textarea = textareaRef.current
+    if (!drag || !textarea || drag.pointerId !== event.pointerId) return
+    const nextHeight = Math.min(Math.max(drag.startHeight + drag.startY - event.clientY, 40), 240)
+    textarea.style.height = `${nextHeight}px`
+  }
+
+  const endResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (resizeDragRef.current?.pointerId !== event.pointerId) return
+    resizeDragRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const mentionedSkills = useMemo(() => {
+    const available = new Set(availableSkills)
+    return Array.from(input.matchAll(/(?:^|\s)\$([A-Za-z0-9][A-Za-z0-9._-]*)/g))
+      .map((match) => match[1])
+      .filter((name) => available.has(name))
+  }, [availableSkills, input])
 
   const sendCurrent = () => {
     const text = input.trim()
     if (!text || !sessionId) return
-    onSend(text)
+    onSend(text, Array.from(new Set([...selectedSkills, ...mentionedSkills])))
     setInput('')
+    setSelectedSkills([])
+    if (textareaRef.current) textareaRef.current.style.height = '40px'
   }
+
+  const filteredSkills = availableSkills
+    .filter((name) => !selectedSkills.includes(name))
+    .filter((name) => name.toLowerCase().includes(skillQuery.trim().toLowerCase()))
+    .slice(0, 12)
 
   return (
     <div className="p-3 border-t border-[var(--color-border)] shrink-0">
-      <div className="flex gap-2">
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && e.shiftKey) {
-              e.preventDefault()
-              sendCurrent()
-            }
-          }}
-          placeholder={sessionId ? t('typeMessage', lang) : t('selectProjectFirst', lang)}
-          disabled={!sessionId}
-          rows={1}
-          className="flex-1 h-9 overflow-y-auto bg-[var(--color-bg-primary)] text-[var(--color-text-primary)] text-sm rounded-lg px-3 py-2 border border-[var(--color-border)] outline-none focus:border-[var(--color-accent)] placeholder:text-[var(--color-text-muted)] disabled:opacity-50 resize-none"
-        />
+      {selectedSkills.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {selectedSkills.map((skill) => (
+            <button
+              key={skill}
+              type="button"
+              onClick={() => setSelectedSkills((current) => current.filter((item) => item !== skill))}
+              className="rounded-full border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/10 px-2 py-0.5 text-[11px] text-[var(--color-accent)]"
+              title={t('removeSkill', lang)}
+            >
+              ${skill} ×
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex items-end gap-2">
+        <div className="relative self-end">
+          <button
+            type="button"
+            disabled={!sessionId || isStopping}
+            onClick={() => setSkillPickerOpen((open) => !open)}
+            className="h-10 rounded-lg border border-[var(--color-border)] px-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+            title={t('selectSkill', lang)}
+          >
+            $ Skill
+          </button>
+          {skillPickerOpen && (
+            <div className="absolute bottom-12 left-0 z-30 w-64 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2 shadow-xl">
+              <input
+                autoFocus
+                value={skillQuery}
+                onChange={(event) => setSkillQuery(event.target.value)}
+                placeholder={t('searchSkills', lang)}
+                className="mb-2 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-xs outline-none focus:border-[var(--color-accent)]"
+              />
+              <div className="max-h-48 overflow-y-auto">
+                {filteredSkills.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-[var(--color-text-muted)]">{t('noSkillsFound', lang)}</p>
+                ) : filteredSkills.map((skill) => (
+                  <button
+                    key={skill}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSkills((current) => [...current, skill])
+                      setSkillQuery('')
+                      setSkillPickerOpen(false)
+                    }}
+                    className="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-[var(--color-bg-hover)]"
+                  >
+                    ${skill}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <div className="relative min-w-0 flex-1 self-end">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value)
+              requestAnimationFrame(resizeTextarea)
+            }}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing) return
+              const shouldSend = sendShortcut === 'enter' ? !e.shiftKey : e.shiftKey
+              if (e.key === 'Enter' && shouldSend) {
+                e.preventDefault()
+                sendCurrent()
+              }
+            }}
+            placeholder={sessionId
+              ? t(sendShortcut === 'enter' ? 'typeMessage' : 'typeMessageShiftEnter', lang)
+              : t('selectProjectFirst', lang)}
+            disabled={!sessionId || isStopping}
+            rows={1}
+            className="block h-10 min-h-10 max-h-[240px] w-full overflow-y-auto resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 pr-8 text-sm text-[var(--color-text-primary)] outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] disabled:opacity-50"
+          />
+          <button
+            type="button"
+            aria-label={t('resizeMessageInput', lang)}
+            title={t('resizeMessageInput', lang)}
+            disabled={!sessionId || isStopping}
+            onPointerDown={beginResize}
+            onPointerMove={continueResize}
+            onPointerUp={endResize}
+            onPointerCancel={endResize}
+            className="absolute right-1.5 top-1 cursor-ns-resize select-none rounded p-1 text-[var(--color-text-muted)] opacity-50 hover:bg-[var(--color-bg-hover)] hover:opacity-90 disabled:pointer-events-none"
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 14 14"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.35"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2 2.25h7.25a2.5 2.5 0 0 1 2.5 2.5V12" />
+              <path d="M5.25 5.25h2.5a1.25 1.25 0 0 1 1.25 1.25V9" />
+            </svg>
+          </button>
+        </div>
         <button
           onClick={sendCurrent}
-          disabled={!sessionId}
-          className="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
+          disabled={!sessionId || isStopping}
+          className="h-10 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent)]/80 transition-colors shrink-0 disabled:opacity-50"
         >
           {t('send', lang)}
         </button>
         <button
           onClick={onStop}
-          disabled={!sessionId}
+          disabled={!sessionId || isStopping}
           title={isStreaming ? t('stopCurrentTask', lang) : t('cancelAutoOrStop', lang)}
-          className="px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
+          className="h-10 px-3 py-2 rounded-lg bg-red-500/15 text-red-400 text-sm font-medium hover:bg-red-500/25 transition-colors shrink-0 disabled:opacity-50"
         >
-          {t('stop', lang)}
+          {isStopping ? t('stopping', lang) : t('stop', lang)}
         </button>
       </div>
     </div>
@@ -117,7 +273,7 @@ function ChatComposer({
 }
 
 export function AgentPanel() {
-  const { connected, logsByProject, hydrateLogs, streamingBySession } = useAgentStore()
+  const { connected, logsByProject, hydrateLogs, streamingBySession, stoppingBySession } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
   const lang = useSettingsStore((s) => s.language)
@@ -138,6 +294,19 @@ export function AgentPanel() {
   // Streaming is tracked per session so a different session's activity never
   // lights up this panel (e.g. a freshly created chat).
   const isStreaming = Boolean(sessionId && streamingBySession[sessionId])
+  const isStopping = Boolean(sessionId && stoppingBySession[sessionId])
+  const skillPlugins = useSkillPluginsStore((s) => s.plugins)
+  const loadSkillPlugins = useSkillPluginsStore((s) => s.load)
+  const activeTurnIds = useRef<Record<string, string>>({})
+  const availableSkills = useMemo(() => Array.from(new Set(
+    skillPlugins.flatMap((plugin) => plugin.enabled.effective
+      ? plugin.skills.filter((skill) => skill.enabled.effective).map((skill) => skill.name)
+      : []),
+  )).sort(), [skillPlugins])
+
+  useEffect(() => {
+    if (connected) void loadSkillPlugins(GLOBAL_SKILLS_SESSION_ID)
+  }, [connected, loadSkillPlugins])
   // Once tokens are actively streaming into the last entry, the growing bubble
   // is the activity indicator — drop the separate "thinking" dots so they don't
   // sit redundantly beneath the live reply.
@@ -217,7 +386,7 @@ export function AgentPanel() {
     })
   }, [connected, sessionId])
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, selectedSkills: string[] = []) => {
     if (!sessionId) return
     if (isChat) touchChat(sessionId, text)
     useAgentStore.getState().addLog(sessionId, {
@@ -232,6 +401,8 @@ export function AgentPanel() {
     }
 
     const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
+    const turnId = createClientId('turn')
+    activeTurnIds.current[sessionId] = turnId
     wsClient.send({
       type: 'message',
       content: text,
@@ -239,6 +410,8 @@ export function AgentPanel() {
       user_id: 'ui_user',
       loop_mode: appMode,
       stream: useSettingsStore.getState().streamResponses,
+      turn_id: turnId,
+      selected_skill_ids: selectedSkills,
       ...(appMode === 'project' && {
         mode: currentMode,
         agent_profile: currentAgentProfile,
@@ -277,14 +450,31 @@ export function AgentPanel() {
 
   const handleStop = () => {
     if (!sessionId) return
-    useAgentStore.getState().markSessionIdle(sessionId)
+    useAgentStore.getState().markSessionStopping(sessionId)
 
     wsClient.send({
-      type: 'message',
-      content: '/stop',
+      type: 'stop',
+      content: '',
       session_id: sessionId,
       user_id: 'ui_user',
       loop_mode: appMode,
+      turn_id: activeTurnIds.current[sessionId],
+      request_id: createClientId('stop'),
+    })
+  }
+
+  const handleSkillFallback = (approved: boolean, skillIds: string[]) => {
+    if (!sessionId) return
+    if (approved) useAgentStore.getState().markSessionPending(sessionId)
+    wsClient.send({
+      type: 'skill_fallback_response',
+      content: '',
+      session_id: sessionId,
+      user_id: 'ui_user',
+      loop_mode: appMode,
+      approved,
+      selected_skill_ids: skillIds,
+      turn_id: createClientId('turn'),
     })
   }
 
@@ -388,6 +578,7 @@ export function AgentPanel() {
           const entry = item.entry
           const isUser = !!entry.metadata?._user
           const isAutoMsg = !!entry.metadata?._auto
+          const requiresSkillFallback = entry.metadata?._skill_fallback_required === true
           if (isUser) {
             return (
               <div key={entry.id} className="group/msg px-4 py-2">
@@ -411,6 +602,34 @@ export function AgentPanel() {
                       <polyline points="1 4 1 10 7 10" />
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                     </svg>
+                  </button>
+                </div>
+              </div>
+            )
+          }
+          if (requiresSkillFallback) {
+            const rawSkills = entry.metadata?.selected_skill_ids
+            const skillIds = Array.isArray(rawSkills)
+              ? rawSkills.filter((item): item is string => typeof item === 'string')
+              : []
+            return (
+              <div key={entry.id} className="mx-4 my-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                <p className="whitespace-pre-wrap text-sm text-[var(--color-text-primary)]">{entry.content}</p>
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">{t('skillFallbackPrompt', lang)}</p>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleSkillFallback(true, skillIds)}
+                    className="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs text-white"
+                  >
+                    {t('approveFallback', lang)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSkillFallback(false, skillIds)}
+                    className="rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs"
+                  >
+                    {t('rejectFallback', lang)}
                   </button>
                 </div>
               </div>
@@ -449,6 +668,8 @@ export function AgentPanel() {
       <ChatComposer
         sessionId={sessionId}
         isStreaming={isStreaming}
+        isStopping={isStopping}
+        availableSkills={availableSkills}
         lang={lang}
         onSend={handleSend}
         onStop={handleStop}

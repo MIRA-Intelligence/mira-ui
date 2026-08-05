@@ -15,6 +15,7 @@ interface AgentState {
   // socket, so a single global flag leaks one session's activity into every
   // panel (e.g. a brand-new chat showing "mira is thinking"). Keyed by session.
   streamingBySession: Record<string, boolean>
+  stoppingBySession: Record<string, boolean>
   connected: boolean
   // Cumulative token usage broadcast by the engine via message metadata.
   // Indexed by session id (which the renderer treats as the project id).
@@ -25,6 +26,7 @@ interface AgentState {
   handleWsMessage: (msg: WsResponse) => void
   markSessionPending: (sessionId: string) => void
   markSessionIdle: (sessionId: string) => void
+  markSessionStopping: (sessionId: string) => void
   isSessionStreaming: (sessionId: string | null) => boolean
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
@@ -154,6 +156,7 @@ function setSessionStreaming(
 export const useAgentStore = create<AgentState>((set, get) => ({
   logsByProject: {},
   streamingBySession: {},
+  stoppingBySession: {},
   connected: false,
   usageBySession: {},
 
@@ -218,6 +221,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'
 
+    if (msg.type === 'stop_ack') {
+      set((state) => {
+        const stopping = { ...state.stoppingBySession }
+        delete stopping[sessionId]
+        const list = state.logsByProject[sessionId] ?? []
+        const nextLogs = list.map((entry) => {
+          if (!entry.metadata?._streaming) return entry
+          const metadata = { ...entry.metadata }
+          delete metadata._streaming
+          return { ...entry, metadata }
+        })
+        return {
+          stoppingBySession: stopping,
+          streamingBySession: setSessionStreaming(state.streamingBySession, sessionId, false),
+          logsByProject: nextLogs === list
+            ? state.logsByProject
+            : { ...state.logsByProject, [sessionId]: nextLogs },
+        }
+      })
+      return
+    }
+
     // Live token streaming: grow a single assistant entry as deltas arrive,
     // then finalize it on stream end. No final `response` is sent while
     // streaming, so this entry is the canonical message until reload.
@@ -277,8 +302,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id: `log-${++logIdCounter}`,
       timestamp: new Date().toISOString(),
       content: msg.content,
-      type: msg.type,
-      metadata: msg.metadata,
+      type: msg.type === 'skill_fallback_required' ? 'response' : msg.type,
+      metadata: msg.type === 'skill_fallback_required'
+        ? { ...msg.metadata, _skill_fallback_required: true }
+        : msg.metadata,
     }
 
     const usageUpdate = readUsageFromMetadata(msg.metadata)
@@ -365,6 +392,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return next === state.streamingBySession ? state : { streamingBySession: next }
     }),
 
+  markSessionStopping: (sessionId) =>
+    set((state) => ({
+      stoppingBySession: { ...state.stoppingBySession, [sessionId]: true },
+    })),
+
   isSessionStreaming: (sessionId) => {
     if (!sessionId) return false
     return get().streamingBySession[sessionId] ?? false
@@ -381,9 +413,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       delete updated[projectId]
       const usage = { ...state.usageBySession }
       delete usage[projectId]
+      const stopping = { ...state.stoppingBySession }
+      delete stopping[projectId]
       return {
         logsByProject: updated,
         streamingBySession: setSessionStreaming(state.streamingBySession, projectId, false),
+        stoppingBySession: stopping,
         usageBySession: usage,
       }
     }),
@@ -398,6 +433,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({
       logsByProject: {},
       streamingBySession: {},
+      stoppingBySession: {},
       usageBySession: {},
     })
   },
