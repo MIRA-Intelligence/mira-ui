@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -8,11 +8,15 @@ import { wsClient } from '@/services/websocket'
 import type { Stats } from '@/types'
 import { QueueItem } from './QueueItem'
 import { ChatItem } from './ChatItem'
+import { FolderRow } from './FolderRow'
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
+import { useOrganizationStore, type OrganizationKind } from '@/stores/organizationStore'
 
 const MODE_SWITCH_POLL_INTERVAL_MS = 1000
 const MODE_SWITCH_POLL_TIMEOUT_MS = 20000
+const ORGANIZATION_DRAG_TYPE = 'application/x-mira-organization-item'
+const UNCATEGORIZED_ID = '__uncategorized__'
 
 export function ProjectQueue() {
   const {
@@ -49,16 +53,42 @@ export function ProjectQueue() {
       )
     }
   }
-  const { chats, activeChatId, createChat, selectChat, renameChat, deleteChat } = useChatStore()
+  const { chats, activeChatId, workspaceKey, createChat, selectChat, renameChat, deleteChat } = useChatStore()
+  const { folders, assignments, loaded: organizationLoaded, createFolder, renameFolder, deleteFolder, moveItem } = useOrganizationStore()
   const isChatActive = appMode === 'normal'
 
   // Which list the rail is showing. Follows the active surface so entering a
   // chat reveals the Chats tab and selecting a project reveals Projects, while
   // still letting the user browse the other list without switching modes.
   const [tab, setTab] = useState<'chats' | 'projects'>(isChatActive ? 'chats' : 'projects')
+  const [search, setSearch] = useState('')
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [folderDraft, setFolderDraft] = useState('')
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   useEffect(() => {
     setTab(isChatActive ? 'chats' : 'projects')
   }, [isChatActive])
+
+  const collapseStorageKey = `mira:organization:collapsed:${workspaceKey}:${tab}`
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(collapseStorageKey)
+      const parsed = raw ? JSON.parse(raw) : []
+      setCollapsedFolders(new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []))
+    } catch {
+      setCollapsedFolders(new Set())
+    }
+  }, [collapseStorageKey])
+
+  const toggleFolder = (folderId: string) => {
+    setCollapsedFolders((current) => {
+      const next = new Set(current)
+      if (next.has(folderId)) next.delete(folderId)
+      else next.add(folderId)
+      try { localStorage.setItem(collapseStorageKey, JSON.stringify([...next])) } catch { /* ignore cache errors */ }
+      return next
+    })
+  }
 
   const handleSelectTask = (id: string) => {
     selectTask(id)
@@ -112,6 +142,87 @@ export function ProjectQueue() {
   const isAutoMode = mode === 'auto'
 
   const showChats = tab === 'chats'
+  const currentKind: OrganizationKind = showChats ? 'chat' : 'project'
+  const normalizedSearch = search.trim().toLocaleLowerCase()
+  const sortedFolders = useMemo(
+    () => [...folders].sort((a, b) => a.name.localeCompare(b.name)),
+    [folders],
+  )
+  const folderIds = useMemo(() => new Set(folders.map((folder) => folder.id)), [folders])
+
+  const itemMatches = (title: string) => !normalizedSearch || title.toLocaleLowerCase().includes(normalizedSearch)
+  const chatGroups = sortedFolders.map((folder) => {
+    const all = chats
+      .filter((chat) => assignments.chat[chat.id] === folder.id)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    const items = folder.name.toLocaleLowerCase().includes(normalizedSearch) ? all : all.filter((chat) => itemMatches(chat.title))
+    return { folder, items }
+  })
+  const projectGroups = sortedFolders.map((folder) => {
+    const all = tasks
+      .filter((task) => assignments.project[task.id] === folder.id)
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+    const items = folder.name.toLocaleLowerCase().includes(normalizedSearch) ? all : all.filter((task) => itemMatches(task.label))
+    return { folder, items }
+  })
+  const uncategorizedChats = chats
+    .filter((chat) => {
+      const folderId = assignments.chat[chat.id]
+      return (!folderId || !folderIds.has(folderId)) && itemMatches(chat.title)
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const uncategorizedProjects = tasks
+    .filter((task) => {
+      const folderId = assignments.project[task.id]
+      return (!folderId || !folderIds.has(folderId)) && itemMatches(task.label)
+    })
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+
+  const reportOrganizationError = (error: unknown) => {
+    const reason = error instanceof Error ? error.message : String(error)
+    pushSystemMessage(t('folderSaveFailed', lang, { reason }), { severity: 'error', ttlMs: 6000 })
+  }
+
+  const submitFolder = async () => {
+    const name = folderDraft.trim()
+    if (!name) return
+    try {
+      await createFolder(name)
+      setFolderDraft('')
+      setCreatingFolder(false)
+    } catch (error) {
+      reportOrganizationError(error)
+    }
+  }
+
+  const handleMove = async (kind: OrganizationKind, itemId: string, folderId: string | null) => {
+    if (!organizationLoaded) return
+    try {
+      await moveItem(kind, itemId, folderId)
+    } catch (error) {
+      reportOrganizationError(error)
+    }
+  }
+
+  const handleDrop = (event: React.DragEvent, folderId: string | null) => {
+    event.preventDefault()
+    try {
+      const payload = JSON.parse(event.dataTransfer.getData(ORGANIZATION_DRAG_TYPE)) as { kind?: unknown; itemId?: unknown }
+      if ((payload.kind === 'chat' || payload.kind === 'project') && typeof payload.itemId === 'string') {
+        void handleMove(payload.kind, payload.itemId, folderId)
+      }
+    } catch {
+      // Ignore drags that did not originate from an organization item.
+    }
+  }
+
+  const dragProps = (kind: OrganizationKind, itemId: string) => ({
+    draggable: true,
+    onDragStart: (event: React.DragEvent<HTMLDivElement>) => {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData(ORGANIZATION_DRAG_TYPE, JSON.stringify({ kind, itemId }))
+    },
+  })
 
   return (
     <aside className="flex flex-col h-full border-r border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
@@ -134,41 +245,130 @@ export function ProjectQueue() {
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
         </button>
+        <button
+          onClick={() => setCreatingFolder(true)}
+          disabled={!organizationLoaded}
+          className="flex w-7 shrink-0 items-center justify-center border-l border-[var(--color-border)] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-40"
+          aria-label={t('newFolder', lang)}
+          title={t('newFolder', lang)}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z" />
+            <path d="M12 10v6M9 13h6" />
+          </svg>
+        </button>
       </div>
 
       {!showChats && <QueueStatsBar stats={stats} taskCount={tasks.length} lang={lang} />}
 
+      <div className="border-b border-[var(--color-border)] p-2">
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t('searchConversationsProjects', lang)}
+          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)]"
+        />
+      </div>
+
       {/* Active list */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="flex-1 space-y-1 overflow-y-auto p-2">
+        {creatingFolder && (
+          <div className="mb-2 flex gap-1">
+            <input
+              autoFocus
+              value={folderDraft}
+              maxLength={60}
+              onChange={(event) => setFolderDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') void submitFolder()
+                if (event.key === 'Escape') { setCreatingFolder(false); setFolderDraft('') }
+              }}
+              placeholder={t('folderNamePlaceholder', lang)}
+              className="min-w-0 flex-1 rounded-md border border-[var(--color-accent)] bg-[var(--color-bg-primary)] px-2 py-1.5 text-xs outline-none"
+            />
+            <button type="button" onClick={() => void submitFolder()} className="rounded-md bg-[var(--color-accent)] px-2 text-xs text-white">
+              {t('save', lang)}
+            </button>
+          </div>
+        )}
         {showChats ? (
-          chats.length === 0 ? (
+          chats.length === 0 && !normalizedSearch ? (
             <p className="px-3 py-4 text-[11px] text-center text-[var(--color-text-muted)]">
               {t('noConversationsYet', lang)}
             </p>
           ) : (
-            chats.map((chat) => (
-              <ChatItem
-                key={chat.id}
-                chat={chat}
-                isSelected={isChatActive && chat.id === activeChatId}
-                onSelect={selectChat}
-                onRename={renameChat}
-                onDelete={deleteChat}
-              />
-            ))
+            <>
+              {chatGroups.filter(({ folder, items }) => !normalizedSearch || items.length > 0 || folder.name.toLocaleLowerCase().includes(normalizedSearch)).map(({ folder, items }) => (
+                <div key={folder.id}>
+                  <FolderRow
+                    name={folder.name}
+                    mutable={organizationLoaded}
+                    count={chats.filter((chat) => assignments.chat[chat.id] === folder.id).length}
+                    expanded={normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)}
+                    onToggle={() => toggleFolder(folder.id)}
+                    onRename={(name) => { void renameFolder(folder.id, name).catch(reportOrganizationError) }}
+                    onDelete={() => {
+                      if (window.confirm(t('deleteFolderConfirm', lang, { name: folder.name }))) {
+                        void deleteFolder(folder.id).catch(reportOrganizationError)
+                      }
+                    }}
+                    onDropItem={(event) => handleDrop(event, folder.id)}
+                  />
+                  {(normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)) && items.map((chat) => (
+                    <div key={chat.id} className="ml-3" {...dragProps('chat', chat.id)}>
+                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onSelect={selectChat} onRename={renameChat} onDelete={deleteChat} folders={sortedFolders} currentFolderId={folder.id} onMove={(id, folderId) => { void handleMove('chat', id, folderId) }} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {uncategorizedChats.length > 0 && (
+                <div>
+                  <FolderRow name={t('uncategorized', lang)} count={uncategorizedChats.length} virtual expanded={normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)} onToggle={() => toggleFolder(UNCATEGORIZED_ID)} onDropItem={(event) => handleDrop(event, null)} />
+                  {(normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)) && uncategorizedChats.map((chat) => (
+                    <div key={chat.id} className="ml-3" {...dragProps('chat', chat.id)}>
+                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onSelect={selectChat} onRename={renameChat} onDelete={deleteChat} folders={sortedFolders} currentFolderId={null} onMove={(id, folderId) => { void handleMove('chat', id, folderId) }} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )
         ) : (
-          tasks.map((task) => (
-            <QueueItem
-              key={task.id}
-              task={task}
-              isSelected={!isChatActive && task.id === selectedTaskId}
-              onSelect={handleSelectTask}
-              onRename={renameTask}
-              onDelete={handleDelete}
-              onDuplicate={duplicateTask}
-            />
-          ))
+          <>
+            {projectGroups.filter(({ folder, items }) => !normalizedSearch || items.length > 0 || folder.name.toLocaleLowerCase().includes(normalizedSearch)).map(({ folder, items }) => (
+              <div key={folder.id}>
+                <FolderRow
+                  name={folder.name}
+                  mutable={organizationLoaded}
+                  count={tasks.filter((task) => assignments.project[task.id] === folder.id).length}
+                  expanded={normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)}
+                  onToggle={() => toggleFolder(folder.id)}
+                  onRename={(name) => { void renameFolder(folder.id, name).catch(reportOrganizationError) }}
+                  onDelete={() => {
+                    if (window.confirm(t('deleteFolderConfirm', lang, { name: folder.name }))) {
+                      void deleteFolder(folder.id).catch(reportOrganizationError)
+                    }
+                  }}
+                  onDropItem={(event) => handleDrop(event, folder.id)}
+                />
+                {(normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)) && items.map((task) => (
+                  <div key={task.id} className="ml-3" {...dragProps('project', task.id)}>
+                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={sortedFolders} currentFolderId={folder.id} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
+                  </div>
+                ))}
+              </div>
+            ))}
+            {uncategorizedProjects.length > 0 && (
+              <div>
+                <FolderRow name={t('uncategorized', lang)} count={uncategorizedProjects.length} virtual expanded={normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)} onToggle={() => toggleFolder(UNCATEGORIZED_ID)} onDropItem={(event) => handleDrop(event, null)} />
+                {(normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)) && uncategorizedProjects.map((task) => (
+                  <div key={task.id} className="ml-3" {...dragProps('project', task.id)}>
+                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={sortedFolders} currentFolderId={null} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
 

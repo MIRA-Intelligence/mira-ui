@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSettingsStore, type DeploymentMode, type Theme, type Language } from '@/stores/settingsStore'
+import { useSettingsStore, type DeploymentMode, type Theme, type Language, type SendShortcut } from '@/stores/settingsStore'
 import {
   bootstrapLocalEngine,
   doctorLocalEngine,
@@ -34,6 +34,7 @@ type SettingsDraft = {
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
+  sendShortcut: SendShortcut
   receivePrereleases: boolean
 }
 
@@ -61,6 +62,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
+    sendShortcut: store.sendShortcut ?? 'enter',
     receivePrereleases: store.receivePrereleases ?? false,
   }
 }
@@ -285,6 +287,7 @@ export function SettingsModal() {
       store.setShowProgressMessages(draft.showProgressMessages)
       store.setShowToolCallHistory(draft.showToolCallHistory)
       store.setStreamResponses(draft.streamResponses)
+      store.setSendShortcut(draft.sendShortcut)
       store.setReceivePrereleases(draft.receivePrereleases)
 
       if (!local && (!nextApiUrl || !nextWsUrl)) {
@@ -632,6 +635,28 @@ export function SettingsModal() {
                 <p className="text-[11px] text-[var(--color-text-muted)] mt-1">
                   {t('streamResponsesHint', curLang)}
                 </p>
+
+                <Label text={t('sendShortcut', curLang)} className="mt-4" />
+                <div className="flex gap-2">
+                  {([
+                    { value: 'enter' as SendShortcut, label: t('enterToSend', curLang) },
+                    { value: 'shift_enter' as SendShortcut, label: t('shiftEnterToSend', curLang) },
+                  ]).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setDraft((current) => ({ ...current, sendShortcut: option.value }))}
+                      className={cn(
+                        'flex-1 py-2 text-sm rounded-lg border transition-colors',
+                        draft.sendShortcut === option.value
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                          : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
+                      )}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </Section>
 
               <AppUpdatesSection
