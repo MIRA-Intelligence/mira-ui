@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentPanel } from './AgentPanel'
@@ -7,11 +7,13 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
 const initialChatState = useChatStore.getState()
 const initialSettingsState = useSettingsStore.getState()
+const initialSkillPluginsState = useSkillPluginsStore.getState()
 
 describe('AgentPanel keyboard behavior', () => {
   beforeEach(() => {
@@ -20,6 +22,7 @@ describe('AgentPanel keyboard behavior', () => {
     useProjectStore.setState(initialProjectState, true)
     useChatStore.setState(initialChatState, true)
     useSettingsStore.setState(initialSettingsState, true)
+    useSkillPluginsStore.setState(initialSkillPluginsState, true)
 
     useSettingsStore.setState({ language: 'en' })
     useProjectStore.setState({
@@ -43,18 +46,18 @@ describe('AgentPanel keyboard behavior', () => {
     })
   })
 
-  it('keeps Enter as newline and sends on Shift+Enter', () => {
+  it('sends on Enter and keeps Shift+Enter for newline by default', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     render(<AgentPanel />)
 
-    const textarea = screen.getByPlaceholderText('Type a message...')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: 'hello world' } })
 
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
     let payloads = sendSpy.mock.calls.map((call) => call[0])
     expect(payloads.filter((p) => p?.type === 'message')).toHaveLength(0)
 
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
     expect(sendSpy).toHaveBeenCalled()
     payloads = sendSpy.mock.calls.map((call) => call[0])
     expect(payloads).toEqual(
@@ -68,6 +71,91 @@ describe('AgentPanel keyboard behavior', () => {
     )
     expect((textarea as HTMLTextAreaElement).value).toBe('')
     expect(screen.getByText('Mira is thinking...')).toBeInTheDocument()
+  })
+
+  it('starts at button height and exposes an upward resize handle', () => {
+    render(<AgentPanel />)
+
+    const textarea = screen.getByRole('textbox')
+    expect(textarea).toHaveClass('h-10', 'min-h-10')
+    expect(textarea).toHaveAttribute('rows', '1')
+    expect(screen.getByRole('button', { name: 'Drag upward to expand the input' })).toHaveClass('cursor-ns-resize')
+  })
+
+  it('supports the legacy Shift+Enter send shortcut', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useSettingsStore.setState({ sendShortcut: 'shift_enter' })
+    render(<AgentPanel />)
+
+    const textarea = screen.getByRole('textbox')
+    fireEvent.change(textarea, { target: { value: 'legacy shortcut' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
+    expect(sendSpy.mock.calls.filter(([payload]) => payload.type === 'message')).toHaveLength(0)
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'message',
+      content: 'legacy shortcut',
+    }))
+  })
+
+  it('sends an explicit stop control message and waits for acknowledgement', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'stop',
+      session_id: 'PRJ-0001',
+      request_id: expect.any(String),
+    }))
+    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled()
+
+    act(() => {
+      useAgentStore.getState().handleWsMessage({
+        type: 'stop_ack',
+        session_id: 'PRJ-0001',
+        content: 'Stopped 1 task(s).',
+      })
+    })
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
+  })
+
+  it('sends selected Skills as structured message metadata', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useSkillPluginsStore.setState({
+      load: vi.fn(async () => {}),
+      plugins: [{
+        id: 'custom',
+        name: 'Custom',
+        version: '1',
+        description: '',
+        install_path: '/skills',
+        source: { type: 'directory', path: '/skills' },
+        enabled: { global: true, project: null, effective: true },
+        groups: [],
+        skills: [{
+          id: 'mrstation',
+          name: 'mrstation',
+          path: '/skills/mrstation/SKILL.md',
+          group_ids: [],
+          enabled: { global: true, project: null, effective: true },
+        }],
+      }],
+    })
+    render(<AgentPanel />)
+
+    fireEvent.click(screen.getByRole('button', { name: '$ Skill' }))
+    fireEvent.click(screen.getByRole('button', { name: '$mrstation' }))
+    const textarea = screen.getByRole('textbox')
+    fireEvent.change(textarea, { target: { value: 'analyze this dataset' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'message',
+      selected_skill_ids: ['mrstation'],
+      turn_id: expect.any(String),
+    }))
   })
 
   it('shows the current tool call in the working indicator while streaming', () => {
@@ -189,9 +277,9 @@ describe('AgentPanel keyboard behavior', () => {
 
     render(<AgentPanel />)
 
-    const textarea = screen.getByPlaceholderText('Type a message...')
+    const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: 'general question' } })
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
 
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
       type: 'message',

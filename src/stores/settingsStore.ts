@@ -6,6 +6,7 @@ export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 export type DeploymentMode = 'localBundle' | 'remoteManual'
+export type SendShortcut = 'enter' | 'shift_enter'
 
 export interface EngineProfile {
   key: string
@@ -61,6 +62,7 @@ interface SettingsState {
   showToolCallHistory: boolean
   // Stream assistant replies token-by-token. Default on for responsiveness.
   streamResponses: boolean
+  sendShortcut: SendShortcut
   // Opt-in: when true, the auto-update check considers prereleases (rcN /
   // betaN) alongside stable releases. Defaults to false so casual users only
   // see ".0" upgrades.
@@ -91,6 +93,7 @@ interface SettingsState {
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
   setStreamResponses: (v: boolean) => void
+  setSendShortcut: (v: SendShortcut) => void
   setReceivePrereleases: (v: boolean) => void
   setEngineBootstrap: (payload: {
     status: EngineStatus
@@ -343,6 +346,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.streamResponses === 'boolean') {
       sanitized.streamResponses = parsed.streamResponses
     }
+    if (parsed.sendShortcut === 'enter' || parsed.sendShortcut === 'shift_enter') {
+      sanitized.sendShortcut = parsed.sendShortcut
+    }
     if (typeof parsed.receivePrereleases === 'boolean') {
       sanitized.receivePrereleases = parsed.receivePrereleases
     }
@@ -367,6 +373,7 @@ function persist(state: SettingsState) {
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
+    sendShortcut,
     receivePrereleases,
   } = state
   const profiles = profilesWithCurrent(state)
@@ -382,6 +389,7 @@ function persist(state: SettingsState) {
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
+    sendShortcut,
     receivePrereleases,
   }))
 }
@@ -419,6 +427,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
+  sendShortcut: saved.sendShortcut ?? 'enter',
   receivePrereleases: saved.receivePrereleases ?? false,
   settingsOpen: false,
   engineStatus: 'unknown',
@@ -552,6 +561,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
   setStreamResponses: (v) => { set({ streamResponses: v }); persist(get()) },
+  setSendShortcut: (v) => { set({ sendShortcut: v }); persist(get()) },
   setReceivePrereleases: (v) => { set({ receivePrereleases: v }); persist(get()) },
   setEngineBootstrap: ({ status, message, version, uptimeSeconds }) => {
     const nextVersion = version ?? null

@@ -8,6 +8,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
+import { useOrganizationStore } from '@/stores/organizationStore'
 import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 
@@ -26,10 +27,19 @@ async function syncOnConnect() {
     if (workspacePath.trim() !== nextWorkspacePath.trim()) {
       useAgentStore.getState().resetWorkspaceState()
       useProjectStore.getState().resetWorkspaceState()
+      useOrganizationStore.getState().reset()
     }
     // Load the Quick Chat thread index for this workspace (no-op if already
     // loaded for the same workspace, preserving the active chat on reconnect).
     useChatStore.getState().loadForWorkspace(nextWorkspacePath.trim())
+    const cachedChats = useChatStore.getState().chats.map((chat) => ({
+      id: chat.id,
+      title: chat.title,
+      created_at: new Date(chat.createdAt).toISOString(),
+      updated_at: new Date(chat.updatedAt).toISOString(),
+    }))
+    const organization = await useOrganizationStore.getState().load(cachedChats, nextWorkspacePath.trim())
+    if (organization) useChatStore.getState().replaceFromRemote(organization.chats)
     setRuntimeConfig(payload)
     setRuntimeConfigLoaded(true)
     setRuntimeConfigError(null)

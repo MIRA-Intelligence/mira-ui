@@ -126,6 +126,94 @@ export interface RemoteProject {
   has_meta?: boolean
 }
 
+export interface OrganizationFolder {
+  id: string
+  name: string
+  created_at: string
+  updated_at: string
+}
+
+export interface RemoteChat {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface OrganizationSnapshot {
+  schema_version: number
+  folders: OrganizationFolder[]
+  chats: RemoteChat[]
+  assignments: {
+    chat: Record<string, string>
+    project: Record<string, string>
+  }
+}
+
+async function organizationRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(`${getApiUrl()}/organization${path}`, init)
+  if (!resp.ok) {
+    let message = await resp.text()
+    try {
+      const parsed = JSON.parse(message) as { error?: unknown }
+      if (typeof parsed.error === 'string') message = parsed.error
+    } catch {
+      // Keep the response body as the error message.
+    }
+    throw new Error(message || `organization request failed (${resp.status})`)
+  }
+  return await resp.json() as T
+}
+
+const jsonInit = (method: string, body?: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+})
+
+export async function fetchOrganization(): Promise<OrganizationSnapshot> {
+  return organizationRequest<OrganizationSnapshot>('')
+}
+
+export async function importOrganizationChats(chats: RemoteChat[]): Promise<RemoteChat[]> {
+  const result = await organizationRequest<{ chats: RemoteChat[] }>('/chats/import', jsonInit('POST', { chats }))
+  return result.chats
+}
+
+export async function createOrganizationFolder(name: string): Promise<OrganizationFolder> {
+  return organizationRequest<OrganizationFolder>('/folders', jsonInit('POST', { name }))
+}
+
+export async function renameOrganizationFolder(folderId: string, name: string): Promise<OrganizationFolder> {
+  return organizationRequest<OrganizationFolder>(`/folders/${encodeURIComponent(folderId)}`, jsonInit('PATCH', { name }))
+}
+
+export async function deleteOrganizationFolder(folderId: string): Promise<void> {
+  await organizationRequest(`/folders/${encodeURIComponent(folderId)}`, { method: 'DELETE' })
+}
+
+export async function assignOrganizationFolder(
+  kind: 'chat' | 'project',
+  itemId: string,
+  folderId: string | null,
+): Promise<void> {
+  await organizationRequest(
+    `/items/${kind}/${encodeURIComponent(itemId)}/folder`,
+    jsonInit('PATCH', { folder_id: folderId }),
+  )
+}
+
+export async function updateOrganizationChat(
+  chatId: string,
+  payload: { title?: string; touch?: boolean },
+): Promise<RemoteChat> {
+  return organizationRequest<RemoteChat>(`/chats/${encodeURIComponent(chatId)}`, jsonInit('PATCH', payload))
+}
+
+export async function deleteOrganizationChat(chatId: string): Promise<void> {
+  await organizationRequest(`/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
+}
+
 export async function createRemoteProject(payload: {
   projectId?: string
   displayName?: string

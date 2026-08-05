@@ -57,6 +57,7 @@ describe('settingsStore', () => {
     expect(state.theme).toBe('light')
     expect(state.showToolCallHistory).toBe(false)
     expect(state.receivePrereleases).toBe(false)
+    expect(state.sendShortcut).toBe('enter')
   })
 
   it('persists user setting changes to local storage', () => {
@@ -65,11 +66,13 @@ describe('settingsStore', () => {
     store.setTheme('dark')
     store.setShowToolCallHistory(true)
     store.setReceivePrereleases(true)
+    store.setSendShortcut('shift_enter')
 
     const persisted = JSON.parse(localStorage.getItem('mira-ui-settings') ?? '{}')
     expect(persisted.theme).toBe('dark')
     expect(persisted.showToolCallHistory).toBe(true)
     expect(persisted.receivePrereleases).toBe(true)
+    expect(persisted.sendShortcut).toBe('shift_enter')
   })
 
   it('switches to local bundle mode with fixed localhost endpoints', () => {

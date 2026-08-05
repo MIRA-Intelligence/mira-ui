@@ -366,7 +366,7 @@ export interface NewProjectInput {
 /* ── WebSocket protocol ─────────────────────────── */
 
 export interface WsMessage {
-  type: 'message' | 'command' | 'set_mode' | 'bind' | 'plan_answer' | 'plan_decision'
+  type: 'message' | 'command' | 'set_mode' | 'bind' | 'plan_answer' | 'plan_decision' | 'stop' | 'skill_fallback_response'
   content: string
   session_id: string
   user_id?: string
@@ -379,6 +379,10 @@ export interface WsMessage {
   allow_result_write?: boolean
   // Opt-in token streaming for this message (defaults on in the UI).
   stream?: boolean
+  turn_id?: string
+  request_id?: string
+  selected_skill_ids?: string[]
+  approved?: boolean
   // Interactive plan-mode payloads.
   answers?: Record<string, string | string[]>
   decision?: 'approve' | 'revise'
@@ -386,7 +390,7 @@ export interface WsMessage {
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required'
   session_id?: string
   content: string
   media?: string[]

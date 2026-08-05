@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { newChatSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
+import {
+  deleteOrganizationChat,
+  importOrganizationChats,
+  updateOrganizationChat,
+  type RemoteChat,
+} from '@/services/api'
 
 /**
  * A lightweight Quick Chat conversation (basic loop). Unlike a research
@@ -61,6 +67,7 @@ interface ChatState {
   workspaceKey: string
 
   loadForWorkspace: (workspaceKey: string) => void
+  replaceFromRemote: (chats: RemoteChat[]) => void
   createChat: () => string
   selectChat: (id: string) => void
   renameChat: (id: string, title: string) => void
@@ -79,6 +86,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ workspaceKey, chats: readChats(workspaceKey), activeChatId: null })
   },
 
+  replaceFromRemote: (remoteChats) => {
+    set((state) => {
+      const chats = remoteChats
+        .map((chat): ChatThread => ({
+          id: chat.id,
+          title: chat.title,
+          createdAt: Date.parse(chat.created_at) || Date.now(),
+          updatedAt: Date.parse(chat.updated_at) || Date.now(),
+        }))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+      writeChats(state.workspaceKey, chats)
+      const activeChatId = state.activeChatId && chats.some((chat) => chat.id === state.activeChatId)
+        ? state.activeChatId
+        : null
+      return { chats, activeChatId }
+    })
+  },
+
   createChat: () => {
     const id = newChatSessionId()
     const now = Date.now()
@@ -88,6 +113,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       writeChats(s.workspaceKey, chats)
       return { chats, activeChatId: id }
     })
+    void importOrganizationChats([{
+      id,
+      title: '',
+      created_at: new Date(now).toISOString(),
+      updated_at: new Date(now).toISOString(),
+    }]).catch(() => {})
     useProjectStore.getState().setAppMode('normal')
     return id
   },
@@ -105,11 +136,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       writeChats(s.workspaceKey, chats)
       return { chats }
     })
+    void updateOrganizationChat(id, { title: next }).catch(() => {})
   },
 
   // Bump updatedAt and, for an untitled thread, seed a title from the first
   // message so the queue shows something meaningful.
   touchChat: (id, fallbackTitle) => {
+    const previous = get().chats.find((chat) => chat.id === id)
     set((s) => {
       let changed = false
       const chats = s.chats.map((c) => {
@@ -122,12 +155,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       writeChats(s.workspaceKey, chats)
       return { chats }
     })
+    if (previous) {
+      void updateOrganizationChat(id, {
+        ...(!previous.title && fallbackTitle ? { title: fallbackTitle.trim().slice(0, TITLE_MAX_CHARS) } : {}),
+        touch: true,
+      }).catch(() => {})
+    }
   },
 
   // Remove without touching app mode (used when promoting a chat to a project,
   // where createProject already switches into project mode).
   removeChat: (id) => {
     void clearChatLogs(id)
+    void deleteOrganizationChat(id).catch(() => {})
     set((s) => {
       const chats = s.chats.filter((c) => c.id !== id)
       writeChats(s.workspaceKey, chats)
@@ -138,6 +178,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   deleteChat: (id) => {
     const wasActive = get().activeChatId === id
     void clearChatLogs(id)
+    void deleteOrganizationChat(id).catch(() => {})
     set((s) => {
       const chats = s.chats.filter((c) => c.id !== id)
       writeChats(s.workspaceKey, chats)
