@@ -7,9 +7,17 @@ AI Agent UI for medical agent workflows, built with React, TypeScript, Vite, Tai
 - Desktop-first interface using Electron (`electron-vite` + secure preload)
 - Web-first React app that can also run in browser
 - Collapsible multi-panel layout for projects, tasks, and agent logs
+- Shared folders for chats and projects, with search, drag-and-drop organization, and an Uncategorized fallback
+- Per-message Skill selection with an explicit approval step when Mira proposes a fallback
+- Configurable Enter or Shift+Enter sending, a resizable message composer, and acknowledged task cancellation
 - Real-time communication setup ready for WebSocket/REST API backends
 - Zustand state management and lightweight component architecture
 - Responsive layouts and shared design tokens for easy UI iterations
+
+## Documentation
+
+- [Original development plan and architecture notes](plan.md)
+- [GitHub and CNB synchronization runbook](docs/cnb-github-sync.md)
 
 ## Contributing / CLA
 
