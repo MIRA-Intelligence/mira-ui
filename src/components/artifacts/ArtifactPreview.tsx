@@ -4,8 +4,11 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
 
 import { CsvTable } from './CsvTable'
+import { DocxBody } from './DocxBody'
 import { ImageLightbox } from './ImageLightbox'
 import { JsonView } from './JsonView'
+import { PptxBody } from './PptxBody'
+import { SpreadsheetBody } from './SpreadsheetBody'
 import { TextView } from './TextView'
 import { detectArtifactKind, iconForKind, type ArtifactKind } from './detectKind'
 
@@ -18,6 +21,9 @@ interface ArtifactPreviewProps {
   disabledReason?: string
   // Default is the basename of `path`, displayed in the row label.
   label?: string
+  // Dedicated preview surfaces already provide their own title and actions.
+  // Render the file body immediately instead of adding another disclosure row.
+  bodyOnly?: boolean
 }
 
 const KINDS_WITH_INLINE_BODY: ReadonlyArray<ArtifactKind> = [
@@ -29,6 +35,10 @@ const KINDS_WITH_INLINE_BODY: ReadonlyArray<ArtifactKind> = [
   'text',
   'audio',
   'video',
+  'pdf',
+  'docx',
+  'xlsx',
+  'pptx',
 ]
 
 const TEXT_LIKE: ReadonlyArray<ArtifactKind> = ['json', 'csv', 'tsv', 'markdown', 'text']
@@ -37,7 +47,14 @@ const TEXT_LIKE: ReadonlyArray<ArtifactKind> = ['json', 'csv', 'tsv', 'markdown'
 // still get a "Download to view" affordance.
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 
-export function ArtifactPreview({ path, url, enabled = true, disabledReason, label }: ArtifactPreviewProps) {
+export function ArtifactPreview({
+  path,
+  url,
+  enabled = true,
+  disabledReason,
+  label,
+  bodyOnly = false,
+}: ArtifactPreviewProps) {
   const lang = useSettingsStore((s) => s.language)
   const kind = detectArtifactKind(path)
   const expandable = enabled && KINDS_WITH_INLINE_BODY.includes(kind)
@@ -61,6 +78,33 @@ export function ArtifactPreview({ path, url, enabled = true, disabledReason, lab
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+  }
+
+  const previewBody = enabled && (
+    <PreviewBody
+      kind={kind}
+      path={path}
+      url={url}
+      prominent={bodyOnly}
+      onOpenLightbox={() => setLightboxOpen(true)}
+    />
+  )
+
+  if (bodyOnly) {
+    return (
+      <div className="h-full min-h-0">
+        {previewBody}
+        {lightboxOpen && enabled && (
+          <ImageLightbox
+            src={url}
+            alt={display}
+            onClose={() => setLightboxOpen(false)}
+            onOpenOriginal={handleOpenOriginal}
+            onDownload={handleDownload}
+          />
+        )}
+      </div>
+    )
   }
 
   return (
@@ -107,12 +151,7 @@ export function ArtifactPreview({ path, url, enabled = true, disabledReason, lab
 
       {expanded && enabled && (
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2">
-          <PreviewBody
-            kind={kind}
-            path={path}
-            url={url}
-            onOpenLightbox={() => setLightboxOpen(true)}
-          />
+          {previewBody}
         </div>
       )}
 
@@ -133,11 +172,13 @@ function PreviewBody({
   kind,
   path,
   url,
+  prominent = false,
   onOpenLightbox,
 }: {
   kind: ArtifactKind
   path: string
   url: string
+  prominent?: boolean
   onOpenLightbox: () => void
 }) {
   const lang = useSettingsStore((s) => s.language)
@@ -147,14 +188,18 @@ function PreviewBody({
       <button
         type="button"
         onClick={onOpenLightbox}
-        className="block group"
+        className={prominent ? 'group flex h-full w-full items-center justify-center' : 'block group'}
         title={t('viewImageFullSize', lang)}
       >
         <img
           src={url}
           alt={path}
           loading="lazy"
-          className="max-h-[360px] w-auto rounded-md border border-[var(--color-border)] group-hover:opacity-95 transition-opacity"
+          className={
+            prominent
+              ? 'max-h-full max-w-full object-contain rounded-md group-hover:opacity-95 transition-opacity'
+              : 'max-h-[360px] w-auto rounded-md border border-[var(--color-border)] group-hover:opacity-95 transition-opacity'
+          }
         />
       </button>
     )
@@ -172,6 +217,29 @@ function PreviewBody({
         preload="metadata"
       />
     )
+  }
+
+  if (kind === 'pdf') {
+    return (
+      <iframe
+        src={url}
+        title={path}
+        className={
+          prominent
+            ? 'h-full w-full rounded-md border-0 bg-white'
+            : 'h-[480px] w-full rounded-md border border-[var(--color-border)] bg-white'
+        }
+      />
+    )
+  }
+  if (kind === 'docx') {
+    return <DocxBody url={url} prominent={prominent} />
+  }
+  if (kind === 'xlsx') {
+    return <SpreadsheetBody url={url} prominent={prominent} />
+  }
+  if (kind === 'pptx') {
+    return <PptxBody url={url} prominent={prominent} />
   }
 
   if (TEXT_LIKE.includes(kind)) {

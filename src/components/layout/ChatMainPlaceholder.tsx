@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { ArtifactPreview } from '@/components/artifacts'
+import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
 import { getProjectArtifactUrl } from '@/services/api'
 import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -94,6 +95,7 @@ export function ChatMainPlaceholder() {
             url={getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)}
             enabled
             label={previewFile.name}
+            bodyOnly={isPreviewableInline(detectArtifactKind(previewFile.relativePath))}
           />
         </div>
       </div>

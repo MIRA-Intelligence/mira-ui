@@ -13,6 +13,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { ArtifactPreview } from '@/components/artifacts'
+import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
 
 interface FileTreeNode {
   name: string
@@ -239,8 +240,14 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
           onClick={() => {
             if (node.isDir) toggleNode(node.path)
             else if (entry) {
-              if (isProjectMode) setSelectedFile(entry)
-              else setChatCenterPreviewFile(entry)
+              if (isProjectMode) {
+                setSelectedFile(entry)
+                if (isPreviewableInline(detectArtifactKind(entry.relativePath))) {
+                  setPreviewFile(entry)
+                }
+              } else {
+                setChatCenterPreviewFile(entry)
+              }
             }
           }}
           className={cn(
@@ -305,6 +312,24 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
       hour: '2-digit',
       minute: '2-digit',
     })
+  }
+
+  const openOriginal = (file: ProjectFileEntry) => {
+    window.open(
+      getProjectArtifactUrl(file.projectId, file.relativePath),
+      '_blank',
+      'noopener,noreferrer',
+    )
+  }
+
+  const downloadFile = (file: ProjectFileEntry) => {
+    const link = document.createElement('a')
+    link.href = getProjectArtifactUrl(file.projectId, file.relativePath)
+    link.download = file.name
+    link.rel = 'noopener noreferrer'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const emptyState = () => {
@@ -488,13 +513,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
             <button
               type="button"
               onClick={() => {
-                const url = getProjectArtifactUrl(selectedFile.projectId, selectedFile.relativePath)
-                const link = document.createElement('a')
-                link.href = url
-                link.download = selectedFile.name
-                document.body.appendChild(link)
-                link.click()
-                document.body.removeChild(link)
+                downloadFile(selectedFile)
               }}
               className="p-1 rounded border text-xs"
               title={t('downloadArtifact', lang)}
@@ -510,16 +529,42 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
           <div className="relative w-full max-w-4xl h-[85vh] flex flex-col rounded-xl border bg-[var(--color-bg-primary)] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
               <span className="text-sm font-semibold truncate">{previewFile.name}</span>
-              <button type="button" onClick={() => setPreviewFile(null)} className="px-2">
-                ✕
-              </button>
+              <div className="ml-3 flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => openOriginal(previewFile)}
+                  className="p-1.5 rounded hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]"
+                  title={t('openOriginalArtifact', lang)}
+                  aria-label={t('openOriginalArtifact', lang)}
+                >
+                  ↗
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadFile(previewFile)}
+                  className="p-1.5 rounded hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]"
+                  title={t('downloadArtifact', lang)}
+                  aria-label={t('downloadArtifact', lang)}
+                >
+                  ⬇
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFile(null)}
+                  className="p-1.5 rounded hover:bg-[var(--color-bg-hover)]"
+                  aria-label={t('chatCenterPreviewClose', lang)}
+                >
+                  ✕
+                </button>
+              </div>
             </div>
-            <div className="flex-1 overflow-auto p-4">
+            <div className="flex-1 min-h-0 overflow-auto p-4">
               <ArtifactPreview
                 path={previewFile.relativePath}
                 url={getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)}
                 enabled
                 label={previewFile.name}
+                bodyOnly
               />
             </div>
           </div>
