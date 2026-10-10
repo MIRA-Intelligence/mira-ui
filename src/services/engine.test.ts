@@ -368,7 +368,7 @@ describe('probeEngineCompatibility', () => {
       }
       if (url === 'http://127.0.0.1:5173/api/version') {
         return new Response(
-          JSON.stringify({ agent_version: '0.3.2', api_contract: 'v1' }),
+          JSON.stringify({ agent_version: compatibleEngineVersion, api_contract: 'v1' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
