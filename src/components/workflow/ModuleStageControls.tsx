@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { JournalTargetSelect } from './JournalTargetSelect'
+import { journalSelection, type JournalProfile } from '@/services/journals'
 
 import { t } from '@/i18n'
 import {
@@ -54,9 +56,10 @@ function startPromptFor(
   moduleType: WorkflowModuleType,
   intent: string,
   deliveryFormat: ExportFormat | null,
+  targetJournal?: string,
 ): string {
   if (moduleType !== 'delivery' || !deliveryFormat) return intent
-  return `${intent}\n\n${buildExportMessage(task, deliveryFormat, { workflow: true })}`
+  return `${intent}\n\n${buildExportMessage(task, deliveryFormat, { workflow: true, targetJournal })}`
 }
 
 export function ModuleStageControls() {
@@ -123,6 +126,7 @@ export function ModuleStageControls() {
   const [targetModule, setTargetModule] = useState<WorkflowModuleType | null>(null)
   const [intent, setIntent] = useState('')
   const [deliveryFormat, setDeliveryFormat] = useState<ExportFormat | null>(null)
+  const [targetJournal, setTargetJournal] = useState<JournalProfile | null>(null)
   const [experimentMode, setExperimentMode] = useState<'auto' | 'manual'>('auto')
   const [inputPaths, setInputPaths] = useState<string[]>([''])
   const [inputPathsValid, setInputPathsValid] = useState(true)
@@ -209,6 +213,7 @@ export function ModuleStageControls() {
       moduleData.delivery_format = deliveryFormat
       moduleData.output_path = config.outputPath
       moduleData.output_type = config.outputType
+      if (deliveryFormat === 'paper_article') Object.assign(moduleData, journalSelection(targetJournal))
     }
     setPending(true)
     setError(null)
@@ -221,7 +226,7 @@ export function ModuleStageControls() {
           : selectedRun.outputs,
         parentRunId: selectedCandidate?.runId ?? selectedRun.run_id,
       })
-      const prompt = startPromptFor(task, targetModule, normalizedIntent, deliveryFormat)
+      const prompt = startPromptFor(task, targetModule, normalizedIntent, deliveryFormat, targetJournal?.id)
       const conversationId = `${projectId}:run:${runId}`
       useAgentStore.getState().addLog(conversationId, {
         id: `module-start-${Date.now()}`,
@@ -459,6 +464,7 @@ export function ModuleStageControls() {
                     )
                   })}
                 </div>
+                {deliveryFormat === 'paper_article' && <JournalTargetSelect value={targetJournal} onChange={setTargetJournal} disabled={pending} />}
               </fieldset>
             )}
 

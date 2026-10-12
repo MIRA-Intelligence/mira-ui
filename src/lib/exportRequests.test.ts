@@ -17,6 +17,14 @@ const task: ProjectTask = {
 }
 
 describe('buildExportMessage', () => {
+  it('uses selected journal headings instead of the generic article structure', () => {
+    const message = buildExportMessage(task, 'paper_article', { workflow: true, targetJournal: 'radiology' })
+    expect(message).toContain('Target journal profile: radiology')
+    expect(message).not.toContain('Write it in a regular journal article structure')
+    expect(message).not.toContain('Verify the document contains Introduction')
+    expect(message).toContain('Do not fabricate citations')
+    expect(buildExportMessage(task, 'presentation', { targetJournal: 'radiology' })).not.toContain('Target journal profile')
+  })
   it.each(['experiment_report', 'paper_article', 'presentation', 'metadata'] as const)(
     'scopes native %s delivery to the selected experiment without legacy plan writes', (format) => {
       const message = buildExportMessage(task, format, { workflow: true })

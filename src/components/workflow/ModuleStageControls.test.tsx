@@ -1,5 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fetchJournalProfiles } from '@/services/journals'
+import { journalFixture } from '@/test/journalFixtures'
+
+vi.mock('@/services/journals', async (original) => ({ ...await original<typeof import('@/services/journals')>(), fetchJournalProfiles: vi.fn().mockResolvedValue([]) }))
 
 vi.mock('@/services/api', () => ({
   commandWorkflowProject: vi.fn(),
@@ -156,7 +160,8 @@ describe('ModuleStageControls', () => {
     })))
   })
 
-  it('continues to Delivery inside the module page with one of the four legacy formats', async () => {
+  it.each([false, true])('continues to Delivery with journal selection=%s', async (selectJournal) => {
+    vi.mocked(fetchJournalProfiles).mockResolvedValue([journalFixture])
     const run = makeRun({ module_type: 'experiment' })
     const snapshot = makeSnapshot(run)
     useProjectStore.setState({ activeStage: 'experiment' })
@@ -185,6 +190,10 @@ describe('ModuleStageControls', () => {
       target: { value: 'Prepare the manuscript for journal submission' },
     })
     fireEvent.click(screen.getByRole('button', { name: /Journal Article/ }))
+    if (selectJournal) {
+      await waitFor(() => expect(screen.getByLabelText('Target journal')).toBeEnabled())
+      fireEvent.change(screen.getByLabelText('Target journal'), { target: { value: 'mrm' } })
+    }
     fireEvent.click(screen.getByRole('button', { name: 'Create branch and start' }))
 
     await waitFor(() => {
@@ -196,6 +205,7 @@ describe('ModuleStageControls', () => {
           confirmation_policy: { mode: 'required' },
           delivery_format: 'paper_article',
           intent: 'Prepare the manuscript for journal submission',
+          ...(selectJournal ? { target_journal: 'mrm', journal_profile_version: '2026-10-12' } : {}),
           output_path: 'result/exports/journal_article.docx',
           output_type: 'article_docx',
           parent_run_id: 'source-run',

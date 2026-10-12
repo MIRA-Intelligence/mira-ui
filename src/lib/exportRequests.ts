@@ -89,8 +89,9 @@ export function getExportConfig(format: ExportFormat): Readonly<ExportConfig> {
   return EXPORT_CONFIG[format]
 }
 
-export function buildExportMessage(task: ProjectTask, format: ExportFormat, options?: { workflow?: boolean }): string {
+export function buildExportMessage(task: ProjectTask, format: ExportFormat, options?: { workflow?: boolean; targetJournal?: string }): string {
   const cfg = EXPORT_CONFIG[format]
+  const journalSpecific = format === 'paper_article' && !!options?.targetJournal
   const lines = [
     `Manual export request for ${task.id}.`,
     '',
@@ -107,10 +108,15 @@ export function buildExportMessage(task: ProjectTask, format: ExportFormat, opti
   }
 
   lines.push('', 'Requirements:')
+  if (journalSpecific) {
+    lines.push(`- Target journal profile: ${options!.targetJournal}. Use the engine's journal-specific system instructions and article type; override the generic outline, not the evidence or approval safeguards.`)
+    lines.push('- Treat editable DOCX as the requested manuscript draft. Report any additional submission files and formatting checks in the same deliverable, not as separate candidates.')
+  }
   if (options?.workflow) {
     lines.push('- Use configuration.selected_experiment, when present, as the experiment scope. Shared attachments may contain other experiments; do not include those as selected results or execute experiments again.')
   }
   for (const requirement of cfg.requirements) {
+    if (journalSpecific && requirement.startsWith('Write it in a regular journal article structure')) continue
     lines.push(`- ${options?.workflow
       ? requirement.replace(/task_plan\.json/g, 'the selected workflow record')
       : requirement}`)
@@ -118,6 +124,10 @@ export function buildExportMessage(task: ProjectTask, format: ExportFormat, opti
 
   lines.push('', 'Verification:')
   for (const check of cfg.verification) {
+    if (journalSpecific && check.startsWith('Verify the document contains Introduction')) {
+      lines.push('- Verify headings and abstract structure against the selected journal profile; do not force an extra Conclusion heading.')
+      continue
+    }
     lines.push(`- ${check}`)
   }
 

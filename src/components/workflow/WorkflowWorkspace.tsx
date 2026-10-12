@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react'
+import { JournalTargetSelect } from './JournalTargetSelect'
+import { journalSelection, type JournalProfile } from '@/services/journals'
 
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -290,6 +292,7 @@ export function WorkflowWorkspace() {
   const [maxExperiments, setMaxExperiments] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
   const [deliveryFormat, setDeliveryFormat] = useState<ExportFormat | null>(null)
+  const [targetJournal, setTargetJournal] = useState<JournalProfile | null>(null)
   const [experimentMode, setExperimentMode] = useState<'auto' | 'manual'>('auto')
   const [inputPaths, setInputPaths] = useState<string[]>([''])
   const [inputPathsValid, setInputPathsValid] = useState(true)
@@ -493,6 +496,7 @@ export function WorkflowWorkspace() {
       }
       const config = getExportConfig(deliveryFormat)
       moduleData.delivery_format = deliveryFormat
+      if (deliveryFormat === 'paper_article') Object.assign(moduleData, journalSelection(targetJournal))
       moduleData.output_path = config.outputPath
       moduleData.output_type = config.outputType
     }
@@ -521,7 +525,7 @@ export function WorkflowWorkspace() {
         lang,
       )
       const startPrompt = moduleType === 'delivery' && deliveryFormat && task
-        ? `${intent}\n\n${buildExportMessage(task, deliveryFormat, { workflow: true })}`
+        ? `${intent}\n\n${buildExportMessage(task, deliveryFormat, { workflow: true, targetJournal: targetJournal?.id })}`
         : buildModuleStartPrompt(moduleType, intent, moduleData, promptLanguage)
       useAgentStore.getState().addLog(conversationId, {
         id: `module-start-${Date.now()}`,
@@ -885,6 +889,7 @@ export function WorkflowWorkspace() {
                       )
                     })}
                   </div>
+                  {deliveryFormat === 'paper_article' && <JournalTargetSelect value={targetJournal} onChange={setTargetJournal} disabled={creating !== null} />}
                 </fieldset>
               )}
 
