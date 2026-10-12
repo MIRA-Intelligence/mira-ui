@@ -5,6 +5,7 @@ import type {
   ContractVersion,
   LogEntry,
   SkillPlugin,
+  SkillLoadEvent,
   SkillPluginScope,
   SkillPluginTargetType,
   TaskPlanContract,
@@ -332,6 +333,13 @@ export async function fetchSessionHistory(sessionId: string, workflowRunId?: str
   } catch {
     return []
   }
+}
+
+export async function fetchSkillHistory(sessionId: string, cursor?: number): Promise<{ events: SkillLoadEvent[]; next_cursor: number | null }> {
+  const query = cursor === undefined ? '' : `?cursor=${cursor}`
+  const response = await fetch(`${getApiUrl()}/sessions/${encodeURIComponent(sessionId)}/skills${query}`)
+  if (!response.ok) throw new Error(response.status === 404 ? 'unsupported' : 'unavailable')
+  return response.json()
 }
 
 export interface DeleteProjectResult {

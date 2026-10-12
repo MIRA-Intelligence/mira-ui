@@ -5,6 +5,8 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore, type SystemMessageSeverity } from '@/stores/uiStore'
 import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { useChatStore } from '@/stores/chatStore'
+import { SkillHistoryChip } from './SkillHistoryChip'
 
 const SYSTEM_MESSAGE_TICK_MS = 500
 
@@ -19,6 +21,11 @@ export function StatusBar() {
   const runtimeConfig = useSettingsStore((s) => s.runtimeConfig)
   const connected = useAgentStore((s) => s.connected)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
+  const appMode = useProjectStore((s) => s.appMode)
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const skillSessionId = appMode === 'normal' ? activeChatId : selectedTaskId
+  const workspace = useSettingsStore((s) => s.workspacePath)
+  const apiUrl = useSettingsStore((s) => s.apiUrl)
   const usage = useAgentStore((s) =>
     selectedTaskId ? s.usageBySession[selectedTaskId] ?? null : null,
   )
@@ -51,6 +58,7 @@ export function StatusBar() {
         </div>
       )}
       <div className="flex items-stretch h-[22px] px-3 gap-2 text-[11px] text-[var(--color-text-muted)]">
+        {skillSessionId && <SkillHistoryChip key={`${apiUrl}:${workspace}:${skillSessionId}`} sessionId={skillSessionId} />}
         <SystemMessageSlot />
 
         <div className="flex items-stretch gap-0.5 shrink-0">

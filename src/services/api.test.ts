@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteProject, uploadProjectFiles } from './api'
+import { deleteProject, fetchSkillHistory, uploadProjectFiles } from './api'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialSettingsState = useSettingsStore.getState()
+
+describe('fetchSkillHistory', () => {
+  it('encodes the session and forwards the pagination cursor', async () => {
+    useSettingsStore.setState({ apiUrl: 'http://agent.local/api' })
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [], next_cursor: null })))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await fetchSkillHistory('chat:a/b', 12)).toEqual({ events: [], next_cursor: null })
+    expect(fetchMock).toHaveBeenCalledWith('http://agent.local/api/sessions/chat%3Aa%2Fb/skills?cursor=12')
+  })
+})
 
 describe('uploadProjectFiles', () => {
   beforeEach(() => {
