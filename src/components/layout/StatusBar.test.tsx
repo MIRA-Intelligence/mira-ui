@@ -7,6 +7,8 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useUiStore } from '@/stores/uiStore'
+import { useChatStore } from '@/stores/chatStore'
+import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
 
 function pushUsage(sessionId: string, tokensUsed: number, maxTokens: number | null) {
   useAgentStore.getState().handleWsMessage({
@@ -24,6 +26,7 @@ const initialProjectState = useProjectStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 const initialAgentState = useAgentStore.getState()
 const initialUiState = useUiStore.getState()
+const initialChatState = useChatStore.getState()
 
 describe('StatusBar', () => {
   beforeEach(() => {
@@ -31,6 +34,8 @@ describe('StatusBar', () => {
     useSettingsStore.setState(initialSettingsState, true)
     useAgentStore.setState(initialAgentState, true)
     useUiStore.setState(initialUiState, true)
+    useChatStore.setState(initialChatState, true)
+    useSkillHistoryStore.getState().reset()
 
     useSettingsStore.setState({
       language: 'en',
@@ -55,6 +60,21 @@ describe('StatusBar', () => {
     expect(screen.getByText('mira-engine 0.3.0')).toBeInTheDocument()
     expect(screen.getByText('No model configured')).toBeInTheDocument()
     expect(screen.getByText('WS connected')).toBeInTheDocument()
+  })
+
+  it('follows Quick Chat versus project selection without mixing skill histories', () => {
+    useAgentStore.setState({ connected: false })
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: 'PRJ-a' })
+    useChatStore.setState({ activeChatId: 'chat-b' })
+    for (const [session, name] of [['PRJ-a', 'project-skill'], ['chat-b', 'chat-skill']]) {
+      useSkillHistoryStore.getState().ingest(session, {
+        id: session, skill_name: name, source: 'manual', partial: false, loaded_at: '2026-10-12T10:00:00Z',
+      })
+    }
+    render(<StatusBar />)
+    expect(screen.getByRole('button', { name: 'Skill load history' })).toHaveTextContent('$project-skill')
+    act(() => useProjectStore.setState({ appMode: 'normal' }))
+    expect(screen.getByRole('button', { name: 'Skill load history' })).toHaveTextContent('$chat-skill')
   })
 
   it('renders the configured model when runtime config is present', () => {

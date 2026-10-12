@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { LogEntry, WsResponse } from '@/types'
 import { isChatSessionId, isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
+import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
 
 export interface SessionUsage {
   tokensUsed: number
@@ -220,6 +221,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   handleWsMessage: (msg) => {
     const sessionId = msg.session_id ?? '_unknown'
+    if (msg.type === 'skill_loaded') {
+      if (msg.session_id) useSkillHistoryStore.getState().ingest(msg.session_id, msg.metadata?.skill_event)
+      return
+    }
     const workflowRunId = readMetadataString(msg.metadata, 'workflow_run_id')
     const logSessionId = workflowRunId ? `${sessionId}:run:${workflowRunId}` : sessionId
 
@@ -426,6 +431,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }),
 
   resetWorkspaceState: () => {
+    useSkillHistoryStore.getState().reset()
     for (const sessionId of Object.keys(_pollTimers)) {
       stopPlanPolling(sessionId)
     }

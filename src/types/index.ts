@@ -540,11 +540,23 @@ export interface WsMessage {
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required' | 'skill_loaded'
   session_id?: string
   content: string
   media?: string[]
   metadata?: Record<string, unknown>
+}
+
+export interface SkillLoadEvent {
+  id: string
+  loaded_at: string
+  skill_name: string
+  source: 'manual' | 'auto' | 'recent' | 'always' | 'read_file'
+  partial: boolean
+  run_id?: string | null
+  module_type?: string | null
+  turn_id?: string | null
+  agent?: string | null
 }
 
 export type SkillPluginScope = 'global' | 'project'
