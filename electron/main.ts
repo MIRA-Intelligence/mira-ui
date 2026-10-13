@@ -1,11 +1,34 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, shell } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
 import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
+import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, recordRendererDiagnostic } from './diagnostics'
+import { realpath, stat } from 'node:fs/promises'
+import path from 'node:path'
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
+const diagnostics = hasSingleInstanceLock ? initializeDesktopDiagnostics() : null
+if (hasSingleInstanceLock) {
+  // Listen without suppressing Node's normal fatal exception behavior.
+  process.on('uncaughtExceptionMonitor', (error) => {
+    logDesktopEvent('process.uncaught_exception', {}, error, 'CRITICAL')
+  })
+  process.on('unhandledRejection', (error) => {
+    logDesktopEvent('process.unhandled_rejection', {}, error, 'CRITICAL')
+    app.exit(1)
+  })
+  try {
+    const pruned = pruneNativeCrashDumps(app.getPath('crashDumps'))
+    if (pruned) logDesktopEvent('diagnostics.native_dumps_pruned', { count: pruned })
+    crashReporter.start({ uploadToServer: false, globalExtra: { mira_boot_id: diagnostics?.bootId ?? 'unknown' } })
+  } catch (error) { logDesktopEvent('crash_reporter.unavailable', {}, error) }
+  app.on('child-process-gone', (_event, details) => {
+    logDesktopEvent('process.child_gone', { process_type: details.type, reason: details.reason, exit_code: details.exitCode }, undefined, 'ERROR')
+  })
+  app.on('will-quit', () => diagnostics?.markCleanShutdown())
+}
 const engineManager = hasSingleInstanceLock ? new LocalEngineManager() : null
 let mainWindow: BrowserWindow | null = null
 
@@ -29,6 +52,14 @@ function createWindow() {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+  win.webContents.on('render-process-gone', (_event, details) => {
+    logDesktopEvent('renderer.process_gone', { window_id: win.id, reason: details.reason, exit_code: details.exitCode }, undefined, 'CRITICAL')
+  })
+  win.webContents.on('did-fail-load', (_event, code, _description, _url, isMainFrame) => {
+    if (isMainFrame) logDesktopEvent('renderer.load_failed', { window_id: win.id, code }, undefined, 'ERROR')
+  })
+  win.on('unresponsive', () => logDesktopEvent('renderer.unresponsive', { window_id: win.id }, undefined, 'ERROR'))
+  win.on('responsive', () => logDesktopEvent('renderer.responsive', { window_id: win.id }))
 
   if (process.env.VITE_DEV_SERVER_URL) {
     win.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -44,6 +75,67 @@ function createWindow() {
 
 function initializeApp() {
   if (!engineManager) return
+
+  let received = 0
+  let dropped = 0
+  let bucketStarted = Date.now()
+  ipcMain.on('diagnostics:record', (event, payload: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return
+    if (Date.now() - bucketStarted >= 1000) {
+      if (dropped) logDesktopEvent('diagnostics.renderer_rate_limited', { count: dropped }, undefined, 'WARNING')
+      bucketStarted = Date.now(); received = 0; dropped = 0
+    }
+    if (++received > 60) { dropped += 1; return }
+    recordRendererDiagnostic(payload)
+  })
+  let exportInFlight = false
+  const exportDesktopDiagnostics = async (includeLocalEngine: boolean): Promise<string | null> => {
+    if (!diagnostics) throw new Error('Diagnostic storage unavailable')
+    if (exportInFlight) throw new Error('Diagnostic export already in progress')
+    exportInFlight = true
+    try {
+      const options = {
+        title: 'Export MIRA diagnostics', defaultPath: `mira-diagnostics-${Date.now()}.zip`,
+        filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      }
+      const selection = mainWindow ? await dialog.showSaveDialog(mainWindow,options) : await dialog.showSaveDialog(options)
+      if (selection.canceled || !selection.filePath) return null
+      let engine: { path?: string; error?: string } | undefined
+      if (includeLocalEngine) {
+        try {
+          const result = await engineManager.exportDiagnostics()
+          const payload = JSON.parse(result.stdout) as { diagnostics_bundle?: string }
+          if (typeof payload.diagnostics_bundle !== 'string') throw new Error('No engine bundle')
+          const file = await realpath(payload.diagnostics_bundle)
+          const root = await realpath(path.join(process.env.MIRA_HOME || path.join(app.getPath('home'), '.mira'), 'runtime', 'diagnostics'))
+          const relative = path.relative(root, file)
+          if (relative.startsWith('..') || path.isAbsolute(relative) || !file.endsWith('.zip') || !(await stat(file)).isFile()) throw new Error('Invalid engine bundle')
+          engine = { path: file }
+        } catch (error) {
+          logDesktopEvent('diagnostics.engine_collection_failed', {}, error)
+          engine = { error: 'engine_collection_failed' }
+        }
+      }
+      await diagnostics.exportBundle(selection.filePath,engine,app.getPath('crashDumps'))
+      shell.showItemInFolder(selection.filePath)
+      return selection.filePath
+    } finally { exportInFlight = false }
+  }
+  ipcMain.handle('diagnostics:export', async (event, options?: { includeLocalEngine?: boolean }) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Invalid diagnostic sender')
+    return exportDesktopDiagnostics(options?.includeLocalEngine === true)
+  })
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
+    { role: 'help', submenu: [{ label: 'Export diagnostics / 导出诊断文件', click: () => {
+      void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode !== 'remoteManual'))
+        .catch((error) => {
+          logDesktopEvent('diagnostics.export_failed', {}, error)
+          dialog.showErrorBox('MIRA diagnostics', 'Could not save the diagnostic file. Please try another location.')
+        })
+    } }] },
+  ]))
 
   ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
@@ -91,7 +183,7 @@ function initializeApp() {
   // still drives the actual connection from its persisted deploymentMode.
   void (async () => {
     if ((await getLastDeploymentMode()) === 'remoteManual') return
-    await engineManager.bootstrapLocalEngine().catch(() => {})
+    await engineManager.bootstrapLocalEngine().catch((error) => logDesktopEvent('engine.prewarm_failed', {}, error))
   })()
   createWindow()
   // Renderer carries the "include prereleases" preference; on first boot we
@@ -113,7 +205,10 @@ if (!hasSingleInstanceLock) {
     mainWindow.focus()
   })
 
-  app.whenReady().then(initializeApp)
+  app.whenReady().then(initializeApp).catch((error) => {
+    logDesktopEvent('app.startup_failed', {}, error, 'CRITICAL')
+    app.exit(1)
+  })
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()

@@ -3,6 +3,8 @@ import type { IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  recordDiagnostic: (record: unknown) => ipcRenderer.send('diagnostics:record',record),
+  exportDiagnostics: (options?: { includeLocalEngine?: boolean }) => ipcRenderer.invoke('diagnostics:export',options),
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
   setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),

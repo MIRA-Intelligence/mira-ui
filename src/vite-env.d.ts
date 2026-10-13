@@ -12,6 +12,8 @@ interface ImportMeta {
 interface Window {
   electronAPI?: {
     platform: string
+    recordDiagnostic?: (record: import('./lib/diagnosticPrivacy').DiagnosticEvent) => void
+    exportDiagnostics?: (options?: { includeLocalEngine?: boolean }) => Promise<string | null>
     bootstrapLocalEngine?: (options?: { force?: boolean }) => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string

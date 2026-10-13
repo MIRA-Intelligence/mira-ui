@@ -20,6 +20,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { EngineLifecycleControls } from './EngineLifecycleControls'
+import { exportDiagnostics, recordDiagnostic } from '@/services/diagnostics'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -385,6 +386,20 @@ export function SettingsModal() {
     }
   }
 
+  const handleExportDiagnostics = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback(null)
+    try {
+      const file = await exportDiagnostics(localMode)
+      if (file) setFeedback(t('diagnosticsExported', curLang))
+    } catch (error) {
+      recordDiagnostic('diagnostics.export_failed', {}, error)
+      setFeedbackError(true)
+      setFeedback(t('diagnosticsExportFailed', curLang))
+    } finally { setBusy(false) }
+  }
+
   const handleUpgradeEngine = async () => {
     setBusy(true)
     setFeedbackError(false)
@@ -594,6 +609,13 @@ export function SettingsModal() {
                 receivePrereleases={draft.receivePrereleases}
                 setReceivePrereleases={(receivePrereleases) => setDraft((current) => ({ ...current, receivePrereleases }))}
               />
+
+              <Section title={t('diagnosticsTitle', curLang)}>
+                <p className="text-xs text-[var(--color-text-muted)] mb-3">{t('diagnosticsHint', curLang)}</p>
+                <ActionButton disabled={busy} onClick={handleExportDiagnostics}>
+                  {t('diagnosticsExport', curLang)}
+                </ActionButton>
+              </Section>
 
               {!localMode && (
                 <Section title={t('connection', curLang)}>

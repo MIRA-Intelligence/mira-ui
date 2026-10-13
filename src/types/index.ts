@@ -540,7 +540,7 @@ export interface WsMessage {
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required' | 'skill_loaded'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required' | 'skill_loaded' | 'token_usage'
   session_id?: string
   content: string
   media?: string[]

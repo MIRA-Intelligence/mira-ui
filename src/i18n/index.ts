@@ -2,6 +2,11 @@ import type { Language } from '@/stores/settingsStore'
 
 const dict = {
   en: {
+    diagnosticsTitle: 'Diagnostics',
+    diagnosticsHint: 'Save a local diagnostic file to help troubleshoot. Logs are not uploaded automatically. For a remote engine, collect its logs on the server.',
+    diagnosticsExport: 'Export diagnostics',
+    diagnosticsExported: 'Diagnostic file saved.',
+    diagnosticsExportFailed: 'Could not export diagnostics. Please try again.',
     settings: 'Settings',
     general: 'General',
     workspace: 'Projects',
@@ -578,6 +583,11 @@ const dict = {
     errorUnknown: 'Something went wrong while handling your message: {detail}',
   },
   zh: {
+    diagnosticsTitle: '故障诊断',
+    diagnosticsHint: '保存本地诊断文件以便排查问题。日志不会自动上传；远程引擎的日志需在服务器上收集。',
+    diagnosticsExport: '导出诊断文件',
+    diagnosticsExported: '诊断文件已保存。',
+    diagnosticsExportFailed: '无法导出诊断文件，请重试。',
     skillLoadHistory: 'Skill 加载记录',
     skillHistoryClose: '关闭 Skill 加载记录',
     skillLoaded: '已加载',

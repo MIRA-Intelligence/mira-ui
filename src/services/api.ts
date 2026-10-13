@@ -335,6 +335,12 @@ export async function fetchSessionHistory(sessionId: string, workflowRunId?: str
   }
 }
 
+export async function fetchTokenUsage(sessionId: string): Promise<unknown> {
+  const response = await fetch(`${getApiUrl()}/sessions/${encodeURIComponent(sessionId)}/usage`)
+  if (!response.ok) throw new Error('Token usage unavailable')
+  return response.json()
+}
+
 export async function fetchSkillHistory(sessionId: string, cursor?: number): Promise<{ events: SkillLoadEvent[]; next_cursor: number | null }> {
   const query = cursor === undefined ? '' : `?cursor=${cursor}`
   const response = await fetch(`${getApiUrl()}/sessions/${encodeURIComponent(sessionId)}/skills${query}`)

@@ -1,6 +1,8 @@
 import type { WsMessage, WsResponse } from '@/types'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
+import { recordDiagnostic } from './diagnostics'
+import { createUuid } from '@/lib/uuid'
 
 type MessageHandler = (msg: WsResponse) => void
 type StatusHandler = (connected: boolean, detail: string | null) => void
@@ -56,7 +58,9 @@ class WebSocketClient {
 
   send(msg: WsMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
+      const requestId = msg.request_id || createUuid()
+      recordDiagnostic('websocket.sent', { operation: msg.type, request_id: requestId })
+      this.ws.send(JSON.stringify({ ...msg, request_id: requestId }))
     }
   }
 
@@ -80,6 +84,7 @@ class WebSocketClient {
     }
 
     this.ws.onopen = () => {
+      recordDiagnostic('websocket.connected')
       this.reconnectDelay = INITIAL_RECONNECT_DELAY
       this.lastDisconnectDetail = null
       this.statusHandlers.forEach((h) => h(true, null))
@@ -93,12 +98,14 @@ class WebSocketClient {
     }
 
     this.ws.onclose = (event) => {
+      recordDiagnostic('websocket.closed', { code: event?.code ?? 0 }, undefined, 'WARNING')
       this.lastDisconnectDetail = describeCloseEvent(event, getWsUrl())
       this.statusHandlers.forEach((h) => h(false, this.lastDisconnectDetail))
       this._scheduleReconnect()
     }
 
     this.ws.onerror = () => {
+      recordDiagnostic('websocket.failed', {}, undefined, 'ERROR')
       this.ws?.close()
     }
   }

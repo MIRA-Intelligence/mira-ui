@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -7,6 +7,7 @@ import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { useChatStore } from '@/stores/chatStore'
 import { SkillHistoryChip } from './SkillHistoryChip'
+import { useTokenUsageStore, type TokenUsage } from '@/stores/tokenUsageStore'
 
 const SYSTEM_MESSAGE_TICK_MS = 500
 
@@ -27,8 +28,13 @@ export function StatusBar() {
   const workspace = useSettingsStore((s) => s.workspacePath)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const usage = useAgentStore((s) =>
-    selectedTaskId ? s.usageBySession[selectedTaskId] ?? null : null,
+    skillSessionId ? s.usageBySession[skillSessionId] ?? null : null,
   )
+  const tokenUsage = useTokenUsageStore((s) => skillSessionId ? s.snapshots[skillSessionId] : undefined)
+  const loadUsage = useTokenUsageStore((s) => s.load)
+  useEffect(() => {
+    if (connected && skillSessionId) void loadUsage(skillSessionId)
+  }, [connected, skillSessionId, workspace, apiUrl, loadUsage])
 
   const bannerMessage = connectionMessage || engineMessage
   const showEngineWarning = Boolean(bannerMessage) && (
@@ -59,6 +65,8 @@ export function StatusBar() {
       )}
       <div className="flex items-stretch h-[22px] px-3 gap-2 text-[11px] text-[var(--color-text-muted)]">
         {skillSessionId && <SkillHistoryChip key={`${apiUrl}:${workspace}:${skillSessionId}`} sessionId={skillSessionId} />}
+        {skillSessionId && <TokenChip key={`tokens:${apiUrl}:${workspace}:${skillSessionId}`} tokensUsed={tokenUsage?.total_tokens ?? usage?.tokensUsed ?? null}
+          maxTokens={tokenUsage ? null : usage?.maxTokens ?? null} snapshot={tokenUsage} lang={lang} />}
         <SystemMessageSlot />
 
         <div className="flex items-stretch gap-0.5 shrink-0">
@@ -79,13 +87,6 @@ export function StatusBar() {
             >
               <span className="truncate">{t('noModelConfigured', lang)}</span>
             </Chip>
-          )}
-          {usage && (
-            <TokenChip
-              tokensUsed={usage.tokensUsed}
-              maxTokens={usage.maxTokens}
-              lang={lang}
-            />
           )}
           <WsChip
             connected={connected}
@@ -213,18 +214,55 @@ function ModelChip({ model, provider }: { model: string; provider: string | null
 function TokenChip({
   tokensUsed,
   maxTokens,
+  snapshot,
   lang,
 }: {
-  tokensUsed: number
+  tokensUsed: number | null
   maxTokens: number | null
+  snapshot?: TokenUsage
   lang: ReturnType<typeof useSettingsStore.getState>['language']
 }) {
-  const usedLabel = formatTokenCount(tokensUsed)
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const closeButton = useRef<HTMLButtonElement>(null)
+  const dialogId = useId()
+  const zh = lang === 'zh'
+  const detailsLabel = zh ? 'Token 使用明细' : 'Token usage details'
+  const unknownLabel = zh ? '未知' : 'Unknown'
+  const cacheReported = snapshot?.cache_reported_calls ?? 0
+  const cacheComplete = Boolean(snapshot && snapshot.calls > 0
+    && cacheReported === snapshot.calls && snapshot.unreported_calls === 0)
+  const cachedLabel = snapshot && (cacheComplete || snapshot.cached_tokens > 0)
+    ? `${cacheComplete ? '' : '≥ '}${snapshot.cached_tokens.toLocaleString()}` : unknownLabel
+
+  useEffect(() => {
+    if (!open) return
+    closeButton.current?.focus()
+    const dismiss = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOpen(false); button.current?.focus() }
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [open])
+
+  const usedLabel = tokensUsed === null || (snapshot?.unreported_calls && !tokensUsed) ? '—' : formatTokenCount(tokensUsed)
   const maxLabel = maxTokens != null ? formatTokenCount(maxTokens) : null
-  const ratio = maxTokens && maxTokens > 0 ? tokensUsed / maxTokens : 0
+  const ratio = maxTokens && maxTokens > 0 ? (tokensUsed ?? 0) / maxTokens : 0
   const tone = tokenChipTone(ratio)
-  const visibleLabel = maxLabel ? `${usedLabel} / ${maxLabel}` : usedLabel
-  const tooltip = maxLabel
+  const visibleLabel = maxLabel ? `${usedLabel} / ${maxLabel}` : `${snapshot?.unreported_calls && tokensUsed ? '≥ ' : ''}${usedLabel}`
+  const tooltip = snapshot
+    ? (lang === 'zh'
+      ? `累计 ${snapshot.total_tokens.toLocaleString()} tokens · 输入 ${snapshot.input_tokens.toLocaleString()} · 输出 ${snapshot.output_tokens.toLocaleString()} · 缓存输入 ${cachedLabel}（已包含在输入中） · ${snapshot.calls} 次调用${snapshot.unreported_calls ? `；${snapshot.unreported_calls} 次未返回用量，统计不完整` : ''}。点击查看明细，非金额。`
+      : `${snapshot.total_tokens.toLocaleString()} tokens · Input ${snapshot.input_tokens.toLocaleString()} · Output ${snapshot.output_tokens.toLocaleString()} · Cached input ${cachedLabel} (included in input) · ${snapshot.calls} calls${snapshot.unreported_calls ? `; ${snapshot.unreported_calls} calls did not report usage; incomplete` : ''}. Click for details; not a monetary cost.`)
+    : tokensUsed === null ? (lang === 'zh' ? 'Token 用量尚不可用' : 'Token usage unavailable') : maxLabel
     ? t('tokenChipTooltipBudget', lang, {
         used: tokensUsed.toLocaleString(),
         max: maxTokens!.toLocaleString(),
@@ -233,23 +271,51 @@ function TokenChip({
     : t('tokenChipTooltip', lang, { used: tokensUsed.toLocaleString() })
 
   return (
-    <Chip title={tooltip} className={tone.text}>
-      <svg
-        width="10"
-        height="10"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden
-        className={cn('shrink-0', tone.icon)}
-      >
-        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-      </svg>
-      <span className="truncate tabular-nums">{visibleLabel}</span>
-    </Chip>
+    <div ref={root} className="relative flex shrink-0 items-stretch">
+      <button ref={button} type="button" title={tooltip} aria-label={detailsLabel}
+        aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? dialogId : undefined}
+        onClick={() => setOpen((value) => !value)}
+        className={cn('flex items-center gap-1.5 rounded px-2 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]', tone.text)}>
+        <span aria-hidden="true">₿</span>
+        <span className="truncate tabular-nums">{visibleLabel}</span>
+      </button>
+      {open && <section id={dialogId} role="dialog" aria-label={detailsLabel}
+        className="fixed bottom-8 left-3 z-50 w-[360px] max-w-[calc(100vw-24px)] max-h-[70vh] overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] shadow-xl text-[var(--color-text-primary)]">
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2">
+          <h2 className="text-sm font-medium">{detailsLabel}</h2>
+          <button ref={closeButton} type="button" aria-label={zh ? '关闭 Token 明细' : 'Close token details'}
+            className="rounded px-2 py-1 hover:bg-[var(--color-bg-hover)]"
+            onClick={() => { setOpen(false); button.current?.focus() }}>×</button>
+        </div>
+        <div className="space-y-3 p-3 text-xs">
+          <p className="text-[var(--color-text-muted)]">{zh ? '当前会话累计 · 自统计启用以来' : 'Current session total · Since tracking was enabled'}</p>
+          {snapshot ? <>
+            <dl className="space-y-2">
+              {([
+                [zh ? '总 token' : 'Total tokens', `${snapshot.unreported_calls ? '≥ ' : ''}${snapshot.total_tokens.toLocaleString()}`],
+                [zh ? '输入 token' : 'Input tokens', `${snapshot.unreported_calls ? '≥ ' : ''}${snapshot.input_tokens.toLocaleString()}`],
+                [zh ? '输出 token' : 'Output tokens', `${snapshot.unreported_calls ? '≥ ' : ''}${snapshot.output_tokens.toLocaleString()}`],
+                [zh ? '缓存命中 token（包含在输入中）' : 'Cache-read tokens (part of input)', cachedLabel],
+                [zh ? '未命中缓存的输入 token' : 'Input tokens not served from cache', cacheComplete ? (snapshot.input_tokens - snapshot.cached_tokens).toLocaleString() : unknownLabel],
+                [zh ? '缓存命中率（按输入 token）' : 'Cache hit rate (input tokens)', cacheComplete && snapshot.input_tokens > 0 ? `${(snapshot.cached_tokens / snapshot.input_tokens * 100).toFixed(1)}%` : '—'],
+                [zh ? '模型调用次数' : 'Model calls', snapshot.calls.toLocaleString()],
+                [zh ? '有缓存明细的调用' : 'Calls reporting cache usage', `${cacheReported} / ${snapshot.calls}`],
+                [zh ? '未返回用量的调用' : 'Calls missing token usage', snapshot.unreported_calls.toLocaleString()],
+              ] as [string, string][]).map(([label, value]) => <div key={label} className="flex justify-between gap-3">
+                <dt className="text-[var(--color-text-muted)]">{label}</dt><dd className="shrink-0 tabular-nums">{value}</dd>
+              </div>)}
+            </dl>
+            {!cacheComplete && snapshot.calls > 0 && <p className="text-amber-500">{zh
+              ? '部分或全部调用缺少缓存明细（含旧版记录）。未知不代表未命中；已知缓存量仅为下限，不能推算完整命中率。'
+              : 'Some or all calls lack cache details (including older records). Unknown does not mean a cache miss; known cache reads are only a lower bound.'}</p>}
+            {snapshot.unreported_calls > 0 && <p className="text-amber-500">{zh ? '部分调用未返回 token 用量，累计统计不完整。' : 'Some calls did not return token usage; totals are incomplete.'}</p>}
+          </> : <p>{zh ? '详细用量尚不可用。旧版统计仅提供总量，请连接支持明细的 engine。' : 'Detailed usage is unavailable. Legacy counters only provide totals; connect to an engine supporting details.'}</p>}
+          <p className="text-[var(--color-text-muted)]">{zh
+            ? '缓存命中仍计入输入和总量；这里显示 token 数，不是费用或账单。实际计费以供应商为准。'
+            : 'Cache reads remain included in input and total tokens. These are token counts, not costs or a bill. Billing depends on the provider.'}</p>
+        </div>
+      </section>}
+    </div>
   )
 }
 

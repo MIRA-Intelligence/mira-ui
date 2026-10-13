@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'child_process'
+import { logDesktopEvent } from '../diagnostics'
 import { randomUUID } from 'crypto'
 import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { constants as fsConstants } from 'fs'
@@ -186,7 +187,11 @@ export class LocalEngineManager {
   }
 
   private setState(patch: Partial<EngineBootstrapState>): EngineBootstrapState {
+    const previousPhase = this.state.phase
     this.state = { ...this.state, ...patch }
+    if (previousPhase !== this.state.phase) logDesktopEvent('engine.phase_changed', {
+      phase: this.state.phase, operation: this.state.operation, version: this.state.version,
+    }, undefined, this.state.phase === 'error' ? 'ERROR' : 'INFO')
     return this.getState()
   }
 
@@ -476,6 +481,10 @@ export class LocalEngineManager {
   }
 
   async runCommand(args: string[], options?: { timeoutMs?: number }): Promise<EngineCommandResult> {
+    const startedAt = Date.now()
+    const operation = args[0] || 'unknown'
+    const requestId = randomUUID()
+    logDesktopEvent('engine.command_started', { operation, request_id: requestId })
     const resolvedExecutable = await resolveExecutable()
     const executablePath = resolvedExecutable ?? engineExecutableName()
     const command = [executablePath, ...args]
@@ -488,25 +497,37 @@ export class LocalEngineManager {
     return new Promise((resolve) => {
       const child = spawn(executablePath, args, {
         shell: process.platform === 'win32' && executablePath === engineExecutableName(),
-        env: process.env,
+        env: { ...process.env, MIRA_DIAGNOSTIC_REQUEST_ID: requestId },
         windowsHide: true,
       })
 
       let stdout = ''
       let stderr = ''
+      let settled = false
+      let timedOut = false
+      const finish = (result: EngineCommandResult) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        logDesktopEvent('engine.command_finished', { operation, request_id: requestId, code: result.code,
+          timed_out: timedOut, duration_ms: Date.now() - startedAt }, undefined, result.ok ? 'INFO' : 'ERROR')
+        resolve(result)
+      }
       const timeout = setTimeout(() => {
+        timedOut = true
+        logDesktopEvent('engine.command_timeout', { operation, request_id: requestId }, undefined, 'ERROR')
         child.kill('SIGTERM')
       }, options?.timeoutMs ?? COMMAND_TIMEOUT_MS)
 
       child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString()
+        stdout = (stdout + chunk.toString()).slice(-262144)
       })
       child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString()
+        stderr = (stderr + chunk.toString()).slice(-262144)
       })
       child.on('error', (err) => {
         clearTimeout(timeout)
-        resolve({
+        finish({
           ok: false,
           code: 1,
           stdout: stdout.trim(),
@@ -517,7 +538,7 @@ export class LocalEngineManager {
       })
       child.on('close', (code) => {
         clearTimeout(timeout)
-        resolve({
+        finish({
           ok: code === 0,
           code: code ?? 1,
           stdout: stdout.trim(),
@@ -533,6 +554,8 @@ export class LocalEngineManager {
     if (process.platform !== 'win32') {
       return this.runCommand(args, options)
     }
+    const startedAt = Date.now()
+    logDesktopEvent('engine.elevated_command_started', { operation: args[0] || 'unknown' })
 
     const resolvedExecutable = await resolveExecutable()
     const executablePath = resolvedExecutable ?? engineExecutableName()
@@ -615,6 +638,9 @@ export class LocalEngineManager {
         ])
         await cleanup()
         const timeoutMessage = timedOut ? `elevated command timed out after ${timeoutMs}ms` : ''
+        logDesktopEvent('engine.elevated_command_finished', { operation: args[0] || 'unknown',
+          code, timed_out: timedOut, duration_ms: Date.now() - startedAt }, undefined,
+          code === 0 && !timedOut ? 'INFO' : 'ERROR')
         resolve({
           ok: code === 0 && !timedOut,
           code,
@@ -626,10 +652,10 @@ export class LocalEngineManager {
       }
 
       child.stdout.on('data', (chunk) => {
-        stdout += chunk.toString()
+        stdout = (stdout + chunk.toString()).slice(-262144)
       })
       child.stderr.on('data', (chunk) => {
-        stderr += chunk.toString()
+        stderr = (stderr + chunk.toString()).slice(-262144)
       })
       child.on('error', (err) => {
         void finish(1, err.message)
@@ -651,6 +677,10 @@ export class LocalEngineManager {
 
   async doctor(): Promise<EngineCommandResult> {
     return this.runCommand(['doctor'])
+  }
+
+  async exportDiagnostics(): Promise<EngineCommandResult> {
+    return this.runCommand(['doctor', '--export'])
   }
 
   async start(): Promise<EngineCommandResult> {

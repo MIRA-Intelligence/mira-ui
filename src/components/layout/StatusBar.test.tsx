@@ -1,5 +1,5 @@
 import { StrictMode } from 'react'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, beforeEach } from 'vitest'
 
 import { StatusBar } from './StatusBar'
@@ -9,6 +9,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
+import { useTokenUsageStore } from '@/stores/tokenUsageStore'
 
 function pushUsage(sessionId: string, tokensUsed: number, maxTokens: number | null) {
   useAgentStore.getState().handleWsMessage({
@@ -36,6 +37,7 @@ describe('StatusBar', () => {
     useUiStore.setState(initialUiState, true)
     useChatStore.setState(initialChatState, true)
     useSkillHistoryStore.getState().reset()
+    useTokenUsageStore.getState().reset()
 
     useSettingsStore.setState({
       language: 'en',
@@ -169,9 +171,8 @@ describe('StatusBar', () => {
     act(() => pushUsage('PRJ-X', 12_500, 100_000))
     const { container } = render(<StatusBar />)
     expect(screen.getByText('13K / 100K')).toBeInTheDocument()
-    expect(
-      container.querySelector('polygon[points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"]'),
-    ).not.toBeNull()
+    expect(screen.getByText('₿')).toBeInTheDocument()
+    expect(container.querySelector('footer')).toBeInTheDocument()
   })
 
   it('shows tokensUsed without a budget when no automation policy is set', () => {
@@ -186,5 +187,101 @@ describe('StatusBar', () => {
     act(() => pushUsage('PRJ-Z', 2_500_000, null))
     render(<StatusBar />)
     expect(screen.getByText('2.5M')).toBeInTheDocument()
+  })
+
+  it('shows live Quick Chat usage immediately to the right of skills without adding logs', () => {
+    useProjectStore.setState({ appMode: 'normal', selectedTaskId: 'other-project' })
+    useChatStore.setState({ activeChatId: 'chat-one' })
+    render(<StatusBar />)
+    act(() => useAgentStore.getState().handleWsMessage({
+      type: 'token_usage', session_id: 'chat-one', content: '', metadata: { token_usage: {
+        input_tokens: 1000, output_tokens: 500, total_tokens: 1500, cached_tokens: 200, calls: 1, unreported_calls: 0, cache_reported_calls: 1,
+      } },
+    }))
+    const coin = screen.getByText('₿').parentElement!
+    expect(coin.parentElement!.previousElementSibling).toContainElement(screen.getByRole('button', { name: 'Skill load history' }))
+    expect(screen.getByText('1.5K')).toBeInTheDocument()
+    expect(coin.title).toContain('Cached input 200 (included in input)')
+    expect(useAgentStore.getState().logsByProject['chat-one']).toBeUndefined()
+    expect(useAgentStore.getState().streamingBySession['chat-one']).toBeUndefined()
+    act(() => useChatStore.setState({ activeChatId: 'chat-two' }))
+    expect(screen.queryByText('1.5K')).not.toBeInTheDocument()
+  })
+
+  it('marks missing provider usage as incomplete rather than zero consumption', () => {
+    useProjectStore.setState({ selectedTaskId: 'PRJ-partial', appMode: 'project' })
+    useTokenUsageStore.getState().ingest('PRJ-partial', {
+      input_tokens: 100, output_tokens: 50, total_tokens: 150, cached_tokens: 0, calls: 2, unreported_calls: 1,
+    })
+    render(<StatusBar />)
+    expect(screen.getByText('≥ 150')).toBeInTheDocument()
+    expect(screen.getByText('₿').parentElement?.title).toContain('incomplete')
+  })
+
+  it('opens token details, updates live, dismisses and isolates sessions', () => {
+    useAgentStore.setState({ connected: false })
+    useProjectStore.setState({ appMode: 'normal' })
+    useChatStore.setState({ activeChatId: 'chat-one' })
+    const snapshot = { input_tokens: 14000, output_tokens: 100, total_tokens: 14100,
+      cached_tokens: 10000, calls: 1, unreported_calls: 0, cache_reported_calls: 1 }
+    useTokenUsageStore.getState().ingest('chat-one', snapshot)
+    render(<StatusBar />)
+    const button = screen.getByRole('button', { name: 'Token usage details' })
+    fireEvent.click(button)
+    let dialog = screen.getByRole('dialog', { name: 'Token usage details' })
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+    expect(within(dialog).getByText('14,100')).toBeInTheDocument()
+    expect(within(dialog).getByText('10,000')).toBeInTheDocument()
+    expect(within(dialog).getByText('4,000')).toBeInTheDocument()
+    expect(within(dialog).getByText('71.4%')).toBeInTheDocument()
+    act(() => useTokenUsageStore.getState().ingest('chat-one', { ...snapshot,
+      input_tokens: 28000, total_tokens: 28100, cached_tokens: 20000, calls: 2, cache_reported_calls: 2 }))
+    expect(within(dialog).getByText('28,100')).toBeInTheDocument()
+    expect(within(dialog).getByText('20,000')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    fireEvent.pointerDown(document.body)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    fireEvent.click(button)
+    dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close token details' }))
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    act(() => useChatStore.setState({ activeChatId: 'chat-two' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [undefined, 0, 'Unknown'], [0, 0, 'Unknown'], [1, 0, 'Unknown'],
+    [1, 80, '≥ 80'], [2, 0, '0'], [2, 80, '80'],
+  ])('distinguishes cache coverage %s and value %s', (reported, cached, expected) => {
+    useAgentStore.setState({ connected: false })
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: 'project-one' })
+    useTokenUsageStore.getState().ingest('project-one', {
+      input_tokens: 200, output_tokens: 10, total_tokens: 210, cached_tokens: cached as number,
+      calls: 2, unreported_calls: 0, cache_reported_calls: reported,
+    })
+    render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Token usage details' }))
+    const row = screen.getByText('Cache-read tokens (part of input)').parentElement!
+    expect(within(row).getByText(expected as string)).toBeInTheDocument()
+    if (reported !== 2) expect(screen.getByText(/Unknown does not mean a cache miss/)).toBeInTheDocument()
+  })
+
+  it('supports Chinese details and missing usage', () => {
+    useAgentStore.setState({ connected: false })
+    useSettingsStore.setState({ language: 'zh' })
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: 'project-one' })
+    render(<StatusBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Token 使用明细' }))
+    expect(screen.getByText(/详细用量尚不可用/)).toBeInTheDocument()
+    act(() => useTokenUsageStore.getState().ingest('project-one', {
+      input_tokens: 0, output_tokens: 0, total_tokens: 0, cached_tokens: 0,
+      calls: 1, unreported_calls: 1, cache_reported_calls: 0,
+    }))
+    expect(screen.getByText(/部分调用未返回 token 用量/)).toBeInTheDocument()
+    expect(screen.getByText(/未知不代表未命中/)).toBeInTheDocument()
   })
 })
