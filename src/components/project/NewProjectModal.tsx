@@ -18,7 +18,6 @@ import type {
   AutomationGoal,
   AutomationGoalLogic,
   AutomationGoalOperator,
-  ContractVersion,
   LiteratureSource,
   NewProjectInput,
 } from '@/types'
@@ -31,10 +30,6 @@ const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 're
   { key: 'engineer', labelKey: 'engineerMode' },
   { key: 'research', labelKey: 'researchMode' },
   { key: 'team', labelKey: 'teamMode' },
-]
-const CONTRACT_OPTIONS: Array<{ key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }> = [
-  { key: 1, labelKey: 'contractCompat' },
-  { key: 2, labelKey: 'contractStrict' },
 ]
 const LITERATURE_SOURCE_OPTIONS: Array<{ key: LiteratureSource; label: string }> = [
   { key: 'pubmed', label: 'PubMed' },
@@ -261,9 +256,7 @@ export function NewProjectModal() {
     deleteTask,
     projectsLoaded,
     agentProfile,
-    contractVersion,
     setAgentProfile,
-    setContractVersion,
   } = useProjectStore()
   const connected = useAgentStore((s) => s.connected)
   // Block runtime switching while ANY session is mid-stream, not just one.
@@ -592,7 +585,7 @@ export function NewProjectModal() {
         sources: selectedLiteratureSources,
       },
       agentProfile,
-      contractVersion,
+      contractVersion: 1,
       automationPolicy,
     }
 
@@ -817,7 +810,7 @@ export function NewProjectModal() {
           {/* Runtime Preferences */}
           <div className="space-y-2">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">{t('runtimePreferencesLabel', lang)}</label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2">
               <div className="space-y-1">
                 <p className="text-[11px] text-[var(--color-text-muted)]">{t('profileLabel', lang)}</p>
                 <div
@@ -850,37 +843,6 @@ export function NewProjectModal() {
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <p className="text-[11px] text-[var(--color-text-muted)]">{t('contractModeLabel', lang)}</p>
-                <div
-                  className={cn(
-                    'flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-input-bg)] p-0.5',
-                    !canSwitchRuntime && 'opacity-60',
-                  )}
-                  title={!canSwitchRuntime ? t('contractSwitchManualOnly', lang) : undefined}
-                >
-                  {CONTRACT_OPTIONS.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      disabled={!canSwitchRuntime}
-                      onClick={() => {
-                        if (!canSwitchRuntime) return
-                        setContractVersion(item.key)
-                      }}
-                      className={cn(
-                        'flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors',
-                        contractVersion === item.key
-                          ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-                          : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                        !canSwitchRuntime && 'cursor-not-allowed',
-                      )}
-                    >
-                      {t(item.labelKey, lang)}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
           </div>
 

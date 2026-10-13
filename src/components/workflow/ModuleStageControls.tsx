@@ -19,6 +19,7 @@ import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflo
 import { WorkflowCandidateList } from './WorkflowCandidateList'
 import { WorkflowInteractionPanel } from './WorkflowInteractionPanel'
 import { ExperimentExecutionMode } from './ExperimentExecutionMode'
+import { ExperimentContractMode } from './ExperimentContractMode'
 import { ExperimentInputPaths } from './ExperimentInputPaths'
 
 const MODULE_META: Record<WorkflowModuleType, {
@@ -128,6 +129,7 @@ export function ModuleStageControls() {
   const [deliveryFormat, setDeliveryFormat] = useState<ExportFormat | null>(null)
   const [targetJournal, setTargetJournal] = useState<JournalProfile | null>(null)
   const [experimentMode, setExperimentMode] = useState<'auto' | 'manual'>('auto')
+  const [experimentContractVersion, setExperimentContractVersion] = useState<1 | 2>(1)
   const [inputPaths, setInputPaths] = useState<string[]>([''])
   const [inputPathsValid, setInputPathsValid] = useState(true)
   const [pending, setPending] = useState(false)
@@ -153,6 +155,7 @@ export function ModuleStageControls() {
     const label = lang === 'zh' ? MODULE_META[moduleType].zh : MODULE_META[moduleType].en.toLowerCase()
     setTargetModule(moduleType)
     setExperimentMode('auto')
+    setExperimentContractVersion(1)
     setInputPaths([''])
     setInputPathsValid(true)
     setIntent(
@@ -197,6 +200,7 @@ export function ModuleStageControls() {
     }
     if (targetModule === 'experiment') {
       moduleData.experiment_execution_mode = experimentMode
+      moduleData.experiment_contract_version = experimentContractVersion
       const paths = [...new Set(inputPaths.map((p) => p.trim()).filter(Boolean))]
       if (paths.length) moduleData.external_read_paths = paths
     }
@@ -423,7 +427,10 @@ export function ModuleStageControls() {
 
             {targetModule === 'experiment' && (
               <>
-                <ExperimentExecutionMode value={experimentMode} onChange={setExperimentMode} disabled={pending} />
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  <ExperimentExecutionMode value={experimentMode} onChange={setExperimentMode} disabled={pending} />
+                  <ExperimentContractMode value={experimentContractVersion} onChange={setExperimentContractVersion} disabled={pending} />
+                </div>
                 <ExperimentInputPaths paths={inputPaths} onChange={setInputPaths} onValidChange={setInputPathsValid} disabled={pending} />
               </>
             )}

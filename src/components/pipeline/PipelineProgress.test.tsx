@@ -106,7 +106,7 @@ describe('PipelineProgress agent profile switch', () => {
     expect(useProjectStore.getState().agentProfile).toBe('research')
   })
 
-  it('allows switching contract mode when idle', () => {
+  it('does not expose experiment acceptance mode globally', () => {
     useProjectStore.setState({
       tasks: [makeTask(false)],
       selectedTaskId: 'PRJ-0001',
@@ -118,11 +118,8 @@ describe('PipelineProgress agent profile switch', () => {
 
     render(<PipelineProgress />)
 
-    const strict = screen.getByRole('button', { name: 'Strict' })
-    expect(strict).not.toBeDisabled()
-    fireEvent.click(strict)
-    const updatedTask = useProjectStore.getState().tasks.find((task) => task.id === 'PRJ-0001')
-    expect(updatedTask?.contractVersion).toBe(2)
+    expect(screen.queryByRole('button', { name: 'Strict' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Compat' })).not.toBeInTheDocument()
   })
 
   it('does not expose interactive planning as a standalone pipeline stage', () => {

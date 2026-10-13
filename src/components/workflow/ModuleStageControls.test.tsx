@@ -125,20 +125,26 @@ describe('ModuleStageControls', () => {
     expect(screen.getByText('2 artifacts')).toBeInTheDocument()
   })
 
-  it.each(['auto', 'manual'] as const)('starts a downstream experiment with its own %s mode', async (mode) => {
+  it.each([['auto', 1], ['auto', 2], ['manual', 1], ['manual', 2]] as const)('starts a downstream experiment with %s execution and %s acceptance', async (mode, contractVersion) => {
     const run = makeRun({ outputs: ['artifact-1'] })
     const snapshot = makeSnapshot(run)
-    useProjectStore.setState({ mode: 'manual' })
+    useProjectStore.setState({ mode: 'manual', contractVersion: 2 })
     useWorkflowStore.setState({ snapshots: { 'PRJ-1': snapshot }, selectedRunByProject: { 'PRJ-1': run.run_id } })
     vi.mocked(fetchWorkflowSnapshot).mockResolvedValue(snapshot)
     vi.mocked(createWorkflowRun).mockResolvedValue({ run_id: 'experiment-run', project_sequence: 3 })
     render(<ModuleStageControls />)
     fireEvent.click(screen.getByRole('button', { name: /Continue to Experiment/ }))
     expect(screen.getByRole('button', { name: 'Auto' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Compat' })).toHaveAttribute('aria-pressed', 'true')
+    const execution = screen.getByRole('group', { name: 'Experiment execution mode' })
+    const acceptance = screen.getByRole('group', { name: 'Experiment acceptance mode' })
+    expect(execution.parentElement).toBe(acceptance.parentElement)
+    expect(execution.parentElement).toHaveClass('grid-cols-2')
+    if (contractVersion === 2) fireEvent.click(screen.getByRole('button', { name: 'Strict' }))
     if (mode === 'manual') fireEvent.click(screen.getByRole('button', { name: 'Manual' }))
     fireEvent.click(screen.getByRole('button', { name: 'Create branch and start' }))
     await waitFor(() => expect(createWorkflowRun).toHaveBeenCalledWith('PRJ-1', expect.objectContaining({
-      moduleType: 'experiment', moduleData: expect.objectContaining({ experiment_execution_mode: mode }),
+      moduleType: 'experiment', moduleData: expect.objectContaining({ experiment_execution_mode: mode, experiment_contract_version: contractVersion }),
     })))
   })
 

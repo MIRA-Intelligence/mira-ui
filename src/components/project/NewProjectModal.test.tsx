@@ -58,7 +58,7 @@ describe('NewProjectModal', () => {
     expect(screen.queryByText('New Research Project')).not.toBeInTheDocument()
   })
 
-  it('syncs profile and contract selection with project store', () => {
+  it('syncs profile while keeping experiment acceptance out of project creation', () => {
     useProjectStore.setState({
       tasks: [{
         id: 'PRJ-0001',
@@ -93,13 +93,14 @@ describe('NewProjectModal', () => {
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'Research' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Strict' }))
+    expect(screen.queryByRole('button', { name: 'Strict' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Compat' })).not.toBeInTheDocument()
 
     const store = useProjectStore.getState()
     expect(store.agentProfile).toBe('research')
-    expect(store.contractVersion).toBe(2)
+    expect(store.contractVersion).toBe(1)
     expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.agentProfile).toBe('research')
-    expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.contractVersion).toBe(2)
+    expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.contractVersion).toBe(1)
   })
 
   it('shows advanced literature source controls with all libraries enabled by default', () => {

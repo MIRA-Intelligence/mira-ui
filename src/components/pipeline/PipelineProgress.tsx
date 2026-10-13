@@ -5,7 +5,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
-import type { AgentProfile, ContractVersion, PipelineStage } from '@/types'
+import type { AgentProfile, PipelineStage } from '@/types'
 import { t } from '@/i18n'
 import type { I18nKey } from '@/i18n'
 
@@ -32,10 +32,6 @@ const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 're
   { key: 'team', labelKey: 'teamMode' },
 ]
 
-const CONTRACT_MODES: { key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }[] = [
-  { key: 1, labelKey: 'contractCompat' },
-  { key: 2, labelKey: 'contractStrict' },
-]
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
   if (stage === 'modules') return null
@@ -68,10 +64,8 @@ export function PipelineProgress() {
     selectedTaskId,
     activeStage,
     agentProfile,
-    contractVersion,
     setActiveStage,
     setAgentProfile,
-    setContractVersion,
   } = useProjectStore()
   const isStreaming = useAgentStore((s) => (selectedTaskId ? (s.streamingBySession[selectedTaskId] ?? false) : false))
   const lang = useSettingsStore((s) => s.language)
@@ -81,8 +75,6 @@ export function PipelineProgress() {
   const task = tasks.find((t) => t.id === selectedTaskId)
   const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
-  const canSwitchContractVersion = !isStreaming && !hasRunningExperiment
-  const effectiveContractVersion = task?.contractVersion ?? contractVersion
   const profileIndex = Math.max(0, PROFILE_OPTIONS.findIndex((p) => p.key === agentProfile))
   const agentProfileSlider = (
     <div className="shrink-0">
@@ -249,35 +241,6 @@ export function PipelineProgress() {
         {toolButtons}
         <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
         {agentProfileSlider}
-        <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
-        <div
-          className={cn(
-            'flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 shrink-0',
-            !canSwitchContractVersion && 'opacity-60',
-          )}
-          title={!canSwitchContractVersion ? t('contractSwitchManualOnly', lang) : undefined}
-        >
-          {CONTRACT_MODES.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              disabled={!canSwitchContractVersion}
-              onClick={() => {
-                if (!canSwitchContractVersion) return
-                setContractVersion(item.key)
-              }}
-              className={cn(
-                'px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors',
-                effectiveContractVersion === item.key
-                  ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                !canSwitchContractVersion && 'cursor-not-allowed',
-              )}
-            >
-              {t(item.labelKey, lang)}
-            </button>
-          ))}
-        </div>
 
         <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 

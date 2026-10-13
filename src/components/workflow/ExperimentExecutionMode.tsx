@@ -7,16 +7,16 @@ export function ExperimentExecutionMode({ value, onChange, disabled = false }: {
 }) {
   const zh = useSettingsStore((state) => state.language) === 'zh'
   return (
-    <fieldset className="mt-4 space-y-2" disabled={disabled}>
+    <fieldset className="min-w-0 space-y-2" disabled={disabled}>
       <legend className="text-xs font-medium text-[var(--color-text-secondary)]">
         {zh ? '实验执行模式' : 'Experiment execution mode'}
       </legend>
-      <div className="flex gap-2">
+      <div className="inline-flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5">
         {(['auto', 'manual'] as const).map((mode) => (
           <button key={mode} type="button" aria-pressed={value === mode} onClick={() => onChange(mode)}
-            className={`rounded-full border px-4 py-1.5 text-xs disabled:opacity-50 ${value === mode
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
-              : 'border-[var(--color-border)] text-[var(--color-text-secondary)]'}`}>
+            className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${value === mode
+              ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
+              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'}`}>
             {mode === 'auto' ? (zh ? '自动' : 'Auto') : (zh ? '手动' : 'Manual')}
           </button>
         ))}
