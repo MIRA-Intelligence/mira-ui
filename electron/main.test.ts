@@ -37,6 +37,7 @@ const electronMock = vi.hoisted(() => {
       }),
       whenReady: vi.fn(() => new Promise<void>(() => {})),
       isReady: vi.fn(() => true),
+      exit: vi.fn(),
     },
     BrowserWindow: MockBrowserWindow,
     dialog: {
@@ -46,7 +47,10 @@ const electronMock = vi.hoisted(() => {
       handle: vi.fn(),
     },
     shell: {
-      openExternal: vi.fn(),
+      openExternal: vi.fn(async (_url: string) => {}),
+    },
+    powerMonitor: {
+      on: vi.fn(),
     },
   }
 })
@@ -57,6 +61,7 @@ vi.mock('electron', () => ({
   dialog: electronMock.dialog,
   ipcMain: electronMock.ipcMain,
   shell: electronMock.shell,
+  powerMonitor: electronMock.powerMonitor,
 }))
 
 vi.mock('./engine/manager', () => ({
@@ -133,5 +138,39 @@ describe('Electron single-instance lifecycle', () => {
     const onHang = window.on.mock.calls.find(([event])=>event === 'unresponsive')?.[1]
     onHang?.()
     expect(logDesktopEvent).toHaveBeenCalledWith('renderer.unresponsive',expect.any(Object),undefined,'ERROR')
+  })
+
+  it('keeps running after a stray promise rejection and records it', async () => {
+    await import('./main')
+    const listener = process.listeners('unhandledRejection').find((item)=>!rejectionListeners.includes(item))
+    expect(listener).toBeTypeOf('function')
+    listener?.(new Error('no handler for slack://'), Promise.resolve())
+    const { logDesktopEvent } = await import('./diagnostics')
+    expect(logDesktopEvent).toHaveBeenCalledWith('process.unhandled_rejection',{},expect.any(Error),'CRITICAL')
+    expect(electronMock.app.exit).not.toHaveBeenCalled()
+  })
+
+  it('handles external links nobody can open without an unhandled rejection', async () => {
+    await import('./main')
+    electronMock.handlers.get('second-instance')?.()
+    const window = electronMock.windows[0]
+    electronMock.shell.openExternal.mockRejectedValueOnce(new Error('No application to open URL'))
+    const openHandler = window.webContents.setWindowOpenHandler.mock.calls[0]?.[0] as (details: { url: string }) => unknown
+    expect(openHandler({ url: 'slack://open' })).toEqual({ action: 'deny' })
+    await new Promise((resolve)=>setTimeout(resolve,0))
+    const { logDesktopEvent } = await import('./diagnostics')
+    expect(logDesktopEvent).toHaveBeenCalledWith('shell.open_external_failed',{},expect.any(Error),'WARNING')
+  })
+
+  it('marks a clean shutdown when Windows ends the session', async () => {
+    await import('./main')
+    electronMock.handlers.get('second-instance')?.()
+    const window = electronMock.windows[0]
+    const onSessionEnd = window.on.mock.calls.find(([event])=>event === 'session-end')?.[1]
+    expect(onSessionEnd).toBeTypeOf('function')
+    onSessionEnd?.()
+    const { initializeDesktopDiagnostics } = await import('./diagnostics')
+    const diagnostics = vi.mocked(initializeDesktopDiagnostics).mock.results[0]?.value as { markCleanShutdown: () => void }
+    expect(diagnostics.markCleanShutdown).toHaveBeenCalled()
   })
 })

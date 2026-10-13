@@ -1,4 +1,4 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor, shell } from 'electron'
 import type { OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
@@ -8,6 +8,8 @@ import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, r
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 
+const EXPORT_IN_PROGRESS = 'Diagnostic export already in progress'
+const STORAGE_UNAVAILABLE = 'Diagnostic storage unavailable'
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 const diagnostics = hasSingleInstanceLock ? initializeDesktopDiagnostics() : null
 if (hasSingleInstanceLock) {
@@ -15,9 +17,10 @@ if (hasSingleInstanceLock) {
   process.on('uncaughtExceptionMonitor', (error) => {
     logDesktopEvent('process.uncaught_exception', {}, error, 'CRITICAL')
   })
+  // Record only: Electron keeps running after a stray rejection (e.g. an
+  // external link no installed app can open), and so should the desktop shell.
   process.on('unhandledRejection', (error) => {
     logDesktopEvent('process.unhandled_rejection', {}, error, 'CRITICAL')
-    app.exit(1)
   })
   try {
     const pruned = pruneNativeCrashDumps(app.getPath('crashDumps'))
@@ -49,7 +52,7 @@ function createWindow() {
   })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    shell.openExternal(url).catch((error) => logDesktopEvent('shell.open_external_failed', {}, error, 'WARNING'))
     return { action: 'deny' }
   })
   win.webContents.on('render-process-gone', (_event, details) => {
@@ -60,12 +63,14 @@ function createWindow() {
   })
   win.on('unresponsive', () => logDesktopEvent('renderer.unresponsive', { window_id: win.id }, undefined, 'ERROR'))
   win.on('responsive', () => logDesktopEvent('renderer.responsive', { window_id: win.id }))
+  win.on('session-end', () => diagnostics?.markCleanShutdown())
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    win.loadURL(process.env.VITE_DEV_SERVER_URL)
-  } else {
-    win.loadFile(join(__dirname, '../dist/index.html'))
-  }
+  // Load failures are also reported through did-fail-load; never let the
+  // returned promise become an unhandled rejection.
+  const loading = process.env.VITE_DEV_SERVER_URL
+    ? win.loadURL(process.env.VITE_DEV_SERVER_URL)
+    : win.loadFile(join(__dirname, '../dist/index.html'))
+  void loading?.catch((error) => logDesktopEvent('renderer.load_rejected', { window_id: win.id }, error, 'ERROR'))
 
   mainWindow = win
   win.on('closed', () => {
@@ -75,6 +80,9 @@ function createWindow() {
 
 function initializeApp() {
   if (!engineManager) return
+  // OS shutdown/logoff can end the process without emitting will-quit; Windows
+  // reports it per window (session-end), Linux/macOS through powerMonitor.
+  powerMonitor.on('shutdown', () => diagnostics?.markCleanShutdown())
 
   let received = 0
   let dropped = 0
@@ -89,9 +97,15 @@ function initializeApp() {
     recordRendererDiagnostic(payload)
   })
   let exportInFlight = false
+  const exportFailureMessage = (error: unknown): string => {
+    const message = error instanceof Error ? error.message : ''
+    if (message === EXPORT_IN_PROGRESS) return 'A diagnostic export is already in progress. / 诊断文件正在导出中，请稍候。'
+    if (message === STORAGE_UNAVAILABLE) return 'Diagnostic storage is unavailable on this device. / 本机诊断存储不可用。'
+    return 'Could not save the diagnostic file. Please try another location. / 无法保存诊断文件，请换一个位置重试。'
+  }
   const exportDesktopDiagnostics = async (includeLocalEngine: boolean): Promise<string | null> => {
-    if (!diagnostics) throw new Error('Diagnostic storage unavailable')
-    if (exportInFlight) throw new Error('Diagnostic export already in progress')
+    if (!diagnostics) throw new Error(STORAGE_UNAVAILABLE)
+    if (exportInFlight) throw new Error(EXPORT_IN_PROGRESS)
     exportInFlight = true
     try {
       const options = {
@@ -132,7 +146,7 @@ function initializeApp() {
       void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode !== 'remoteManual'))
         .catch((error) => {
           logDesktopEvent('diagnostics.export_failed', {}, error)
-          dialog.showErrorBox('MIRA diagnostics', 'Could not save the diagnostic file. Please try another location.')
+          dialog.showErrorBox('MIRA diagnostics', exportFailureMessage(error))
         })
     } }] },
   ]))

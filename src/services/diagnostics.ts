@@ -34,18 +34,25 @@ export function installRuntimeDiagnostics(getEngineApi: () => string): () => voi
   const traceOrigins = new Set<string>()
   const wrappedFetch: typeof fetch = async (input, init) => {
     let url: URL
+    let isProbe = false
     try {
       url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href)
       const engine = new URL(getEngineApi(), window.location.href)
-      if (url.origin !== engine.origin || !url.pathname.startsWith(engine.pathname.replace(/\/$/, '') + '/')) {
+      const apiPath = engine.pathname.replace(/\/$/, '')
+      // The compatibility probe calls /health and /version on the gateway root
+      // (the API URL without /api), so those must negotiate tracing too.
+      const gatewayPath = apiPath.replace(/\/api$/, '')
+      isProbe = url.pathname === `${gatewayPath}/version` || url.pathname === `${gatewayPath}/health`
+      if (url.origin !== engine.origin || (!isProbe && !url.pathname.startsWith(apiPath + '/'))) {
         return originalFetch.call(window, input, init)
       }
     } catch { return originalFetch.call(window, input, init) }
     const requestId = createUuid()
-    const traceSupported = traceOrigins.has(url.origin)
+    const traceSupported = traceOrigins.has(url.origin) && !isProbe
     let options = init
     // Older remote engines do not allow this header in CORS preflight. Negotiate
-    // against /version before adding it; diagnostics must preserve connectivity.
+    // against /version before adding it, and never add it to the probes that
+    // decide whether an engine is reachable; diagnostics must preserve connectivity.
     if (traceSupported) {
       const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
       headers.set('X-Mira-Request-Id', requestId)

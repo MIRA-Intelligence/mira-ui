@@ -94,12 +94,20 @@ export class DesktopDiagnostics {
     const zip = new JSZip()
     const files: string[] = []
     const omissions: string[] = []
+    // Stat each entry once: a dangling link or a file rotated away mid-listing must
+    // become an omission, not abort the whole export.
+    const candidates: Array<{ name: string; modified: number }> = []
     for (const name of readdirSync(this.directory)
-      .filter((item) => /^desktop-\d+-[a-f0-9-]+\.jsonl(?:\.\d+)?$/.test(item))
-      .sort((a,b) => statSync(path.join(this.directory,b)).mtimeMs - statSync(path.join(this.directory,a)).mtimeMs).slice(0,16)) {
+      .filter((item) => /^desktop-\d+-[a-f0-9-]+\.jsonl(?:\.\d+)?$/.test(item))) {
+      try {
+        const info = lstatSync(path.join(this.directory,name))
+        if (info.isSymbolicLink()) omissions.push('symlink_skipped')
+        else candidates.push({ name,modified: info.mtimeMs })
+      } catch { omissions.push('log_read_failed') }
+    }
+    for (const { name } of candidates.sort((a,b) => b.modified - a.modified).slice(0,16)) {
       const file = path.join(this.directory,name)
       try {
-        if (lstatSync(file).isSymbolicLink()) { omissions.push('symlink_skipped'); continue }
         const fd = openSync(file, 'r')
         let data: Buffer
         try {
@@ -123,10 +131,10 @@ export class DesktopDiagnostics {
     if (engine?.error) omissions.push(engine.error)
     // Native minidumps may contain process memory. List only counts, never include
     // their bytes in ordinary support exports.
-    let nativeFiles = 0
-    try { if (crashDirectory) nativeFiles = readdirSync(crashDirectory).length } catch { /* unavailable */ }
+    let nativeDumps = 0
+    try { if (crashDirectory) nativeDumps = findNativeCrashDumps(crashDirectory).length } catch { /* unavailable */ }
     zip.file('manifest.json', JSON.stringify({ ...this.identity, created_at: new Date().toISOString(),
-      files, omissions, write_errors: this.writeErrors, native_crash_directory_entries: nativeFiles,
+      files, omissions, write_errors: this.writeErrors, native_crash_dump_count: nativeDumps,
       privacy: 'Metadata and stack locations only. No config, conversations, tool arguments or native minidumps.',
       engine_scope: engine ? 'Local engine only' : 'Engine not collected; remote engines require server-side export.',
       max_tail_bytes_per_file: TAIL_BYTES },null,2))
@@ -158,8 +166,8 @@ export function recordRendererDiagnostic(input: unknown): void {
   if (record) active?.append('renderer',record)
 }
 
-export function pruneNativeCrashDumps(directory: string, maxFiles = 10,
-  maxBytes = 64 * 1024 * 1024): number {
+// Bounded walk shared by retention and export counts; never follows symlinks.
+function findNativeCrashDumps(directory: string): Array<{ path: string; size: number; modified: number }> {
   const files: Array<{ path: string; size: number; modified: number }> = []
   let visited = 0
   const visit = (current: string, depth: number) => {
@@ -173,8 +181,14 @@ export function pruneNativeCrashDumps(directory: string, maxFiles = 10,
       else if (info.isFile() && name.endsWith('.dmp')) files.push({ path: file,size: info.size,modified: info.mtimeMs })
     }
   }
+  visit(directory,0)
+  return files
+}
+
+export function pruneNativeCrashDumps(directory: string, maxFiles = 10,
+  maxBytes = 64 * 1024 * 1024): number {
   try {
-    visit(directory,0)
+    const files = findNativeCrashDumps(directory)
     let retained = 0
     let bytes = 0
     let removed = 0

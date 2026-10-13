@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -46,6 +46,22 @@ describe('persistent desktop diagnostics', () => {
     expect(texts.join('\n')).not.toContain('patient-private')
     expect(texts.join('\n')).not.toContain('sk-privatekey')
     expect(JSON.parse(await zip.file('manifest.json')!.async('string')).omissions).toContain('symlink_skipped')
+  })
+
+  it('exports despite dangling log links and counts only actual native dumps', async () => {
+    const instance = new DesktopDiagnostics(directory,'test')
+    symlinkSync(path.join(directory,'missing-target'),path.join(directory,'desktop-998-bbbbbbbb.jsonl'))
+    const crashes = path.join(directory,'Crashpad')
+    for (const sub of ['completed','pending','new','attachments']) mkdirSync(path.join(crashes,sub),{ recursive: true })
+    writeFileSync(path.join(crashes,'settings.dat'),'x')
+    writeFileSync(path.join(crashes,'completed','one.dmp'),'x')
+    const destination = path.join(directory,'diagnostics.zip')
+    await instance.exportBundle(destination,undefined,crashes)
+    const zip = await JSZip.loadAsync(readFileSync(destination))
+    const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
+    expect(manifest.omissions).toContain('symlink_skipped')
+    expect(manifest.files).toContain(path.basename(instance.logPath))
+    expect(manifest.native_crash_dump_count).toBe(1)
   })
 
   it('bounds owned native dumps while preserving unrelated files and symlinks', () => {

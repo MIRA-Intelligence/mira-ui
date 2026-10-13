@@ -25,6 +25,22 @@ describe('renderer runtime diagnostics', () => {
     expect((nativeFetch.mock.calls.at(-1) as unknown as [string,RequestInit])[1]).toBeUndefined()
   })
 
+  it('negotiates tracing through the gateway-root version probe used by the app', async () => {
+    const nativeFetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      String(input).endsWith('/version') ? Response.json({ agent_version: '9.9.9', diagnostics_contract: 1 })
+        : String(input).endsWith('/health') ? Response.json({ status: 'ok' })
+          : Response.json({ ok: true }))
+    vi.stubGlobal('fetch',nativeFetch)
+    dispose = installRuntimeDiagnostics(()=> 'http://127.0.0.1:18790/api')
+    const { probeEngineCompatibility } = await import('./engine')
+    await probeEngineCompatibility('http://127.0.0.1:18790/api')
+    expect(nativeFetch.mock.calls.map((call)=>String(call[0]))).toEqual([
+      'http://127.0.0.1:18790/health', 'http://127.0.0.1:18790/version'])
+    await fetch('http://127.0.0.1:18790/api/sessions')
+    const args = nativeFetch.mock.calls.at(-1) as unknown as [string,RequestInit]
+    expect(new Headers(args[1].headers).get('X-Mira-Request-Id')).toBeTruthy()
+  })
+
   it('does not add headers that would break CORS on older remote engines', async () => {
     const nativeFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ agent_version: 'older' }))
     vi.stubGlobal('fetch',nativeFetch)
