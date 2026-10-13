@@ -18,6 +18,8 @@ export function StatusBar() {
   const engineMessage = useSettingsStore((s) => s.engineMessage)
   const engineVersion = useSettingsStore((s) => s.engineVersion)
   const connectionMessage = useSettingsStore((s) => s.connectionMessage)
+  const engineAuthRejected = useSettingsStore((s) => s.engineAuthRejected)
+  const openSettings = useSettingsStore((s) => s.openSettings)
   const localEnginePhase = useSettingsStore((s) => s.localEnginePhase)
   const runtimeConfig = useSettingsStore((s) => s.runtimeConfig)
   const connected = useAgentStore((s) => s.connected)
@@ -36,15 +38,18 @@ export function StatusBar() {
     if (connected && skillSessionId) void loadUsage(skillSessionId)
   }, [connected, skillSessionId, workspace, apiUrl, loadUsage])
 
-  const bannerMessage = connectionMessage || engineMessage
-  const showEngineWarning = Boolean(bannerMessage) && (
+  const authMessage = engineAuthRejected
+    ? t(deploymentMode === 'remoteManual' ? 'engineTokenRejectedRemote' : 'engineTokenRejectedDesktop', lang)
+    : null
+  const bannerMessage = authMessage || connectionMessage || engineMessage
+  const showEngineWarning = Boolean(authMessage) || (Boolean(bannerMessage) && (
     engineStatus === 'incompatible'
       || engineStatus === 'unreachable'
       || engineStatus === 'setup_required'
       || localEnginePhase === 'error'
       || !connected
       || deploymentMode === 'remoteManual'
-  )
+  ))
 
   const engineLabel = useMemo(() => {
     const versionLabel = engineVersion ? `mira-engine ${engineVersion}` : 'mira-engine'
@@ -61,6 +66,11 @@ export function StatusBar() {
       {showEngineWarning && (
         <div className="px-6 py-2 text-xs text-amber-300 bg-amber-950/40 border-b border-amber-500/30">
           {bannerMessage || t('engineWarningFallback', lang)}
+          {authMessage && (
+            <button type="button" onClick={openSettings} className="ml-2 underline hover:text-amber-200">
+              {t('engineTokenOpenSettings', lang)}
+            </button>
+          )}
         </div>
       )}
       <div className="flex items-stretch h-[22px] px-3 gap-2 text-[11px] text-[var(--color-text-muted)]">

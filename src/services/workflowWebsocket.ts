@@ -1,4 +1,5 @@
 import { useSettingsStore } from '@/stores/settingsStore'
+import { withEngineAuth } from './engineAuth'
 import type { WorkflowSocketMessage } from '@/types'
 
 type Handler = (message: WorkflowSocketMessage) => void
@@ -57,7 +58,7 @@ class WorkflowWebSocketClient {
     if (!this.enabled || !this.projectId) return
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) return
     try {
-      this.socket = new WebSocket(workflowWsUrl())
+      this.socket = new WebSocket(withEngineAuth(workflowWsUrl()))
     } catch {
       this.scheduleReconnect()
       return

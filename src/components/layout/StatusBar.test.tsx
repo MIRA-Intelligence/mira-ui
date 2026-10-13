@@ -284,4 +284,13 @@ describe('StatusBar', () => {
     expect(screen.getByText(/部分调用未返回 token 用量/)).toBeInTheDocument()
     expect(screen.getByText(/未知不代表未命中/)).toBeInTheDocument()
   })
+
+  it('explains a rejected engine token and links to settings in remote mode', () => {
+    useSettingsStore.setState({ deploymentMode: 'remoteManual', engineAuthRejected: true, settingsOpen: false })
+    render(<StatusBar />)
+
+    expect(screen.getByText(/token is missing or invalid/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+    expect(useSettingsStore.getState().settingsOpen).toBe(true)
+  })
 })

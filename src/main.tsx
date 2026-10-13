@@ -4,8 +4,14 @@ import App from './App'
 import './styles/globals.css'
 import { installRuntimeDiagnostics, recordDiagnostic, exportDiagnostics } from './services/diagnostics'
 import { useSettingsStore } from './stores/settingsStore'
+import { engineOrigin, installEngineAuth } from './services/engineAuth'
 
 installRuntimeDiagnostics(() => useSettingsStore.getState().apiUrl)
+// Installed after diagnostics so the token is added before the request is traced.
+installEngineAuth((origin) => {
+  const settings = useSettingsStore.getState()
+  if (origin === engineOrigin(settings.apiUrl)) settings.setEngineAuthRejected(true)
+})
 
 type ErrorBoundaryState = {
   error: Error | null

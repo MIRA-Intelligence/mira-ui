@@ -2,6 +2,7 @@ import compatibility from '../../compatibility.json'
 import type { RuntimeConfigPayload } from './runtimeConfig'
 import { t } from '@/i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { usesDesktopEngineToken } from './engineAuth'
 
 export type EngineProbeStatus = 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 
@@ -157,6 +158,15 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
     }
 
     const configResp = await fetch(`${base}/api/config`)
+    if (configResp.status === 401) {
+      // Reachable and compatible, but our gateway token is missing or stale.
+      return {
+        status: 'unreachable',
+        message: t(usesDesktopEngineToken(base) ? 'engineTokenRejectedDesktop' : 'engineTokenRejectedRemote', lang),
+        version,
+        uptimeSeconds,
+      }
+    }
     if (!configResp.ok) {
       return {
         status: 'incompatible',

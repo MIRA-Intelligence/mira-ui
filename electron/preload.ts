@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
   setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
+  getEngineToken: () => ipcRenderer.invoke('engine:gateway-token'),
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),
   startLocalEngine: () => ipcRenderer.invoke('engine:start'),

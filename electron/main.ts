@@ -4,12 +4,14 @@ import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
 import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
+import { isMainFrameSender, readGatewayToken } from './engineToken'
 import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, recordRendererDiagnostic } from './diagnostics'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 const EXPORT_IN_PROGRESS = 'Diagnostic export already in progress'
 const STORAGE_UNAVAILABLE = 'Diagnostic storage unavailable'
+const miraHome = () => process.env.MIRA_HOME || path.join(app.getPath('home'), '.mira')
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 const diagnostics = hasSingleInstanceLock ? initializeDesktopDiagnostics() : null
 if (hasSingleInstanceLock) {
@@ -121,7 +123,7 @@ function initializeApp() {
           const payload = JSON.parse(result.stdout) as { diagnostics_bundle?: string }
           if (typeof payload.diagnostics_bundle !== 'string') throw new Error('No engine bundle')
           const file = await realpath(payload.diagnostics_bundle)
-          const root = await realpath(path.join(process.env.MIRA_HOME || path.join(app.getPath('home'), '.mira'), 'runtime', 'diagnostics'))
+          const root = await realpath(path.join(miraHome(), 'runtime', 'diagnostics'))
           const relative = path.relative(root, file)
           if (relative.startsWith('..') || path.isAbsolute(relative) || !file.endsWith('.zip') || !(await stat(file)).isFile()) throw new Error('Invalid engine bundle')
           engine = { path: file }
@@ -152,6 +154,9 @@ function initializeApp() {
   ]))
 
   ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
+  ipcMain.handle('engine:gateway-token', async (event) => (
+    isMainFrameSender(event, mainWindow?.webContents) ? readGatewayToken(miraHome()) : null
+  ))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
   ipcMain.handle('engine:start', async () => engineManager.start())

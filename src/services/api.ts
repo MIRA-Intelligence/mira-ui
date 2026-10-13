@@ -1,5 +1,6 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import { createUuid } from '@/lib/uuid'
+import { withEngineAuth } from './engineAuth'
 import type {
   AgentProfile,
   ContractVersion,
@@ -577,7 +578,7 @@ export async function validateDataPath(path: string, purpose?: 'experiment_input
 export function getProjectArtifactUrl(sessionId: string, artifactPath: string): string {
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
-  return `${getApiUrl()}/projects/${sid}/artifacts?path=${path}`
+  return withEngineAuth(`${getApiUrl()}/projects/${sid}/artifacts?path=${path}`)
 }
 
 export async function fetchSkillPlugins(sessionId: string): Promise<SkillPlugin[]> {
@@ -717,7 +718,7 @@ export async function fetchWorkflowArtifact(
 }
 
 export function getWorkflowArtifactContentUrl(projectId: string, artifactId: string): string {
-  return `${getApiUrl()}/workflow/v1/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`
+  return withEngineAuth(`${getApiUrl()}/workflow/v1/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/content`)
 }
 
 export async function commandWorkflowRun(

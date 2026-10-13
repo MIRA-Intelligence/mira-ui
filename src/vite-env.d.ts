@@ -27,6 +27,7 @@ interface Window {
       error: string | null
     }>
     setEngineModeHint?: (mode: 'localBundle' | 'remoteManual') => Promise<boolean>
+    getEngineToken?: () => Promise<string | null>
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string

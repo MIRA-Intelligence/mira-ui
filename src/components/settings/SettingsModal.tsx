@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSettingsStore, type DeploymentMode, type Theme, type Language, type SendShortcut } from '@/stores/settingsStore'
+import { engineTokenOrigin, useSettingsStore, type DeploymentMode, type Theme, type Language, type SendShortcut } from '@/stores/settingsStore'
 import {
   bootstrapLocalEngine,
   doctorLocalEngine,
@@ -32,6 +32,7 @@ type SettingsDraft = {
   deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
+  engineToken: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
@@ -52,6 +53,11 @@ function remoteWsFallback(): string {
   return `${proto}://${host}:18790/ws`
 }
 
+function storedEngineToken(store: ReturnType<typeof useSettingsStore.getState>, apiUrl: string): string {
+  const origin = engineTokenOrigin(apiUrl)
+  return origin ? store.engineTokens[origin] ?? '' : ''
+}
+
 function createDraft(store: ReturnType<typeof useSettingsStore.getState>): SettingsDraft {
   return {
     workspacePath: store.workspacePath,
@@ -60,6 +66,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     deploymentMode: store.deploymentMode,
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
+    engineToken: storedEngineToken(store, store.apiUrl),
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
@@ -241,6 +248,9 @@ export function SettingsModal() {
           ? LOCAL_WS_URL
           : storedRemote?.wsUrl ?? (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
         workspacePath: storedRemote?.workspacePath ?? base.workspacePath,
+        engineToken: mode === 'localBundle'
+          ? current.engineToken
+          : storedEngineToken(store, storedRemote?.apiUrl ?? current.apiUrl),
       }
     })
     if (mode === 'localBundle') {
@@ -276,6 +286,8 @@ export function SettingsModal() {
 
       const targetApiUrl = local ? LOCAL_API_URL : nextApiUrl
       const targetWsUrl = local ? LOCAL_WS_URL : nextWsUrl
+      // The token must be in place before the engine is contacted below.
+      if (!local) store.setEngineToken(targetApiUrl, draft.engineToken)
 
       // Saving preferences must not undo an explicit Stop. Engine lifecycle
       // is handled by the dedicated controls; runtime writes require it online.
@@ -631,13 +643,29 @@ export function SettingsModal() {
                     onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
                     className={inputClass}
                   />
+                  <Label text={t('engineToken', curLang)} className="mt-3" />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.engineToken}
+                    placeholder={t('engineTokenPlaceholder', curLang)}
+                    onChange={(e) => setDraft((current) => ({ ...current, engineToken: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                    {t('engineTokenHint', curLang)}
+                  </p>
                   <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
                     Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
                   </p>
                   <div className="mt-3">
                     <ActionButton
                       disabled={busy || runtimeLoading || !draft.apiUrl.trim()}
-                      onClick={() => void loadRuntimeConfig('remoteManual', draft.apiUrl, false)}
+                      onClick={() => {
+                        store.setEngineToken(draft.apiUrl, draft.engineToken)
+                        void loadRuntimeConfig('remoteManual', draft.apiUrl, false)
+                      }}
                     >
                       {runtimeLoading ? 'Refreshing...' : 'Refresh from engine'}
                     </ActionButton>

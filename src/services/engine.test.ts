@@ -359,4 +359,20 @@ describe('probeEngineCompatibility', () => {
     expect(result.status).toBe('compatible')
     expect(result.uptimeSeconds).toBeNull()
   })
+
+  it('explains a rejected gateway token instead of a generic config failure', async () => {
+    useSettingsStore.setState({ deploymentMode: 'remoteManual', engineTokens: {} })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/health')) return Response.json({ status: 'ok' })
+      if (url.endsWith('/version')) return Response.json({ agent_version: compatibleEngineVersion, api_contract: 'v1' })
+      return Response.json({ error: 'unauthorized' }, { status: 401 })
+    }))
+
+    const result = await probeEngineCompatibility('https://mira.lab.example:18790/api')
+
+    expect(result.status).toBe('unreachable')
+    expect(result.message).toContain('mira gateway-token')
+    expect(result.version).toBe(compatibleEngineVersion)
+  })
 })
