@@ -8,7 +8,10 @@ export type RemoteSshErrorCode =
   | 'invalid_host'
   | 'invalid_command'
   | 'auth_required'
+  | 'auth_cancelled'
+  | 'prompt_unsupported'
   | 'host_key'
+  | 'host_key_changed'
   | 'ssh_failed'
   | 'not_installed'
   | 'incompatible'
@@ -104,4 +107,51 @@ export function onRemoteSshStatus(listener: (status: RemoteSshStatus) => void): 
   const subscribe = window.electronAPI?.onRemoteSshStatus
   if (typeof subscribe !== 'function') return () => {}
   return subscribe((status) => listener(sanitizeRemoteSshStatus(status)))
+}
+
+// A question ssh needs answered while logging in (askpass). host_key: an
+// unknown server key to confirm; secret: password, passphrase or one-time code.
+export type SshPromptKind = 'host_key' | 'secret'
+
+export interface SshPrompt {
+  id: string
+  host: string
+  kind: SshPromptKind
+  text: string
+  retry: boolean
+}
+
+export function sanitizeSshPrompt(value: unknown): SshPrompt | null {
+  if (!isRecord(value) || typeof value.id !== 'string' || !value.id || typeof value.text !== 'string') return null
+  return {
+    id: value.id,
+    host: typeof value.host === 'string' ? value.host : '',
+    kind: value.kind === 'host_key' ? 'host_key' : 'secret',
+    text: value.text.slice(0, 4000),
+    retry: value.retry === true,
+  }
+}
+
+export function onSshPrompt(listener: (prompt: SshPrompt) => void): () => void {
+  const subscribe = window.electronAPI?.onRemoteSshPrompt
+  if (typeof subscribe !== 'function') return () => {}
+  return subscribe((value) => {
+    const prompt = sanitizeSshPrompt(value)
+    if (prompt) listener(prompt)
+  })
+}
+
+export function onSshPromptCancel(listener: (id: string) => void): () => void {
+  const subscribe = window.electronAPI?.onRemoteSshPromptCancel
+  if (typeof subscribe !== 'function') return () => {}
+  return subscribe((value) => {
+    if (isRecord(value) && typeof value.id === 'string') listener(value.id)
+  })
+}
+
+// null cancels the login.
+export async function answerSshPrompt(id: string, answer: string | null): Promise<boolean> {
+  const respond = window.electronAPI?.answerRemoteSshPrompt
+  if (typeof respond !== 'function') return false
+  return respond(id, answer).catch(() => false)
 }

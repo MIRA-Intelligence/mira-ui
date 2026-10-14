@@ -1,15 +1,31 @@
-import { spawn as nodeSpawn } from 'node:child_process'
+import { execFile, spawn as nodeSpawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 import { TOKEN_PATTERN } from './engineToken'
+import {
+  askpassSupported,
+  classifyPrompt,
+  parseSshVersion,
+  PROMPT_TEXT_LIMIT,
+  type AskpassSession,
+  type PromptHandler,
+  type SshPromptRequest,
+  type SshVersion,
+} from './sshAskpass'
 
 // Remote-SSH (Mode B in MIRA-Intelligence/mira docs/server-edition/architecture.md):
 // the system `ssh` starts or attaches the user's engine on the server
 // (`mira remote attach --json`, MIRA-Intelligence/mira#166), then forwards a
 // local loopback port to it. SSH handles authentication; Mira stores no SSH
 // credentials, and the gateway token stays in this process's memory.
+//
+// Passwords, key passphrases, one-time codes and unknown host keys are asked
+// through SSH_ASKPASS (sshAskpass.ts), like VS Code Remote-SSH. On macOS/Linux
+// one ControlMaster connection carries both attach and the port forward, so a
+// password is asked once per connection. Windows OpenSSH has no ControlMaster:
+// attach and the tunnel log in separately and a password is asked twice.
 
 export const REMOTE_PROTOCOL = 1
 export const DEFAULT_MIRA_COMMAND = 'mira'
@@ -32,7 +48,10 @@ export type RemoteSshErrorCode =
   | 'invalid_host'
   | 'invalid_command'
   | 'auth_required'
+  | 'auth_cancelled'
+  | 'prompt_unsupported'
   | 'host_key'
+  | 'host_key_changed'
   | 'ssh_failed'
   | 'not_installed'
   | 'incompatible'
@@ -91,30 +110,63 @@ export function sshExecutable(platform: NodeJS.Platform = process.platform, env:
   return exists(builtin) ? builtin : 'ssh.exe'
 }
 
-// BatchMode keeps ssh from ever blocking on a password or host-key prompt we
-// cannot show; such cases surface as auth_required / host_key instead.
-function baseOptions(target: SshTarget): string[] {
+const portArgs = (target: SshTarget) => (target.port ? ['-p', String(target.port)] : [])
+const forwardSpec = (localPort: number, remotePort: number) => `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`
+const KEEPALIVE = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3']
+
+// Without prompt support BatchMode keeps ssh from ever blocking on a password
+// or host-key prompt nobody can answer; such cases surface as auth_required /
+// host_key instead. With prompts, ssh asks through SSH_ASKPASS.
+function baseOptions(target: SshTarget, interactive: boolean): string[] {
   return [
-    '-o', 'BatchMode=yes',
+    ...(interactive ? [] : ['-o', 'BatchMode=yes']),
     '-o', 'ConnectTimeout=15',
-    ...(target.port ? ['-p', String(target.port)] : []),
+    ...portArgs(target),
   ]
 }
 
-export function buildAttachArgs(target: SshTarget, miraCommand = DEFAULT_MIRA_COMMAND): string[] {
-  return [...baseOptions(target), target.destination, '--', attachCommand(miraCommand)]
+export function buildAttachArgs(target: SshTarget, miraCommand = DEFAULT_MIRA_COMMAND, interactive = false): string[] {
+  return [...baseOptions(target, interactive), target.destination, '--', attachCommand(miraCommand)]
 }
 
-export function buildTunnelArgs(target: SshTarget, localPort: number, remotePort: number): string[] {
+export function buildTunnelArgs(target: SshTarget, localPort: number, remotePort: number, interactive = false): string[] {
   return [
     '-N',
     '-o', 'ExitOnForwardFailure=yes',
-    '-o', 'ServerAliveInterval=15',
-    '-o', 'ServerAliveCountMax=3',
-    ...baseOptions(target),
-    '-L', `127.0.0.1:${localPort}:127.0.0.1:${remotePort}`,
+    ...KEEPALIVE,
+    ...baseOptions(target, interactive),
+    '-L', forwardSpec(localPort, remotePort),
     target.destination,
   ]
+}
+
+// The long-lived, authenticated connection (macOS/Linux). It stays in the
+// foreground as our child, so its exit means the connection is gone.
+export function buildMasterArgs(target: SshTarget, controlPath: string): string[] {
+  return [
+    '-N',
+    '-o', 'ControlMaster=yes',
+    '-o', `ControlPath=${controlPath}`,
+    '-o', 'ControlPersist=no',
+    ...KEEPALIVE,
+    ...baseOptions(target, true),
+    target.destination,
+  ]
+}
+
+// Clients of the master never authenticate: BatchMode stops a client whose
+// master is gone from silently opening (and prompting for) a new connection.
+function muxOptions(target: SshTarget, controlPath: string): string[] {
+  return ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`, '-o', 'BatchMode=yes', ...portArgs(target)]
+}
+
+export function buildMuxAttachArgs(target: SshTarget, controlPath: string, miraCommand = DEFAULT_MIRA_COMMAND): string[] {
+  return [...muxOptions(target, controlPath), target.destination, '--', attachCommand(miraCommand)]
+}
+
+// The forward lives in the master and ends with it.
+export function buildMuxForwardArgs(target: SshTarget, controlPath: string, operation: 'forward' | 'cancel', localPort: number, remotePort: number): string[] {
+  return [...muxOptions(target, controlPath), '-O', operation, '-L', forwardSpec(localPort, remotePort), target.destination]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,6 +189,22 @@ function lastJsonLine(stdout: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+// ssh itself failed (exit 255) or never finished (null).
+export function classifySshFailure(code: number | null, stderr: string): Extract<AttachOutcome, { ok: false }> {
+  if (code === null) return { ok: false, code: 'ssh_failed', message: 'Timed out waiting for the server.' }
+  // A changed key may mean an attack; it is never accepted from the app.
+  if (/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key for .* has changed/i.test(stderr)) {
+    return { ok: false, code: 'host_key_changed', message: 'The server host key has changed.' }
+  }
+  if (/Host key verification failed/i.test(stderr)) {
+    return { ok: false, code: 'host_key', message: lastLine(stderr) }
+  }
+  if (/Permission denied|Too many authentication failures|no matching host key|Authentication failed/i.test(stderr)) {
+    return { ok: false, code: 'auth_required', message: lastLine(stderr) }
+  }
+  return { ok: false, code: 'ssh_failed', message: lastLine(stderr) || 'ssh failed' }
 }
 
 export function parseAttachOutput(result: { code: number | null; stdout: string; stderr: string }): AttachOutcome {
@@ -173,18 +241,7 @@ export function parseAttachOutput(result: { code: number | null; stdout: string;
   }
 
   const stderr = result.stderr
-  if (result.code === 255) {
-    if (/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/i.test(stderr)) {
-      return { ok: false, code: 'host_key', message: lastLine(stderr) }
-    }
-    if (/Permission denied|Too many authentication failures|no matching host key|Authentication failed/i.test(stderr)) {
-      return { ok: false, code: 'auth_required', message: lastLine(stderr) }
-    }
-    return { ok: false, code: 'ssh_failed', message: lastLine(stderr) || 'ssh failed' }
-  }
-  if (result.code === null) {
-    return { ok: false, code: 'ssh_failed', message: 'Timed out waiting for the server.' }
-  }
+  if (result.code === 255 || result.code === null) return classifySshFailure(result.code, stderr)
   if (result.code === 127 || /not found|No such file or directory/i.test(stderr)) {
     return { ok: false, code: 'not_installed', message: lastLine(stderr) }
   }
@@ -259,34 +316,87 @@ export interface SshChild {
   once(event: 'error', listener: (error: Error) => void): unknown
 }
 
+export async function waitForFile(file: string, timeoutMs: number, intervalMs = 100): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (existsSync(file)) return true
+    await new Promise((resolve) => setTimeout(resolve, intervalMs))
+  }
+  return false
+}
+
+export function detectSshVersion(executable: string): Promise<SshVersion | null> {
+  return new Promise((resolve) => {
+    execFile(executable, ['-V'], { timeout: 5000, windowsHide: true }, (_error, stdout, stderr) => {
+      resolve(parseSshVersion(`${stderr}\n${stdout}`))
+    })
+  })
+}
+
 export interface RemoteSshDeps {
   executable: string
-  spawn: (command: string, args: string[]) => SshChild
+  platform: NodeJS.Platform
+  // `env` is added to the inherited environment (askpass variables).
+  spawn: (command: string, args: string[], env?: Record<string, string>) => SshChild
   getFreePort: (preferred?: number | null) => Promise<number>
   waitForPort: (port: number, timeoutMs: number) => Promise<boolean>
+  waitForFile: (file: string, timeoutMs: number) => Promise<boolean>
   log: (event: string, fields: Record<string, string | number | boolean | null>) => void
   setTimer: (callback: () => void, ms: number) => unknown
   clearTimer: (handle: unknown) => void
   attachTimeoutMs: number
   tunnelReadyTimeoutMs: number
+  // Covers the time the user spends answering prompts.
+  loginTimeoutMs: number
+  // Interactive prompts. Without them ssh runs in BatchMode (key-only login).
+  openAskpass?: (handler: PromptHandler) => Promise<AskpassSession>
+  prompt?: (request: SshPromptRequest, signal: AbortSignal) => Promise<string | null>
+  // Private directory for ControlMaster sockets; without it every ssh
+  // process logs in on its own.
+  controlDir?: () => Promise<string>
+  sshVersion?: () => Promise<SshVersion | null>
 }
 
 export const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000]
 export const MAX_RECONNECT_ATTEMPTS = 10
 const OUTPUT_LIMIT = 64 * 1024
+// After sleep, a quick attach over the surviving master tells whether the
+// connection still works before anyone is asked to log in again.
+const RESUME_CHECK_MS = 20_000
+const MUX_COMMAND_MS = 15_000
+// ssh-level failures mean the master connection itself is unusable.
+const CONNECTION_CODES = new Set<RemoteSshErrorCode>(['ssh_failed', 'auth_required', 'host_key', 'host_key_changed'])
 
 export function defaultRemoteSshDeps(log: RemoteSshDeps['log']): RemoteSshDeps {
+  const executable = sshExecutable()
   return {
-    executable: sshExecutable(),
-    spawn: (command, args) => nodeSpawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }),
+    executable,
+    platform: process.platform,
+    // Own session on macOS/Linux: without a controlling terminal every
+    // OpenSSH release asks through SSH_ASKPASS instead of /dev/tty.
+    spawn: (command, args, env) => nodeSpawn(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      detached: process.platform !== 'win32',
+      env: env ? { ...process.env, ...env } : process.env,
+    }),
     getFreePort,
     waitForPort,
+    waitForFile,
     log,
     setTimer: (callback, ms) => setTimeout(callback, ms),
     clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     attachTimeoutMs: 90_000,
     tunnelReadyTimeoutMs: 20_000,
+    loginTimeoutMs: 300_000,
+    sshVersion: () => detectSshVersion(executable),
   }
+}
+
+interface ConnectMode {
+  interactive: boolean
+  multiplex: boolean
+  version: SshVersion | null
 }
 
 export class RemoteSshManager {
@@ -294,10 +404,20 @@ export class RemoteSshManager {
   private target: SshTarget | null = null
   private miraCommand = DEFAULT_MIRA_COMMAND
   private token: string | null = null
+  // Direct mode: the `ssh -N -L` tunnel. Multiplexed mode: the master.
   private tunnel: SshChild | null = null
+  private master: SshChild | null = null
+  private controlPath: string | null = null
+  private forward: { local: number; remote: number } | null = null
+  private readonly children = new Set<SshChild>()
   private generation = 0
+  private sequence = 0
   private pending: Promise<RemoteSshStatus> | null = null
   private retryTimer: unknown = null
+  private abort: AbortController | null = null
+  private cancelled = false
+  private seenPrompts = new Set<string>()
+  private modePromise: Promise<ConnectMode> | null = null
   private listeners = new Set<(status: RemoteSshStatus) => void>()
 
   constructor(private readonly deps: RemoteSshDeps) {}
@@ -346,10 +466,16 @@ export class RemoteSshManager {
     return this.status()
   }
 
-  // After sleep the forwarded TCP connections are usually dead; rebuild the
-  // tunnel right away instead of waiting for ServerAlive to notice.
+  // After sleep the forwarded TCP connections are usually dead. A master that
+  // survived is checked with a quick attach (no new login); anything else is
+  // rebuilt right away instead of waiting for ServerAlive to notice.
   handleResume(): void {
     if (!this.target || !['connected', 'reconnecting'].includes(this.state.phase)) return
+    if (this.state.phase === 'connected' && this.master && this.controlPath) {
+      this.update({ phase: 'reconnecting', attempt: 0, error: null })
+      void this.establish(this.generation, true)
+      return
+    }
     const localPort = this.state.localPort
     this.stop()
     this.update({ phase: 'reconnecting', attempt: 0, error: null, localPort })
@@ -365,6 +491,8 @@ export class RemoteSshManager {
     this.generation += 1
     this.pending = null
     this.token = null
+    this.abort?.abort()
+    this.abort = null
     if (this.retryTimer !== null) {
       this.deps.clearTimer(this.retryTimer)
       this.retryTimer = null
@@ -372,6 +500,17 @@ export class RemoteSshManager {
     const tunnel = this.tunnel
     this.tunnel = null
     tunnel?.kill()
+    this.dropMaster()
+    for (const child of this.children) child.kill()
+    this.children.clear()
+  }
+
+  private dropMaster(): void {
+    const master = this.master
+    this.master = null
+    this.controlPath = null
+    this.forward = null
+    master?.kill()
   }
 
   private update(patch: Partial<RemoteSshStatus>): void {
@@ -380,44 +519,177 @@ export class RemoteSshManager {
     for (const listener of this.listeners) listener(snapshot)
   }
 
-  private establish(generation: number): Promise<RemoteSshStatus> {
-    const run = this.attachAndForward(generation).finally(() => {
+  private establish(generation: number, resuming = false): Promise<RemoteSshStatus> {
+    const run = this.connectOnce(generation, resuming).finally(() => {
       if (this.pending === run) this.pending = null
     })
     this.pending = run
     return run
   }
 
-  private async attachAndForward(generation: number): Promise<RemoteSshStatus> {
-    const target = this.target
-    if (!target) return this.status()
+  private mode(): Promise<ConnectMode> {
+    this.modePromise ??= (async () => {
+      if (!this.deps.openAskpass || !this.deps.prompt) return { interactive: false, multiplex: false, version: null }
+      const version = this.deps.sshVersion ? await this.deps.sshVersion().catch(() => null) : null
+      const interactive = askpassSupported(this.deps.platform, version)
+      // Windows OpenSSH has no ControlMaster support.
+      return { interactive, multiplex: interactive && this.deps.platform !== 'win32' && Boolean(this.deps.controlDir), version }
+    })()
+    return this.modePromise
+  }
+
+  private async connectOnce(generation: number, resuming: boolean): Promise<RemoteSshStatus> {
+    if (!this.target) return this.status()
+    const mode = await this.mode()
+    if (generation !== this.generation) return this.status()
+    // A live master is reused: no new login, no prompt.
+    if (mode.multiplex && this.master && this.controlPath) return this.attachOverMaster(generation, resuming)
+
+    this.abort = new AbortController()
+    this.cancelled = false
+    this.seenPrompts = new Set()
+    let askpass: AskpassSession | null = null
+    try {
+      askpass = mode.interactive ? await this.deps.openAskpass!((text) => this.onPrompt(generation, text)) : null
+      if (generation !== this.generation) return this.status()
+      return mode.multiplex
+        ? await this.loginMaster(generation, askpass!.env)
+        : await this.attachAndForward(generation, mode, askpass?.env)
+    } finally {
+      askpass?.dispose()
+    }
+  }
+
+  private async onPrompt(generation: number, text: string): Promise<string | null> {
+    const signal = this.abort?.signal
+    if (generation !== this.generation || !signal || !this.deps.prompt) return null
+    const key = text.trim()
+    const retry = this.seenPrompts.has(key)
+    this.seenPrompts.add(key)
+    const kind = classifyPrompt(text)
+    this.deps.log('remote_ssh.prompt', { kind, retry })
+    const answer = await this.deps.prompt({ host: this.state.host ?? '', kind, text: text.slice(0, PROMPT_TEXT_LIMIT), retry }, signal)
+    if (answer === null && generation === this.generation) {
+      // Cancelled (or timed out): stop ssh instead of letting it retry.
+      this.cancelled = true
+      this.tunnel?.kill()
+      this.master?.kill()
+      for (const child of this.children) child.kill()
+    }
+    return answer
+  }
+
+  private async loginMaster(generation: number, env: Record<string, string>): Promise<RemoteSshStatus> {
+    const target = this.target!
+    const controlPath = path.join(await this.deps.controlDir!(), `m${++this.sequence}`)
+    if (generation !== this.generation) return this.status()
+    const master = this.deps.spawn(this.deps.executable, buildMasterArgs(target, controlPath), env)
+    this.master = master
+    let stderr = ''
+    let exitCode: number | null = null
+    master.stderr?.on('data', (chunk: Buffer | string) => { stderr = (stderr + String(chunk)).slice(-OUTPUT_LIMIT) })
+    const exited = new Promise<false>((resolve) => {
+      master.once('exit', (code) => {
+        exitCode = code ?? 255
+        resolve(false)
+        this.onConnectionExit(generation, master)
+      })
+      master.once('error', (error) => {
+        stderr += `\n${error.message}`
+        exitCode = 255
+        resolve(false)
+      })
+    })
+    // The control socket appears only after a successful login.
+    const ready = await Promise.race([this.deps.waitForFile(controlPath, this.deps.loginTimeoutMs), exited])
+    if (generation !== this.generation) return this.status()
+    if (!ready) {
+      if (this.master === master) this.dropMaster()
+      if (this.cancelled) return this.fail(generation, 'auth_cancelled', 'Login cancelled.')
+      const failure = classifySshFailure(exitCode, stderr)
+      return this.fail(generation, failure.code, failure.message)
+    }
+    this.controlPath = controlPath
+    return this.attachOverMaster(generation, false)
+  }
+
+  private async attachOverMaster(generation: number, resuming: boolean): Promise<RemoteSshStatus> {
+    const target = this.target!
+    const controlPath = this.controlPath!
     // Every (re)connect re-runs attach and takes port and token from its
     // answer: a server-side restart can move the engine to another port.
-    const output = await this.run(buildAttachArgs(target, this.miraCommand), this.deps.attachTimeoutMs)
+    const output = await this.run(buildMuxAttachArgs(target, controlPath, this.miraCommand), resuming ? RESUME_CHECK_MS : this.deps.attachTimeoutMs)
     if (generation !== this.generation) return this.status()
     const attach = parseAttachOutput(output)
-    if (!attach.ok) return this.fail(generation, attach.code, attach.message)
+    if (!attach.ok) {
+      if (CONNECTION_CODES.has(attach.code)) this.dropMaster()
+      return this.fail(generation, attach.code, attach.message)
+    }
+    if (this.forward && this.forward.remote !== attach.port) {
+      await this.run(buildMuxForwardArgs(target, controlPath, 'cancel', this.forward.local, this.forward.remote), MUX_COMMAND_MS)
+      this.forward = null
+      if (generation !== this.generation) return this.status()
+    }
+    if (!this.forward) {
+      const localPort = await this.deps.getFreePort(this.state.localPort)
+      if (generation !== this.generation) return this.status()
+      const result = await this.run(buildMuxForwardArgs(target, controlPath, 'forward', localPort, attach.port), MUX_COMMAND_MS)
+      if (generation !== this.generation) return this.status()
+      if (result.code !== 0) return this.fail(generation, 'tunnel_failed', lastLine(result.stderr) || 'Could not forward the engine port over SSH.')
+      this.forward = { local: localPort, remote: attach.port }
+    }
+    const localPort = this.forward.local
+    const ready = await this.deps.waitForPort(localPort, this.deps.tunnelReadyTimeoutMs)
+    if (generation !== this.generation) return this.status()
+    if (!ready) {
+      this.dropMaster()
+      return this.fail(generation, 'tunnel_failed', 'Could not forward the engine port over SSH.')
+    }
+    return this.connected(attach, localPort)
+  }
+
+  private async attachAndForward(generation: number, mode: ConnectMode, env?: Record<string, string>): Promise<RemoteSshStatus> {
+    const target = this.target!
+    // Every (re)connect re-runs attach and takes port and token from its
+    // answer: a server-side restart can move the engine to another port.
+    const output = await this.run(buildAttachArgs(target, this.miraCommand, mode.interactive), this.deps.attachTimeoutMs + (mode.interactive ? this.deps.loginTimeoutMs : 0), env)
+    if (generation !== this.generation) return this.status()
+    if (this.cancelled) return this.fail(generation, 'auth_cancelled', 'Login cancelled.')
+    const attach = parseAttachOutput(output)
+    if (!attach.ok) {
+      // Windows OpenSSH too old for prompts: say why a password cannot work.
+      if (attach.code === 'auth_required' && !mode.interactive && this.deps.openAskpass) {
+        return this.fail(generation, 'prompt_unsupported', mode.version?.raw ?? 'unknown OpenSSH version')
+      }
+      return this.fail(generation, attach.code, attach.message)
+    }
 
     const localPort = await this.deps.getFreePort(this.state.localPort)
     if (generation !== this.generation) return this.status()
-    const tunnel = this.deps.spawn(this.deps.executable, buildTunnelArgs(target, localPort, attach.port))
+    const tunnel = this.deps.spawn(this.deps.executable, buildTunnelArgs(target, localPort, attach.port, mode.interactive), env)
     this.tunnel = tunnel
     let stderr = ''
     tunnel.stderr?.on('data', (chunk: Buffer | string) => { stderr = (stderr + String(chunk)).slice(-OUTPUT_LIMIT) })
     const exited = new Promise<false>((resolve) => {
       tunnel.once('exit', () => {
         resolve(false)
-        this.onTunnelExit(generation, tunnel)
+        this.onConnectionExit(generation, tunnel)
       })
       tunnel.once('error', () => resolve(false))
     })
-    const ready = await Promise.race([this.deps.waitForPort(localPort, this.deps.tunnelReadyTimeoutMs), exited])
+    const readyTimeout = this.deps.tunnelReadyTimeoutMs + (mode.interactive ? this.deps.loginTimeoutMs : 0)
+    const ready = await Promise.race([this.deps.waitForPort(localPort, readyTimeout), exited])
     if (generation !== this.generation) return this.status()
     if (!ready) {
       this.tunnel = null
       tunnel.kill()
+      if (this.cancelled) return this.fail(generation, 'auth_cancelled', 'Login cancelled.')
       return this.fail(generation, 'tunnel_failed', lastLine(stderr) || 'Could not forward the engine port over SSH.')
     }
+    return this.connected(attach, localPort)
+  }
+
+  private connected(attach: Extract<AttachOutcome, { ok: true }>, localPort: number): RemoteSshStatus {
     this.token = attach.token
     this.deps.log('remote_ssh.connected', { phase: 'connected', version: attach.version, operation: attach.started ? 'start' : 'attach' })
     this.update({ phase: 'connected', localPort, version: attach.version, error: null, attempt: 0 })
@@ -437,9 +709,14 @@ export class RemoteSshManager {
     return this.status()
   }
 
-  private onTunnelExit(generation: number, tunnel: SshChild): void {
-    if (generation !== this.generation || tunnel !== this.tunnel) return
-    this.tunnel = null
+  private onConnectionExit(generation: number, child: SshChild): void {
+    if (generation !== this.generation) return
+    if (child === this.tunnel) this.tunnel = null
+    else if (child === this.master) {
+      this.master = null
+      this.controlPath = null
+      this.forward = null
+    } else return
     this.token = null
     if (this.state.phase !== 'connected') return
     this.deps.log('remote_ssh.tunnel_exited', { phase: 'reconnecting' })
@@ -461,15 +738,17 @@ export class RemoteSshManager {
     }, delay)
   }
 
-  private run(args: string[], timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  private run(args: string[], timeoutMs: number, env?: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
       let stdout = ''
       let stderr = ''
       let settled = false
-      const child = this.deps.spawn(this.deps.executable, args)
+      const child = this.deps.spawn(this.deps.executable, args, env)
+      this.children.add(child)
       const finish = (code: number | null) => {
         if (settled) return
         settled = true
+        this.children.delete(child)
         this.deps.clearTimer(timer)
         resolve({ code, stdout, stderr })
       }

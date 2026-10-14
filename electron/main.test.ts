@@ -18,6 +18,8 @@ const electronMock = vi.hoisted(() => {
     webContents = {
       setWindowOpenHandler: vi.fn(),
       on: vi.fn(),
+      send: vi.fn(),
+      isDestroyed: vi.fn(() => false),
     }
 
     constructor() {
@@ -71,6 +73,7 @@ vi.mock('electron', () => ({
 }))
 
 const remoteSshMock = vi.hoisted(() => ({
+  deps: null as null | { prompt?: (request: unknown, signal: AbortSignal) => Promise<string | null> },
   connect: vi.fn(async (host: string) => ({ phase: 'connected', host })),
   disconnect: vi.fn(() => ({ phase: 'idle' })),
   status: vi.fn(() => ({ phase: 'idle' })),
@@ -81,7 +84,7 @@ const remoteSshMock = vi.hoisted(() => ({
 }))
 
 vi.mock('./remoteSsh', () => ({
-  RemoteSshManager: class { constructor() { return remoteSshMock } },
+  RemoteSshManager: class { constructor(deps: typeof remoteSshMock.deps) { remoteSshMock.deps = deps; return remoteSshMock } },
   defaultRemoteSshDeps: vi.fn(() => ({})),
   readSshConfigHosts: vi.fn(async () => ['lab']),
 }))
@@ -225,6 +228,16 @@ describe('Electron single-instance lifecycle', () => {
     expect(await handlers.get('remote-ssh:hosts')?.(trusted)).toEqual(['lab'])
     expect(await handlers.get('remote-ssh:hosts')?.(subframe)).toEqual([])
     await expect(handlers.get('remote-ssh:disconnect')?.(subframe)).rejects.toThrow()
+
+    // Login prompts reach the renderer and only its main frame may answer.
+    const send = (window as unknown as { webContents: { send: ReturnType<typeof vi.fn> } }).webContents.send
+    const answer = remoteSshMock.deps!.prompt!({ host: 'lab', kind: 'secret', text: 'Password: ', retry: false }, new AbortController().signal)
+    expect(send).toHaveBeenCalledWith('remote-ssh:prompt', { id: expect.any(String), host: 'lab', kind: 'secret', text: 'Password: ', retry: false })
+    const promptId = (send.mock.calls.at(-1)![1] as { id: string }).id
+    await expect(handlers.get('remote-ssh:prompt-response')?.(subframe, promptId, 'pw')).rejects.toThrow('Invalid remote SSH sender')
+    expect(await handlers.get('remote-ssh:prompt-response')?.(trusted, 'other', 'pw')).toBe(false)
+    expect(await handlers.get('remote-ssh:prompt-response')?.(trusted, promptId, 'pw')).toBe(true)
+    await expect(answer).resolves.toBe('pw')
 
     const onResume = vi.mocked(electronMock.powerMonitor.on).mock.calls.find(([event]) => event === 'resume')?.[1] as () => void
     onResume()

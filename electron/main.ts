@@ -6,6 +6,8 @@ import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 import { isMainFrameSender, readGatewayToken } from './engineToken'
 import { RemoteSshManager, defaultRemoteSshDeps, readSshConfigHosts } from './remoteSsh'
+import { AskpassService } from './sshAskpass'
+import { SshPromptBroker } from './sshPrompt'
 import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, recordRendererDiagnostic } from './diagnostics'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -36,8 +38,28 @@ if (hasSingleInstanceLock) {
   app.on('will-quit', () => diagnostics?.markCleanShutdown())
 }
 const engineManager = hasSingleInstanceLock ? new LocalEngineManager() : null
-const remoteSsh = hasSingleInstanceLock ? new RemoteSshManager(defaultRemoteSshDeps((event, fields) => logDesktopEvent(event, fields))) : null
 let mainWindow: BrowserWindow | null = null
+// Remote-SSH login prompts (password, passphrase, one-time code, unknown host
+// key) are shown by the renderer; answers go straight back to ssh.
+const sshPrompts = new SshPromptBroker({
+  send: (channel, payload) => {
+    if (!mainWindow || mainWindow.webContents.isDestroyed()) return false
+    mainWindow.webContents.send(channel, payload)
+    return true
+  },
+})
+const sshAskpass = new AskpassService({
+  helperDir: () => path.join(app.getPath('userData'), 'ssh-askpass'),
+  nodePath: process.execPath,
+})
+const remoteSsh = hasSingleInstanceLock
+  ? new RemoteSshManager({
+    ...defaultRemoteSshDeps((event, fields) => logDesktopEvent(event, fields)),
+    openAskpass: (handler) => sshAskpass.open(handler),
+    controlDir: () => sshAskpass.controlDir(),
+    prompt: (request, signal) => sshPrompts.request(request, signal),
+  })
+  : null
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -68,6 +90,8 @@ function createWindow() {
   win.on('unresponsive', () => logDesktopEvent('renderer.unresponsive', { window_id: win.id }, undefined, 'ERROR'))
   win.on('responsive', () => logDesktopEvent('renderer.responsive', { window_id: win.id }))
   win.on('session-end', () => diagnostics?.markCleanShutdown())
+  // A reloaded renderer has lost its prompt dialog; cancel instead of waiting.
+  win.webContents.on('did-start-loading', () => sshPrompts.cancelAll())
 
   // Load failures are also reported through did-fail-load; never let the
   // returned promise become an unhandled rejection.
@@ -90,7 +114,11 @@ function initializeApp() {
   // Remote-SSH: forwarded connections rarely survive sleep; ssh children must
   // not outlive the app.
   powerMonitor.on('resume', () => remoteSsh.handleResume())
-  app.on('will-quit', () => remoteSsh.dispose())
+  app.on('will-quit', () => {
+    remoteSsh.dispose()
+    sshPrompts.cancelAll()
+    void sshAskpass.close()
+  })
   remoteSsh.onStatus((status) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('remote-ssh:status', status)
   })
@@ -182,6 +210,10 @@ function initializeApp() {
   ipcMain.handle('remote-ssh:status', async (event) => {
     requireMainFrame(event)
     return remoteSsh.status()
+  })
+  ipcMain.handle('remote-ssh:prompt-response', async (event, id: unknown, answer: unknown) => {
+    requireMainFrame(event)
+    return sshPrompts.respond(id, answer)
   })
   ipcMain.handle('remote-ssh:token', async (event) => (
     isMainFrameSender(event, mainWindow?.webContents) ? remoteSsh.getToken() : null

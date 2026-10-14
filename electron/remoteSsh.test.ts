@@ -13,6 +13,10 @@ import {
   buildAttachArgs,
   buildTunnelArgs,
   attachCommand,
+  buildMasterArgs,
+  buildMuxAttachArgs,
+  buildMuxForwardArgs,
+  classifySshFailure,
   defaultRemoteSshDeps,
   getFreePort,
   parseAttachOutput,
@@ -24,6 +28,7 @@ import {
   type RemoteSshDeps,
   type SshChild,
 } from './remoteSsh'
+import type { SshPromptRequest } from './sshAskpass'
 
 const TOKEN = 'tok_0123456789abcdefghijklmnop'
 
@@ -169,6 +174,7 @@ function harness(script: { attach: Array<{ code: number; stdout?: string; stderr
   const log = vi.fn()
   const deps: RemoteSshDeps = {
     executable: 'ssh',
+    platform: 'darwin',
     spawn: (_command, args) => {
       const child = new FakeChild(args)
       children.push(child)
@@ -180,6 +186,7 @@ function harness(script: { attach: Array<{ code: number; stdout?: string; stderr
     },
     getFreePort: vi.fn(async (preferred?: number | null) => preferred ?? 51000),
     waitForPort: vi.fn(async () => script.portOpen ?? true),
+    waitForFile: vi.fn(async () => true),
     log,
     setTimer: (callback, ms) => {
       if (ms >= 1000) timers.push({ callback, ms })
@@ -189,6 +196,7 @@ function harness(script: { attach: Array<{ code: number; stdout?: string; stderr
     // Below the 1s filter above, so only reconnect timers are captured.
     attachTimeoutMs: 500,
     tunnelReadyTimeoutMs: 500,
+    loginTimeoutMs: 500,
   }
   return { manager: new RemoteSshManager(deps), children, timers, deps, log }
 }
@@ -396,5 +404,284 @@ describe('RemoteSshManager with real processes', () => {
       manager.dispose()
       await rm(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('interactive ssh command construction', () => {
+  it('drops BatchMode when prompts can be shown', () => {
+    expect(buildAttachArgs({ destination: 'lab', port: null }, 'mira', true)).toEqual(['-o', 'ConnectTimeout=15', 'lab', '--', "sh -lc 'mira remote attach --json'"])
+    expect(buildTunnelArgs({ destination: 'lab', port: null }, 51000, 40123, true)).not.toContain('BatchMode=yes')
+  })
+
+  it('logs in once with a master and runs attach and the forward over it without prompting', () => {
+    const target = { destination: 'ana@lab', port: 2222 }
+    expect(buildMasterArgs(target, '/tmp/mira-ssh-x/m1')).toEqual([
+      '-N', '-o', 'ControlMaster=yes', '-o', 'ControlPath=/tmp/mira-ssh-x/m1', '-o', 'ControlPersist=no',
+      '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=15', '-p', '2222', 'ana@lab',
+    ])
+    expect(buildMuxAttachArgs(target, '/tmp/mira-ssh-x/m1')).toEqual([
+      '-o', 'ControlMaster=no', '-o', 'ControlPath=/tmp/mira-ssh-x/m1', '-o', 'BatchMode=yes', '-p', '2222',
+      'ana@lab', '--', "sh -lc 'mira remote attach --json'",
+    ])
+    expect(buildMuxForwardArgs(target, '/tmp/mira-ssh-x/m1', 'forward', 51000, 40123)).toEqual([
+      '-o', 'ControlMaster=no', '-o', 'ControlPath=/tmp/mira-ssh-x/m1', '-o', 'BatchMode=yes', '-p', '2222',
+      '-O', 'forward', '-L', '127.0.0.1:51000:127.0.0.1:40123', 'ana@lab',
+    ])
+  })
+
+  it('treats a changed host key as a hard error', () => {
+    const stderr = '@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed.'
+    expect(classifySshFailure(255, stderr)).toMatchObject({ code: 'host_key_changed' })
+    expect(classifySshFailure(255, 'Host key verification failed.')).toMatchObject({ code: 'host_key' })
+    expect(classifySshFailure(null, '')).toMatchObject({ code: 'ssh_failed' })
+  })
+})
+
+const PASSWORD = 'correct horse battery staple'
+
+// Fake ssh for the multiplexed flow: the master stays up until killed and
+// "logs in" when the test opens its control socket; mux clients answer from
+// the script.
+function muxHarness(options: {
+  platform?: NodeJS.Platform
+  version?: { major: number; minor: number; windows: boolean; raw: string } | null
+  attach?: Array<{ code: number; stdout?: string; stderr?: string }>
+  forwardCode?: number
+  answers?: Array<string | null>
+} = {}) {
+  const children: FakeChild[] = []
+  const timers: Array<{ callback: () => void; ms: number }> = []
+  const attachQueue = [...(options.attach ?? [{ code: 0, stdout: attachJson() }])]
+  const answers = [...(options.answers ?? [PASSWORD])]
+  const handlers: Array<(text: string) => Promise<string | null>> = []
+  const envs: Array<Record<string, string> | undefined> = []
+  const disposed = vi.fn()
+  let login: ((ok: boolean) => void) | null = null
+  const log = vi.fn()
+  const prompt = vi.fn(async (_request: SshPromptRequest, _signal: AbortSignal) => answers.shift() ?? null)
+  const deps: RemoteSshDeps = {
+    executable: 'ssh',
+    platform: options.platform ?? 'darwin',
+    spawn: (_command, args, env) => {
+      const child = new FakeChild(args)
+      children.push(child)
+      envs.push(env)
+      if (args.includes('ControlMaster=yes')) return child
+      if (args.includes('-O')) {
+        child.finish(options.forwardCode ?? 0, '', options.forwardCode ? 'mux_client_forward: forwarding request failed' : '')
+      } else if (!args.includes('-N')) {
+        const next = attachQueue.shift() ?? { code: 255, stderr: 'no script' }
+        child.finish(next.code, next.stdout ?? '', next.stderr ?? '')
+      }
+      return child
+    },
+    getFreePort: vi.fn(async (preferred?: number | null) => preferred ?? 51000),
+    waitForPort: vi.fn(async () => true),
+    waitForFile: vi.fn(() => new Promise<boolean>((resolve) => { login = resolve })),
+    log,
+    setTimer: (callback, ms) => {
+      if (ms >= 1000 && ms <= 30_000) timers.push({ callback, ms })
+      return { ms }
+    },
+    clearTimer: () => {},
+    attachTimeoutMs: 500,
+    tunnelReadyTimeoutMs: 500,
+    loginTimeoutMs: 500,
+    openAskpass: vi.fn(async (handler) => {
+      handlers.push(handler)
+      return { env: { SSH_ASKPASS: '/askpass.sh', MIRA_ASKPASS_NONCE: `n${handlers.length}` }, dispose: disposed }
+    }),
+    prompt,
+    controlDir: async () => '/tmp/mira-ssh-x',
+    sshVersion: async () => (options.version === undefined ? { major: 10, minor: 3, windows: false, raw: 'OpenSSH_10.3' } : options.version),
+  }
+  const masters = () => children.filter((child) => child.args.includes('ControlMaster=yes'))
+  const muxAttaches = () => children.filter((child) => child.args.includes('ControlMaster=no') && child.args.includes('--'))
+  // ssh asks a question through askpass, then (if answered) finishes logging in.
+  const askAndLogin = async (text = "ana@lab's password: ") => {
+    await vi.waitFor(() => expect(handlers.length).toBeGreaterThan(0))
+    const answer = await handlers.at(-1)!(text)
+    if (answer !== null) login?.(true)
+    return answer
+  }
+  return { manager: new RemoteSshManager(deps), deps, children, timers, prompt, log, envs, disposed, masters, muxAttaches, askAndLogin, handlers }
+}
+
+describe('RemoteSshManager with interactive prompts (ControlMaster)', () => {
+  it('asks for the password once and runs attach and the forward over the master', async () => {
+    const h = muxHarness()
+    const connecting = h.manager.connect('ana@lab')
+    expect(await h.askAndLogin()).toBe(PASSWORD)
+    const status = await connecting
+
+    expect(status).toMatchObject({ phase: 'connected', localPort: 51000, version: '0.5.0' })
+    expect(h.manager.getToken()).toBe(TOKEN)
+    expect(h.prompt).toHaveBeenCalledTimes(1)
+    expect(h.prompt.mock.calls[0][0]).toEqual({ host: 'ana@lab', kind: 'secret', text: "ana@lab's password: ", retry: false })
+    expect(h.masters()).toHaveLength(1)
+    expect(h.masters()[0].args).toContain('ControlPath=/tmp/mira-ssh-x/m1')
+    expect(h.envs[0]).toMatchObject({ SSH_ASKPASS: '/askpass.sh' })
+    // Mux clients reuse the login and never prompt.
+    const clients = h.children.filter((child) => !child.args.includes('ControlMaster=yes'))
+    expect(clients.map((child) => child.args.includes('-O') ? 'forward' : 'attach')).toEqual(['attach', 'forward'])
+    for (const client of clients) {
+      expect(client.args).toContain('ControlPath=/tmp/mira-ssh-x/m1')
+      expect(client.args).toContain('BatchMode=yes')
+    }
+    expect(h.disposed).toHaveBeenCalled()
+    const logged = JSON.stringify(h.log.mock.calls)
+    expect(logged).not.toContain(PASSWORD)
+    expect(logged).not.toContain(TOKEN)
+    expect(logged).not.toContain('password:')
+  })
+
+  it('marks a repeated prompt as a retry and classifies host-key questions', async () => {
+    const h = muxHarness({ answers: ['yes', 'wrong', PASSWORD] })
+    const connecting = h.manager.connect('lab')
+    await vi.waitFor(() => expect(h.handlers).toHaveLength(1))
+    const hostKey = "The authenticity of host 'lab (10.0.0.5)' can't be established.\nED25519 key fingerprint is SHA256:abc.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? "
+    expect(await h.handlers[0](hostKey)).toBe('yes')
+    expect(await h.handlers[0]("ana@lab's password: ")).toBe('wrong')
+    await h.askAndLogin()
+    await connecting
+    expect(h.prompt.mock.calls.map(([request]) => [request.kind, request.retry])).toEqual([['host_key', false], ['secret', false], ['secret', true]])
+  })
+
+  it('stops ssh when a prompt is cancelled', async () => {
+    const h = muxHarness({ answers: [null] })
+    const connecting = h.manager.connect('lab')
+    expect(await h.askAndLogin()).toBeNull()
+    const status = await connecting
+    expect(status.error?.code).toBe('auth_cancelled')
+    expect(h.masters()[0].killed).toBe(true)
+    expect(h.muxAttaches()).toHaveLength(0)
+  })
+
+  it('reports a failed login from the master without attaching', async () => {
+    const h = muxHarness()
+    const connecting = h.manager.connect('lab')
+    await vi.waitFor(() => expect(h.masters()).toHaveLength(1))
+    h.masters()[0].finish(255, '', 'ana@lab: Permission denied (publickey,password).')
+    expect((await connecting).error?.code).toBe('auth_required')
+    const changed = muxHarness()
+    const again = changed.manager.connect('lab')
+    await vi.waitFor(() => expect(changed.masters()).toHaveLength(1))
+    changed.masters()[0].finish(255, '', 'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.')
+    expect((await again).error?.code).toBe('host_key_changed')
+  })
+
+  it('reuses a live master after sleep without a new login', async () => {
+    const h = muxHarness({ attach: [{ code: 0, stdout: attachJson() }, { code: 0, stdout: attachJson() }] })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    await connecting
+    h.manager.handleResume()
+    await vi.waitFor(() => expect(h.muxAttaches()).toHaveLength(2))
+    await vi.waitFor(() => expect(h.manager.status().phase).toBe('connected'))
+    expect(h.masters()).toHaveLength(1)
+    expect(h.masters()[0].killed).toBe(false)
+    expect(h.prompt).toHaveBeenCalledTimes(1)
+    // Same engine port: the existing forward is kept.
+    expect(h.children.filter((child) => child.args.includes('-O'))).toHaveLength(1)
+  })
+
+  it('moves the forward when the engine port changed while asleep', async () => {
+    const h = muxHarness({ attach: [{ code: 0, stdout: attachJson() }, { code: 0, stdout: attachJson({ port: 40999 }) }] })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    await connecting
+    h.manager.handleResume()
+    await vi.waitFor(() => expect(h.manager.status().phase).toBe('connected'))
+    const forwards = h.children.filter((child) => child.args.includes('-O')).map((child) => child.args.slice(child.args.indexOf('-O') + 1, child.args.indexOf('-O') + 4))
+    expect(forwards).toEqual([
+      ['forward', '-L', '127.0.0.1:51000:127.0.0.1:40123'],
+      ['cancel', '-L', '127.0.0.1:51000:127.0.0.1:40123'],
+      ['forward', '-L', '127.0.0.1:51000:127.0.0.1:40999'],
+    ])
+  })
+
+  it('logs in again when the master is gone', async () => {
+    const h = muxHarness({ answers: [PASSWORD, PASSWORD], attach: [{ code: 0, stdout: attachJson() }, { code: 0, stdout: attachJson() }] })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    await connecting
+    h.masters()[0].emit('exit', 255)
+    expect(h.manager.status()).toMatchObject({ phase: 'reconnecting', attempt: 1 })
+    expect(h.manager.getToken()).toBeNull()
+    h.timers.at(-1)!.callback()
+    await vi.waitFor(() => expect(h.masters()).toHaveLength(2))
+    await h.askAndLogin()
+    await vi.waitFor(() => expect(h.manager.status().phase).toBe('connected'))
+    expect(h.masters()[1].args).toContain('ControlPath=/tmp/mira-ssh-x/m2')
+    expect(h.prompt).toHaveBeenCalledTimes(2)
+  })
+
+  it('drops a master that no longer answers after sleep and logs in again', async () => {
+    const h = muxHarness({
+      answers: [PASSWORD, PASSWORD],
+      attach: [{ code: 0, stdout: attachJson() }, { code: 255, stderr: 'mux_client_request_session: read from master failed: Broken pipe' }, { code: 0, stdout: attachJson() }],
+    })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    await connecting
+    h.manager.handleResume()
+    await vi.waitFor(() => expect(h.masters()[0].killed).toBe(true))
+    expect(h.manager.status().phase).toBe('reconnecting')
+    h.timers.at(-1)!.callback()
+    await h.askAndLogin()
+    await vi.waitFor(() => expect(h.manager.status().phase).toBe('connected'))
+    expect(h.masters()).toHaveLength(2)
+  })
+
+  it('cancels a pending prompt on disconnect', async () => {
+    const h = muxHarness()
+    let seen: AbortSignal | null = null
+    h.prompt.mockImplementationOnce((_request, signal) => {
+      seen = signal
+      return new Promise((resolve) => signal.addEventListener('abort', () => resolve(null)))
+    })
+    const connecting = h.manager.connect('lab')
+    await vi.waitFor(() => expect(h.handlers).toHaveLength(1))
+    const answer = h.handlers[0]("ana@lab's password: ")
+    await vi.waitFor(() => expect(seen).not.toBeNull())
+    h.manager.disconnect()
+    expect(seen!.aborted).toBe(true)
+    expect(await answer).toBeNull()
+    expect(h.masters()[0].killed).toBe(true)
+    expect((await connecting).phase).toBe('idle')
+  })
+
+  it('fails cleanly when the forward is refused', async () => {
+    const h = muxHarness({ forwardCode: 255 })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    expect((await connecting).error?.code).toBe('tunnel_failed')
+  })
+})
+
+describe('RemoteSshManager on Windows', () => {
+  it('asks through askpass for attach and the tunnel separately (no ControlMaster)', async () => {
+    const h = muxHarness({ platform: 'win32', version: { major: 9, minor: 5, windows: true, raw: 'OpenSSH_for_Windows_9.5' } })
+    const status = await h.manager.connect('lab')
+    expect(status.phase).toBe('connected')
+    expect(h.masters()).toHaveLength(0)
+    const [attach, tunnel] = h.children
+    expect(attach.args).not.toContain('BatchMode=yes')
+    expect(tunnel.args).toContain('-N')
+    expect(tunnel.args).not.toContain('BatchMode=yes')
+    expect(h.envs[0]).toMatchObject({ SSH_ASKPASS: '/askpass.sh' })
+    expect(h.envs[1]).toMatchObject({ SSH_ASKPASS: '/askpass.sh' })
+  })
+
+  it('explains that old Windows OpenSSH cannot show password prompts', async () => {
+    const h = muxHarness({
+      platform: 'win32',
+      version: { major: 8, minor: 1, windows: true, raw: 'OpenSSH_for_Windows_8.1' },
+      attach: [{ code: 255, stderr: 'ana@lab: Permission denied (password).' }],
+    })
+    const status = await h.manager.connect('lab')
+    expect(status.error).toEqual({ code: 'prompt_unsupported', message: 'OpenSSH_for_Windows_8.1' })
+    expect(h.children[0].args).toContain('BatchMode=yes')
+    expect(h.deps.openAskpass).not.toHaveBeenCalled()
   })
 })

@@ -12,6 +12,7 @@ import { ProvidersPage } from '@/components/providers/ProvidersPage'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
+import { SshPromptDialog } from '@/components/settings/SshPromptDialog'
 import { FeedbackDialog } from '@/components/feedback/FeedbackDialog'
 import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -235,6 +236,7 @@ export function AppLayout() {
       <StatusBar />
       <SettingsModal />
       <LocalEngineUpdateModal />
+      <SshPromptDialog />
       <SkillsPluginsModal />
       <ProvidersPage />
       <NewProjectModal />
