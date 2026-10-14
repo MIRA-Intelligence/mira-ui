@@ -159,7 +159,7 @@ describe('useWebSocket', () => {
 
     it('reports SSH failures without probing', async () => {
       remoteSshMock.connect.mockResolvedValue({
-        phase: 'error', host: 'lab', localPort: null, version: null, attempt: 0,
+        phase: 'error', host: 'lab', localPort: null, version: null, attempt: 0, miraPath: null,
         error: { code: 'auth_required', message: 'Permission denied (publickey).' },
       })
 

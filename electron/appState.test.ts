@@ -14,9 +14,11 @@ vi.mock('electron', () => ({
 import {
   getLastDeploymentMode,
   getSkippedVersions,
+  getSshMiraPath,
   readAppState,
   setLastDeploymentMode,
   setSkippedVersions,
+  setSshMiraPath,
 } from './appState'
 
 describe('appState', () => {
@@ -33,7 +35,7 @@ describe('appState', () => {
 
   it('returns an empty state when nothing is persisted', async () => {
     const state = await readAppState()
-    expect(state).toEqual({ skippedVersions: [], lastDeploymentMode: null })
+    expect(state).toEqual({ skippedVersions: [], lastDeploymentMode: null, sshMiraPaths: {} })
   })
 
   it('round-trips the last deployment mode', async () => {
@@ -86,6 +88,27 @@ describe('appState', () => {
 
   it('ignores malformed persisted content', async () => {
     await writeFile(path.join(dir, 'app-state.json'), 'not json', 'utf8')
-    expect(await readAppState()).toEqual({ skippedVersions: [], lastDeploymentMode: null })
+    expect(await readAppState()).toEqual({ skippedVersions: [], lastDeploymentMode: null, sshMiraPaths: {} })
+  })
+
+  it('remembers the last working remote mira path per SSH host', async () => {
+    expect(await getSshMiraPath('lab')).toBeNull()
+    await setLastDeploymentMode('remoteSsh')
+    await setSshMiraPath('lab', '/home/ana/miniconda3/envs/mira/bin/mira')
+    await setSshMiraPath('ana@gpu:2222', "/home/ana/my envs/it's/bin/mira")
+    expect(await getSshMiraPath('lab')).toBe('/home/ana/miniconda3/envs/mira/bin/mira')
+    expect(await getSshMiraPath('ana@gpu:2222')).toBe("/home/ana/my envs/it's/bin/mira")
+    expect(await getLastDeploymentMode()).toBe('remoteSsh')
+
+    // Relative paths, control characters and backslashes are never stored.
+    await setSshMiraPath('lab', 'mira')
+    await setSshMiraPath('lab', '/bin/mi\nra')
+    await setSshMiraPath('lab', '/bin/mira\n')
+    expect(await getSshMiraPath('lab')).toBe('/home/ana/miniconda3/envs/mira/bin/mira')
+  })
+
+  it('drops malformed remembered paths when reading', async () => {
+    await writeFile(path.join(dir, 'app-state.json'), JSON.stringify({ sshMiraPaths: { lab: '/ok/bin/mira', bad: 'relative', worse: 7 } }), 'utf8')
+    expect((await readAppState()).sshMiraPaths).toEqual({ lab: '/ok/bin/mira' })
   })
 })

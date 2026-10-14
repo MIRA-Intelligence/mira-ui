@@ -73,12 +73,19 @@ vi.mock('electron', () => ({
 }))
 
 const remoteSshMock = vi.hoisted(() => ({
-  deps: null as null | { prompt?: (request: unknown, signal: AbortSignal) => Promise<string | null> },
+  deps: null as null | {
+    prompt?: (request: unknown, signal: AbortSignal) => Promise<string | null>
+    lastMiraPaths?: { get: (host: string) => Promise<string | null>; set: (host: string, path: string) => Promise<void> }
+  },
   connect: vi.fn(async (host: string) => ({ phase: 'connected', host })),
   disconnect: vi.fn(() => ({ phase: 'idle' })),
   status: vi.fn(() => ({ phase: 'idle' })),
   getToken: vi.fn(() => 'remote-token-0123456789'),
   onStatus: vi.fn(),
+  onInstallOutput: vi.fn(),
+  installPlan: vi.fn(() => ({ spec: 'mira-engine>=0.4.0rc1', venv: '${MIRA_HOME:-$HOME/.mira}/venv', script: 'set -e', defaultSpec: true })),
+  install: vi.fn(async () => ({ ok: true, version: '0.5.0', launcher: null, executable: null })),
+  cancelInstall: vi.fn(() => true),
   handleResume: vi.fn(),
   dispose: vi.fn(),
 }))
@@ -96,6 +103,8 @@ vi.mock('./engine/manager', () => ({
 vi.mock('./appState', () => ({
   getLastDeploymentMode: vi.fn(),
   setLastDeploymentMode: vi.fn(),
+  getSshMiraPath: vi.fn(async () => '/opt/conda/bin/mira'),
+  setSshMiraPath: vi.fn(async () => {}),
 }))
 
 vi.mock('./updateCheck', () => ({
@@ -238,6 +247,19 @@ describe('Electron single-instance lifecycle', () => {
     expect(await handlers.get('remote-ssh:prompt-response')?.(trusted, 'other', 'pw')).toBe(false)
     expect(await handlers.get('remote-ssh:prompt-response')?.(trusted, promptId, 'pw')).toBe(true)
     await expect(answer).resolves.toBe('pw')
+
+    // Installing Mira on the server: main frame only, output streamed to it.
+    expect(await handlers.get('remote-ssh:install-plan')?.(trusted)).toMatchObject({ spec: 'mira-engine>=0.4.0rc1' })
+    await expect(handlers.get('remote-ssh:install')?.(subframe)).rejects.toThrow('Invalid remote SSH sender')
+    expect(remoteSshMock.install).not.toHaveBeenCalled()
+    expect(await handlers.get('remote-ssh:install')?.(trusted)).toMatchObject({ ok: true })
+    await expect(handlers.get('remote-ssh:install-cancel')?.(subframe)).rejects.toThrow('Invalid remote SSH sender')
+    expect(await handlers.get('remote-ssh:install-cancel')?.(trusted)).toBe(true)
+    const onOutput = remoteSshMock.onInstallOutput.mock.calls[0][0] as (chunk: string) => void
+    onOutput('Collecting mira-engine\n')
+    expect(send).toHaveBeenCalledWith('remote-ssh:install-output', 'Collecting mira-engine\n')
+    // The last working path is kept per host in the app state file.
+    expect(await remoteSshMock.deps!.lastMiraPaths!.get('lab')).toBe('/opt/conda/bin/mira')
 
     const onResume = vi.mocked(electronMock.powerMonitor.on).mock.calls.find(([event]) => event === 'resume')?.[1] as () => void
     onResume()

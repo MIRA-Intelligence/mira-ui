@@ -37,6 +37,10 @@ interface Window {
     onRemoteSshPrompt?: (listener: (prompt: unknown) => void) => () => void
     onRemoteSshPromptCancel?: (listener: (payload: unknown) => void) => () => void
     answerRemoteSshPrompt?: (id: string, answer: string | null) => Promise<boolean>
+    getRemoteInstallPlan?: () => Promise<unknown>
+    installRemoteMira?: () => Promise<unknown>
+    cancelRemoteInstall?: () => Promise<boolean>
+    onRemoteInstallOutput?: (listener: (chunk: unknown) => void) => () => void
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string

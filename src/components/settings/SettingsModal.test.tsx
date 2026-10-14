@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/desktop', () => ({
@@ -228,7 +228,7 @@ describe('SettingsModal remote runtime config', () => {
       useRemoteSshStore.setState({ status: IDLE_REMOTE_SSH_STATUS })
       window.electronAPI = {
         platform: 'darwin',
-        remoteSshConnect: vi.fn(async (host: string) => ({ phase: 'connecting' as const, host, localPort: null, version: null, error: null, attempt: 0 })),
+        remoteSshConnect: vi.fn(async (host: string) => ({ phase: 'connecting' as const, host, localPort: null, version: null, error: null, attempt: 0, miraPath: null })),
         remoteSshDisconnect: vi.fn(async () => IDLE_REMOTE_SSH_STATUS),
         listSshHosts: vi.fn(async () => ['lab', 'gpu02']),
       }
@@ -259,13 +259,13 @@ describe('SettingsModal remote runtime config', () => {
       useSettingsStore.getState().setDeploymentMode('remoteSsh')
       useSettingsStore.getState().setSshHost('lab')
       useRemoteSshStore.setState({ status: {
-        phase: 'error', host: 'lab', localPort: null, version: null, attempt: 0,
+        phase: 'error', host: 'lab', localPort: null, version: null, attempt: 0, miraPath: null,
         error: { code: 'not_installed', message: 'sh: 1: mira: not found' },
       } })
       useSettingsStore.getState().openSettings()
       render(<SettingsModal />)
 
-      expect(await screen.findByRole('status')).toHaveTextContent('Could not run `mira` on lab')
+      expect(await screen.findByRole('status')).toHaveTextContent('Mira was not found on lab')
       expect(fetchRuntimeConfig).not.toHaveBeenCalled()
 
       // Point the host at a mira outside the login-shell PATH and retry.
@@ -277,6 +277,29 @@ describe('SettingsModal remote runtime config', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
       expect(window.electronAPI?.remoteSshDisconnect).toHaveBeenCalled()
+    })
+
+    it('focuses the remote mira command when the install dialog asks for a manual path', async () => {
+      useSettingsStore.getState().setDeploymentMode('remoteSsh')
+      useSettingsStore.getState().setSshHost('lab')
+      render(<SettingsModal />)
+      act(() => {
+        useRemoteSshStore.getState().requestMiraCommandFocus()
+        useSettingsStore.getState().openSettings()
+      })
+      const field = await screen.findByLabelText('Remote mira command')
+      await waitFor(() => expect(document.activeElement).toBe(field))
+    })
+
+    it('shows which remote mira the connection uses', async () => {
+      useSettingsStore.getState().setDeploymentMode('remoteSsh')
+      useSettingsStore.getState().setSshHost('lab')
+      useRemoteSshStore.setState({ status: {
+        ...IDLE_REMOTE_SSH_STATUS, phase: 'connected', host: 'lab', localPort: 51000, version: '0.5.0', miraPath: '/home/ana/.mira/bin/mira',
+      } })
+      useSettingsStore.getState().openSettings()
+      render(<SettingsModal />)
+      expect(await screen.findByText('Server mira: /home/ana/.mira/bin/mira')).toBeInTheDocument()
     })
 
     it('requires a host to save', async () => {

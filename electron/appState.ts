@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
+import { isRememberablePath } from './remoteSsh'
 
 // Single main-process state file under userData. Holds small, app-level bits
 // that the main process needs before (or independently of) the renderer's
@@ -12,14 +13,19 @@ export type DeploymentModeHint = 'localBundle' | 'remoteManual' | 'remoteSsh'
 export interface AppState {
   skippedVersions: string[]
   lastDeploymentMode: DeploymentModeHint | null
+  // Remote-SSH: the remote mira path that last worked, per SSH host. A path,
+  // not a credential.
+  sshMiraPaths: Record<string, string>
 }
+
+const MAX_SSH_MIRA_PATHS = 100
 
 const STATE_FILENAME = 'app-state.json'
 // Pre-generalization the file only stored the update skip-list under this name.
 const LEGACY_STATE_FILENAME = 'update-state.json'
 
 function emptyState(): AppState {
-  return { skippedVersions: [], lastDeploymentMode: null }
+  return { skippedVersions: [], lastDeploymentMode: null, sshMiraPaths: {} }
 }
 
 function stateFile(): string {
@@ -40,7 +46,13 @@ function sanitize(parsed: unknown): AppState {
     obj.lastDeploymentMode === 'localBundle' || obj.lastDeploymentMode === 'remoteManual' || obj.lastDeploymentMode === 'remoteSsh'
       ? obj.lastDeploymentMode
       : null
-  return { skippedVersions, lastDeploymentMode }
+  const sshMiraPaths: Record<string, string> = {}
+  if (obj.sshMiraPaths && typeof obj.sshMiraPaths === 'object' && !Array.isArray(obj.sshMiraPaths)) {
+    for (const [host, value] of Object.entries(obj.sshMiraPaths as Record<string, unknown>)) {
+      if (host && host.length <= 255 && isRememberablePath(value)) sshMiraPaths[host] = value
+    }
+  }
+  return { skippedVersions, lastDeploymentMode, sshMiraPaths }
 }
 
 async function readFromFile(file: string): Promise<AppState | null> {
@@ -94,5 +106,20 @@ export async function getLastDeploymentMode(): Promise<DeploymentModeHint | null
 export async function setLastDeploymentMode(mode: DeploymentModeHint): Promise<void> {
   const state = await readAppState()
   state.lastDeploymentMode = mode
+  await writeAppState(state)
+}
+
+export async function getSshMiraPath(host: string): Promise<string | null> {
+  return (await readAppState()).sshMiraPaths[host] ?? null
+}
+
+export async function setSshMiraPath(host: string, path: string): Promise<void> {
+  if (!host || host.length > 255 || !isRememberablePath(path)) return
+  const state = await readAppState()
+  // Most recent last; the oldest hosts are forgotten past the cap.
+  delete state.sshMiraPaths[host]
+  state.sshMiraPaths[host] = path
+  const hosts = Object.keys(state.sshMiraPaths)
+  for (const stale of hosts.slice(0, Math.max(0, hosts.length - MAX_SSH_MIRA_PATHS))) delete state.sshMiraPaths[stale]
   await writeAppState(state)
 }

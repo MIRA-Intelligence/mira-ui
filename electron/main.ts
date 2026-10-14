@@ -2,7 +2,7 @@ import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor,
 import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
-import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
+import { getLastDeploymentMode, getSshMiraPath, setLastDeploymentMode, setSshMiraPath } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 import { isMainFrameSender, readGatewayToken } from './engineToken'
 import { RemoteSshManager, defaultRemoteSshDeps, readSshConfigHosts } from './remoteSsh'
@@ -58,6 +58,7 @@ const remoteSsh = hasSingleInstanceLock
     openAskpass: (handler) => sshAskpass.open(handler),
     controlDir: () => sshAskpass.controlDir(),
     prompt: (request, signal) => sshPrompts.request(request, signal),
+    lastMiraPaths: { get: getSshMiraPath, set: setSshMiraPath },
   })
   : null
 
@@ -121,6 +122,11 @@ function initializeApp() {
   })
   remoteSsh.onStatus((status) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('remote-ssh:status', status)
+  })
+  // Install output (pip/uv progress) goes to the install dialog only; it is
+  // not written to the desktop log.
+  remoteSsh.onInstallOutput((chunk) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('remote-ssh:install-output', chunk)
   })
 
   let received = 0
@@ -214,6 +220,18 @@ function initializeApp() {
   ipcMain.handle('remote-ssh:prompt-response', async (event, id: unknown, answer: unknown) => {
     requireMainFrame(event)
     return sshPrompts.respond(id, answer)
+  })
+  ipcMain.handle('remote-ssh:install-plan', async (event) => {
+    requireMainFrame(event)
+    return remoteSsh.installPlan()
+  })
+  ipcMain.handle('remote-ssh:install', async (event) => {
+    requireMainFrame(event)
+    return remoteSsh.install()
+  })
+  ipcMain.handle('remote-ssh:install-cancel', async (event) => {
+    requireMainFrame(event)
+    return remoteSsh.cancelInstall()
   })
   ipcMain.handle('remote-ssh:token', async (event) => (
     isMainFrameSender(event, mainWindow?.webContents) ? remoteSsh.getToken() : null

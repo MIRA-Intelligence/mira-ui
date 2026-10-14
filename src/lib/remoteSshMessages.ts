@@ -12,6 +12,7 @@ const ERROR_KEYS: Partial<Record<RemoteSshErrorCode, I18nKey>> = {
   host_key_changed: 'sshErrorHostKeyChanged',
   ssh_failed: 'sshErrorSshFailed',
   not_installed: 'sshErrorNotInstalled',
+  too_old: 'sshErrorTooOld',
   incompatible: 'sshErrorIncompatible',
   invalid_output: 'sshErrorInvalidOutput',
   tunnel_failed: 'sshErrorTunnel',
@@ -33,7 +34,9 @@ export function remoteSshMessage(status: RemoteSshStatus, lang: Language, fallba
     case 'error': {
       const code = status.error?.code ?? 'internal'
       const detail = status.error?.message || code
-      return t(ERROR_KEYS[code] ?? 'sshErrorEngine', lang, { host, detail, code, command })
+      // Without a manual command the server searched for mira itself.
+      const key = code === 'not_installed' && !miraCommand.trim() ? 'sshErrorNotFound' : ERROR_KEYS[code] ?? 'sshErrorEngine'
+      return t(key, lang, { host, detail, code, command })
     }
   }
 }

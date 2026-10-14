@@ -14,6 +14,9 @@ export type RemoteSshErrorCode =
   | 'host_key_changed'
   | 'ssh_failed'
   | 'not_installed'
+  // The engine on the server predates Remote-SSH: offer to install/upgrade.
+  | 'too_old'
+  // The engine speaks a newer protocol than this app.
   | 'incompatible'
   | 'invalid_output'
   | 'tunnel_failed'
@@ -31,10 +34,12 @@ export interface RemoteSshStatus {
   version: string | null
   error: { code: RemoteSshErrorCode; message: string } | null
   attempt: number
+  // The remote mira executable the last attach used (manual or discovered).
+  miraPath: string | null
 }
 
 export const IDLE_REMOTE_SSH_STATUS: RemoteSshStatus = {
-  phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0,
+  phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0, miraPath: null,
 }
 
 const PHASES = new Set<RemoteSshPhase>(['idle', 'connecting', 'connected', 'reconnecting', 'error'])
@@ -58,6 +63,7 @@ export function sanitizeRemoteSshStatus(value: unknown): RemoteSshStatus {
     version: typeof value.version === 'string' ? value.version : null,
     error,
     attempt: typeof value.attempt === 'number' ? value.attempt : 0,
+    miraPath: typeof value.miraPath === 'string' && value.miraPath ? value.miraPath : null,
   }
 }
 
@@ -154,4 +160,86 @@ export async function answerSshPrompt(id: string, answer: string | null): Promis
   const respond = window.electronAPI?.answerRemoteSshPrompt
   if (typeof respond !== 'function') return false
   return respond(id, answer).catch(() => false)
+}
+
+// ---------------------------------------------------------------------------
+// Installing Mira on the server (electron/remoteSsh.ts install()). The main
+// process runs it only when the renderer asks, which it does only after the
+// user pressed Install in RemoteInstallDialog.
+
+export interface RemoteInstallPlan {
+  spec: string
+  venv: string
+  script: string
+  defaultSpec: boolean
+}
+
+export type RemoteInstallErrorCode =
+  | 'no_python'
+  | 'too_old'
+  | 'install_failed'
+  | 'cancelled'
+  | 'timeout'
+  | 'busy'
+  | 'not_ready'
+  | 'auth_required'
+  | 'auth_cancelled'
+  | 'host_key'
+  | 'host_key_changed'
+  | 'ssh_failed'
+  | 'unavailable'
+
+export type RemoteInstallOutcome =
+  | { ok: true; version: string | null; launcher: string | null }
+  | { ok: false; code: RemoteInstallErrorCode; message: string; version: string | null }
+
+const INSTALL_ERROR_CODES = new Set<RemoteInstallErrorCode>([
+  'no_python', 'too_old', 'install_failed', 'cancelled', 'timeout', 'busy', 'not_ready',
+  'auth_required', 'auth_cancelled', 'host_key', 'host_key_changed', 'ssh_failed', 'unavailable',
+])
+
+const stringOrNull = (value: unknown) => (typeof value === 'string' && value ? value : null)
+
+export function sanitizeInstallPlan(value: unknown): RemoteInstallPlan | null {
+  if (!isRecord(value) || typeof value.spec !== 'string' || typeof value.venv !== 'string' || typeof value.script !== 'string') return null
+  return { spec: value.spec, venv: value.venv, script: value.script, defaultSpec: value.defaultSpec === true }
+}
+
+export function sanitizeInstallOutcome(value: unknown): RemoteInstallOutcome {
+  if (isRecord(value) && value.ok === true) {
+    return { ok: true, version: stringOrNull(value.version), launcher: stringOrNull(value.launcher) }
+  }
+  const record = isRecord(value) ? value : {}
+  const code = INSTALL_ERROR_CODES.has(record.code as RemoteInstallErrorCode) ? record.code as RemoteInstallErrorCode : 'install_failed'
+  return { ok: false, code, message: typeof record.message === 'string' ? record.message : '', version: stringOrNull(record.version) }
+}
+
+export async function getRemoteInstallPlan(): Promise<RemoteInstallPlan | null> {
+  const plan = window.electronAPI?.getRemoteInstallPlan
+  if (typeof plan !== 'function') return null
+  return sanitizeInstallPlan(await plan().catch(() => null))
+}
+
+export async function installRemoteMira(): Promise<RemoteInstallOutcome> {
+  const install = window.electronAPI?.installRemoteMira
+  if (typeof install !== 'function') return { ok: false, code: 'unavailable', message: '', version: null }
+  try {
+    return sanitizeInstallOutcome(await install())
+  } catch (error) {
+    return { ok: false, code: 'install_failed', message: error instanceof Error ? error.message : String(error), version: null }
+  }
+}
+
+export async function cancelRemoteInstall(): Promise<boolean> {
+  const cancel = window.electronAPI?.cancelRemoteInstall
+  if (typeof cancel !== 'function') return false
+  return cancel().catch(() => false)
+}
+
+export function onRemoteInstallOutput(listener: (chunk: string) => void): () => void {
+  const subscribe = window.electronAPI?.onRemoteInstallOutput
+  if (typeof subscribe !== 'function') return () => {}
+  return subscribe((chunk) => {
+    if (typeof chunk === 'string') listener(chunk)
+  })
 }

@@ -25,7 +25,7 @@ describe('remoteSsh renderer bridge', () => {
     expect(sanitizeRemoteSshStatus(null)).toEqual(IDLE_REMOTE_SSH_STATUS)
     expect(sanitizeRemoteSshStatus({ phase: 'hacked' })).toEqual(IDLE_REMOTE_SSH_STATUS)
     expect(sanitizeRemoteSshStatus({ phase: 'connected', host: 'lab', localPort: 99999, version: '1', token: 'x', attempt: 0 }))
-      .toEqual({ phase: 'connected', host: 'lab', localPort: null, version: '1', error: null, attempt: 0 })
+      .toEqual({ phase: 'connected', host: 'lab', localPort: null, version: '1', error: null, attempt: 0, miraPath: null })
   })
 
   it('reports Remote-SSH as unavailable outside the desktop app', async () => {
@@ -38,7 +38,7 @@ describe('remoteSsh renderer bridge', () => {
     let emit: (status: unknown) => void = () => {}
     window.electronAPI = {
       platform: 'linux',
-      remoteSshConnect: vi.fn(async () => ({ phase: 'connecting' as const, host: 'lab', localPort: null, version: null, error: null, attempt: 0 })),
+      remoteSshConnect: vi.fn(async () => ({ phase: 'connecting' as const, host: 'lab', localPort: null, version: null, error: null, attempt: 0, miraPath: null })),
       listSshHosts: vi.fn(async () => ['lab', 42 as unknown as string]),
       onRemoteSshStatus: vi.fn((listener) => { emit = listener; return () => {} }),
     }
@@ -64,9 +64,13 @@ describe('remoteSshMessage', () => {
     const error = (code: string, message = 'detail') => ({ ...base, phase: 'error' as const, error: { code: code as never, message } })
     expect(remoteSshMessage(error('auth_required'), 'en')).toContain('`ssh lab` works in a terminal')
     expect(remoteSshMessage(error('host_key'), 'en')).toContain('Run `ssh lab` once')
-    expect(remoteSshMessage(error('not_installed'), 'en')).toContain('Could not run `mira` on lab')
-    expect(remoteSshMessage(error('not_installed'), 'en', '', '/opt/mira/bin/mira')).toContain('`/opt/mira/bin/mira`')
-    expect(remoteSshMessage(error('not_installed'), 'en')).toContain('docs/remote-ssh.md')
+    // Discovery searched for mira; a manual command is named in the message.
+    expect(remoteSshMessage(error('not_installed'), 'en')).toContain('Mira was not found on lab')
+    expect(remoteSshMessage(error('not_installed'), 'zh')).toContain('没有找到 Mira')
+    expect(remoteSshMessage(error('not_installed'), 'en', '', '/opt/mira/bin/mira')).toContain('Could not run `/opt/mira/bin/mira` on lab')
+    expect(remoteSshMessage(error('not_installed'), 'en', '', '/opt/mira/bin/mira')).toContain('docs/remote-ssh.md')
+    expect(remoteSshMessage(error('too_old'), 'en')).toContain('too old for Remote-SSH')
+    expect(remoteSshMessage(error('incompatible'), 'en')).toContain('Update the MIRA desktop app')
     expect(remoteSshMessage(error('invalid_command'), 'en')).toContain('plain path')
     expect(remoteSshMessage(error('lease_conflict', 'another engine owns ~/.mira'), 'en'))
       .toBe('The engine on lab could not start (lease_conflict): another engine owns ~/.mira')

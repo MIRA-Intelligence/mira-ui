@@ -30,6 +30,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('remote-ssh:prompt-cancel', wrapped)
   },
   answerRemoteSshPrompt: (id: string, answer: string | null) => ipcRenderer.invoke('remote-ssh:prompt-response', id, answer),
+  getRemoteInstallPlan: () => ipcRenderer.invoke('remote-ssh:install-plan'),
+  installRemoteMira: () => ipcRenderer.invoke('remote-ssh:install'),
+  cancelRemoteInstall: () => ipcRenderer.invoke('remote-ssh:install-cancel'),
+  onRemoteInstallOutput: (listener: (chunk: unknown) => void) => {
+    const wrapped = (_event: IpcRendererEvent, chunk: unknown) => listener(chunk)
+    ipcRenderer.on('remote-ssh:install-output', wrapped)
+    return () => ipcRenderer.removeListener('remote-ssh:install-output', wrapped)
+  },
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),
   startLocalEngine: () => ipcRenderer.invoke('engine:start'),

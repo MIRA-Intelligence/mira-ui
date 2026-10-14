@@ -1,6 +1,7 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -13,7 +14,17 @@ import {
   buildAttachArgs,
   buildTunnelArgs,
   attachCommand,
+  buildInstallScript,
   buildMasterArgs,
+  DEFAULT_INSTALL_SPEC,
+  DISCOVERY_SCRIPT,
+  discoveryCommand,
+  INSTALL_REMOTE_COMMAND,
+  installSpec,
+  isRememberablePath,
+  parseFoundMira,
+  parseInstallOutput,
+  shQuote,
   buildMuxAttachArgs,
   buildMuxForwardArgs,
   classifySshFailure,
@@ -53,17 +64,20 @@ describe('parseSshTarget', () => {
 
 describe('ssh command construction', () => {
   it('runs attach in batch mode behind an option terminator', () => {
-    expect(buildAttachArgs({ destination: 'ana@lab', port: 2222 })).toEqual([
+    expect(buildAttachArgs({ destination: 'ana@lab', port: 2222 }, 'mira')).toEqual([
       '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-p', '2222', 'ana@lab', '--', "sh -lc 'mira remote attach --json'",
     ])
+    expect(buildAttachArgs({ destination: 'ana@lab', port: 2222 }).at(-1)).toBe(discoveryCommand(null))
     expect(buildAttachArgs({ destination: 'lab', port: null }, '/opt/mira/bin/mira').at(-1))
       .toBe("sh -lc '/opt/mira/bin/mira remote attach --json'")
     expect(attachCommand('~/.local/bin/mira')).toBe("sh -lc '~/.local/bin/mira remote attach --json'")
   })
 
   it('accepts only plain paths as the remote mira command', () => {
-    expect(parseMiraCommand(undefined)).toBe('mira')
-    expect(parseMiraCommand('  ')).toBe('mira')
+    // Empty means "not set": discover.
+    expect(parseMiraCommand(undefined)).toBe('')
+    expect(parseMiraCommand('  ')).toBe('')
+    expect(parseMiraCommand('mira')).toBe('mira')
     expect(parseMiraCommand('/opt/mira/bin/mira')).toBe('/opt/mira/bin/mira')
     expect(parseMiraCommand('~/venvs/mira-1.2/bin/mira')).toBe('~/venvs/mira-1.2/bin/mira')
     for (const value of ["mira'; rm -rf ~; '", 'mira remote', '$(id)', '-x', 'a`b`', 'C:\\mira.exe']) {
@@ -122,7 +136,7 @@ describe('parseAttachOutput', () => {
     expect(parseAttachOutput({ code: 255, stdout: '', stderr: 'ssh: Could not resolve hostname lab' })).toMatchObject({ code: 'ssh_failed', message: 'ssh: Could not resolve hostname lab' })
     expect(parseAttachOutput({ code: 127, stdout: '', stderr: 'sh: 1: mira: not found' })).toMatchObject({ code: 'not_installed' })
     expect(parseAttachOutput({ code: 127, stdout: '', stderr: 'sh: 1: /opt/mira/bin/mira: No such file or directory' })).toMatchObject({ code: 'not_installed' })
-    expect(parseAttachOutput({ code: 2, stdout: '', stderr: "Error: No such command 'remote'." })).toMatchObject({ code: 'incompatible' })
+    expect(parseAttachOutput({ code: 2, stdout: '', stderr: "Error: No such command 'remote'." })).toMatchObject({ code: 'too_old' })
     expect(parseAttachOutput({ code: null, stdout: '', stderr: '' })).toMatchObject({ code: 'ssh_failed' })
   })
 })
@@ -145,10 +159,15 @@ describe('parseSshConfigHosts', () => {
 })
 
 class FakeChild extends EventEmitter implements SshChild {
+  stdin = new PassThrough()
+  input = ''
   stdout = new PassThrough()
   stderr = new PassThrough()
   killed = false
-  constructor(readonly args: string[]) { super() }
+  constructor(readonly args: string[]) {
+    super()
+    this.stdin.on('data', (chunk) => { this.input += String(chunk) })
+  }
   kill(): boolean {
     if (!this.killed) {
       this.killed = true
@@ -167,8 +186,14 @@ class FakeChild extends EventEmitter implements SshChild {
   }
 }
 
-function harness(script: { attach: Array<{ code: number; stdout?: string; stderr?: string }>; portOpen?: boolean }) {
+function harness(script: {
+  attach: Array<{ code: number; stdout?: string; stderr?: string }>
+  portOpen?: boolean
+  onInstall?: (child: FakeChild) => void
+  lastPaths?: Record<string, string>
+}) {
   const children: FakeChild[] = []
+  const lastPaths = { ...(script.lastPaths ?? {}) }
   const timers: Array<{ callback: () => void; ms: number }> = []
   const attachQueue = [...script.attach]
   const log = vi.fn()
@@ -178,7 +203,9 @@ function harness(script: { attach: Array<{ code: number; stdout?: string; stderr
     spawn: (_command, args) => {
       const child = new FakeChild(args)
       children.push(child)
-      if (!args.includes('-N')) {
+      if (args.at(-1) === INSTALL_REMOTE_COMMAND) {
+        script.onInstall?.(child)
+      } else if (!args.includes('-N')) {
         const next = attachQueue.shift() ?? { code: 255, stderr: 'no script' }
         child.finish(next.code, next.stdout ?? '', next.stderr ?? '')
       }
@@ -197,8 +224,14 @@ function harness(script: { attach: Array<{ code: number; stdout?: string; stderr
     attachTimeoutMs: 500,
     tunnelReadyTimeoutMs: 500,
     loginTimeoutMs: 500,
+    installTimeoutMs: 900,
+    installSpec: () => DEFAULT_INSTALL_SPEC,
+    lastMiraPaths: {
+      get: vi.fn(async (host: string) => lastPaths[host] ?? null),
+      set: vi.fn(async (host: string, value: string) => { lastPaths[host] = value }),
+    },
   }
-  return { manager: new RemoteSshManager(deps), children, timers, deps, log }
+  return { manager: new RemoteSshManager(deps), children, timers, deps, log, lastPaths }
 }
 
 const tunnels = (children: FakeChild[]) => children.filter((child) => child.args.includes('-N'))
@@ -211,7 +244,7 @@ describe('RemoteSshManager', () => {
 
     const status = await manager.connect('ana@lab')
 
-    expect(status).toEqual({ phase: 'connected', host: 'ana@lab', localPort: 51000, version: '0.5.0', error: null, attempt: 0 })
+    expect(status).toEqual({ phase: 'connected', host: 'ana@lab', localPort: 51000, version: '0.5.0', error: null, attempt: 0, miraPath: null })
     expect(manager.getToken()).toBe(TOKEN)
     expect(tunnels(children)[0].args).toContain('127.0.0.1:51000:127.0.0.1:40123')
     expect(JSON.stringify(statuses)).not.toContain(TOKEN)
@@ -246,7 +279,7 @@ describe('RemoteSshManager', () => {
 
     await manager.connect('lab')
     expect(attaches()).toHaveLength(2)
-    expect(attaches()[1].args.at(-1)).toBe("sh -lc 'mira remote attach --json'")
+    expect(attaches()[1].args.at(-1)).toBe(discoveryCommand(null))
 
     const invalid = await manager.connect('lab', { miraCommand: "mira'; id; '" })
     expect(invalid.error?.code).toBe('invalid_command')
@@ -419,7 +452,7 @@ describe('interactive ssh command construction', () => {
       '-N', '-o', 'ControlMaster=yes', '-o', 'ControlPath=/tmp/mira-ssh-x/m1', '-o', 'ControlPersist=no',
       '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ConnectTimeout=15', '-p', '2222', 'ana@lab',
     ])
-    expect(buildMuxAttachArgs(target, '/tmp/mira-ssh-x/m1')).toEqual([
+    expect(buildMuxAttachArgs(target, '/tmp/mira-ssh-x/m1', 'mira')).toEqual([
       '-o', 'ControlMaster=no', '-o', 'ControlPath=/tmp/mira-ssh-x/m1', '-o', 'BatchMode=yes', '-p', '2222',
       'ana@lab', '--', "sh -lc 'mira remote attach --json'",
     ])
@@ -448,6 +481,7 @@ function muxHarness(options: {
   attach?: Array<{ code: number; stdout?: string; stderr?: string }>
   forwardCode?: number
   answers?: Array<string | null>
+  onInstall?: (child: FakeChild) => void
 } = {}) {
   const children: FakeChild[] = []
   const timers: Array<{ callback: () => void; ms: number }> = []
@@ -467,7 +501,9 @@ function muxHarness(options: {
       children.push(child)
       envs.push(env)
       if (args.includes('ControlMaster=yes')) return child
-      if (args.includes('-O')) {
+      if (args.at(-1) === INSTALL_REMOTE_COMMAND) {
+        options.onInstall?.(child)
+      } else if (args.includes('-O')) {
         child.finish(options.forwardCode ?? 0, '', options.forwardCode ? 'mux_client_forward: forwarding request failed' : '')
       } else if (!args.includes('-N')) {
         const next = attachQueue.shift() ?? { code: 255, stderr: 'no script' }
@@ -683,5 +719,441 @@ describe('RemoteSshManager on Windows', () => {
     expect(status.error).toEqual({ code: 'prompt_unsupported', message: 'OpenSSH_for_Windows_8.1' })
     expect(h.children[0].args).toContain('BatchMode=yes')
     expect(h.deps.openAskpass).not.toHaveBeenCalled()
+  })
+})
+
+describe('remote mira discovery wrapper', () => {
+  it('is one line that quotes safely through any login shell', () => {
+    expect(DISCOVERY_SCRIPT).not.toMatch(/[\r\n]/)
+    // fish treats \\ and \' inside single quotes as escapes; zsh RC_QUOTES reads ''.
+    expect(DISCOVERY_SCRIPT).not.toMatch(/\\\\|\\'|''/)
+    expect(shQuote("it's")).toBe(`'it'\\''s'`)
+    expect(shQuote('')).toBe("''")
+    expect(discoveryCommand(null)).toBe(`sh -lc ${shQuote(DISCOVERY_SCRIPT)} mira ''`)
+    expect(discoveryCommand("/home/ana/my envs/it's/bin/mira").endsWith(` mira '/home/ana/my envs/it'\\''s/bin/mira'`)).toBe(true)
+    // A path that cannot be remembered is not passed at all.
+    expect(discoveryCommand('relative/mira')).toBe(discoveryCommand(null))
+    expect(discoveryCommand('/a/b\\c')).toBe(discoveryCommand(null))
+  })
+
+  it('uses a manual command on its own, without discovery', () => {
+    expect(attachCommand('/opt/mira/bin/mira', '/last/bin/mira')).toBe("sh -lc '/opt/mira/bin/mira remote attach --json'")
+    expect(attachCommand('', '/last/bin/mira')).toBe(discoveryCommand('/last/bin/mira'))
+  })
+
+  it('only remembers plain absolute paths', () => {
+    expect(isRememberablePath('/home/ana/.mira/bin/mira')).toBe(true)
+    expect(isRememberablePath("/srv/My Envs/it's $HOME/bin/mira")).toBe(true)
+    for (const value of ['', '/', 'mira', '~/bin/mira', '/a\nb', '/a\\b', `/${'x'.repeat(1100)}`, 7, null]) {
+      expect(isRememberablePath(value)).toBe(false)
+    }
+  })
+
+  it('reads the marker line and keeps it out of the attach result', () => {
+    const stdout = `Welcome\nmira-remote-path: last /srv/my env/bin/mira\n${attachJson()}\n`
+    expect(parseFoundMira(stdout)).toEqual({ source: 'last', path: '/srv/my env/bin/mira' })
+    expect(parseFoundMira('mira-remote-path: bogus /x\nhello')).toBeNull()
+    expect(parseAttachOutput({ code: 0, stdout, stderr: '' })).toMatchObject({ ok: true, port: 40123 })
+    // The marker alone is not "output" to complain about.
+    expect(parseAttachOutput({ code: 1, stdout: 'mira-remote-path: path /usr/bin/mira\n', stderr: '' }))
+      .toEqual({ ok: false, code: 'invalid_output', message: 'Unexpected output from server.' })
+  })
+
+  it('classifies not installed, too old and ssh failures', () => {
+    const notInstalled = '{"protocol":1,"ok":false,"error":{"code":"not_installed","message":"mira was not found on the server."}}'
+    expect(parseAttachOutput({ code: 127, stdout: notInstalled, stderr: '' })).toEqual({ ok: false, code: 'not_installed', message: 'mira was not found on the server.' })
+    // A stale launcher whose interpreter is gone.
+    expect(parseAttachOutput({ code: 127, stdout: 'mira-remote-path: launcher /h/.mira/bin/mira', stderr: '/h/.mira/bin/mira: 2: exec: /old/env/bin/python: not found' })).toMatchObject({ code: 'not_installed' })
+    expect(parseAttachOutput({ code: 2, stdout: '', stderr: "Usage: mira [OPTIONS] COMMAND\nError: No such command 'remote'." })).toEqual({ ok: false, code: 'too_old', message: "Error: No such command 'remote'." })
+    expect(parseAttachOutput({ code: 2, stdout: '', stderr: 'Error: No such option: --json' })).toMatchObject({ code: 'too_old' })
+    // Real Typer output from mira-engine 0.3.5rc1 (PyPI).
+    const boxed = "Usage: mira [OPTIONS] COMMAND [ARGS]...\nTry 'mira --help' for help.\n╭─ Error ─────────╮\n│ No such command 'remote'.        │\n╰─────────────────╯\n"
+    expect(parseAttachOutput({ code: 2, stdout: '', stderr: boxed })).toEqual({ ok: false, code: 'too_old', message: "No such command 'remote'." })
+    expect(parseInstallOutput({ code: 2, stdout: 'Installed mira-engine 0.3.5rc1\n', stderr: boxed.replace('remote', 'setup') }))
+      .toEqual({ ok: false, code: 'too_old', message: "No such command 'setup'.", version: '0.3.5rc1' })
+    expect(parseAttachOutput({ code: 0, stdout: attachJson({ protocol: 0 }), stderr: '' })).toMatchObject({ code: 'too_old' })
+    expect(parseAttachOutput({ code: 0, stdout: attachJson({ protocol: 2 }), stderr: '' })).toMatchObject({ code: 'incompatible' })
+    expect(parseAttachOutput({ code: 255, stdout: '', stderr: 'ssh: connect to host lab port 22: Connection refused' })).toMatchObject({ code: 'ssh_failed' })
+  })
+})
+
+// Runs the wrapper the way sshd does (`$SHELL -c <command>`) under every
+// shell available here, with a throwaway HOME and stub `mira` executables.
+describe.skipIf(process.platform === 'win32')('remote mira discovery wrapper (real shells)', () => {
+  const shells = ['/bin/sh', '/bin/bash', '/bin/zsh', '/bin/dash', '/bin/tcsh', '/usr/bin/fish', '/opt/homebrew/bin/fish'].filter((shell) => existsSync(shell))
+
+  async function sandbox() {
+    const root = await mkdtemp(path.join(tmpdir(), 'mira discovery '))
+    const home = path.join(root, 'home')
+    const bin = path.join(root, 'path bin')
+    await mkdir(home, { recursive: true })
+    await mkdir(bin, { recursive: true })
+    const stub = async (file: string, label: string) => {
+      await mkdir(path.dirname(file), { recursive: true })
+      await writeFile(file, `#!/bin/sh\necho "${label} $*"\n`)
+      await chmod(file, 0o755)
+    }
+    const run = (shell: string, lastPath: string | null, env: Record<string, string> = {}) => {
+      const result = spawnSync(shell, ['-c', discoveryCommand(lastPath)], {
+        env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, ...env },
+        encoding: 'utf8',
+      })
+      return { code: result.status, stdout: result.stdout, stderr: result.stderr }
+    }
+    return { root, home, bin, stub, run, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  it.each(shells)('finds the launcher, then the last path, then PATH (%s)', async (shell) => {
+    const box = await sandbox()
+    try {
+      const last = path.join(box.root, "it's my env", 'bin', 'mira')
+      await box.stub(last, 'last')
+      await box.stub(path.join(box.bin, 'mira'), 'path')
+
+      // PATH only.
+      let out = box.run(shell, null)
+      expect(out.code).toBe(0)
+      expect(parseFoundMira(out.stdout)).toEqual({ source: 'path', path: path.join(box.bin, 'mira') })
+      expect(out.stdout).toContain('path remote attach --json')
+
+      // The remembered path (spaces and a quote in it) beats PATH.
+      out = box.run(shell, last)
+      expect(parseFoundMira(out.stdout)).toEqual({ source: 'last', path: last })
+      expect(out.stdout.trim().split('\n').at(-1)).toBe('last remote attach --json')
+
+      // The launcher beats both; MIRA_HOME moves it.
+      const launcher = path.join(box.home, '.mira', 'bin', 'mira')
+      await box.stub(launcher, 'launcher')
+      out = box.run(shell, last)
+      expect(parseFoundMira(out.stdout)).toEqual({ source: 'launcher', path: launcher })
+      const custom = path.join(box.root, 'custom home')
+      await box.stub(path.join(custom, 'bin', 'mira'), 'custom')
+      out = box.run(shell, last, { MIRA_HOME: custom })
+      expect(parseFoundMira(out.stdout)).toEqual({ source: 'launcher', path: path.join(custom, 'bin', 'mira') })
+
+      // A launcher that is not executable is skipped.
+      await chmod(launcher, 0o644)
+      out = box.run(shell, last)
+      expect(parseFoundMira(out.stdout)?.source).toBe('last')
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it.each(shells)('reports not_installed as JSON when nothing is found (%s)', async (shell) => {
+    const box = await sandbox()
+    try {
+      const out = box.run(shell, path.join(box.root, 'gone', 'mira'))
+      expect(out.code).toBe(127)
+      expect(parseFoundMira(out.stdout)).toBeNull()
+      expect(parseAttachOutput(out)).toEqual({ ok: false, code: 'not_installed', message: 'mira was not found on the server.' })
+    } finally {
+      await box.cleanup()
+    }
+  })
+})
+
+describe('RemoteSshManager discovery', () => {
+  const found = (source: string, file: string, json = attachJson()) => `mira-remote-path: ${source} ${file}\n${json}\n`
+
+  it('passes the remembered path and remembers the one that worked', async () => {
+    const h = harness({
+      attach: [{ code: 0, stdout: found('path', '/opt/conda/envs/mira/bin/mira') }],
+      lastPaths: { lab: '/old/bin/mira' },
+    })
+    const status = await h.manager.connect('lab')
+    expect(status).toMatchObject({ phase: 'connected', miraPath: '/opt/conda/envs/mira/bin/mira' })
+    expect(h.deps.lastMiraPaths!.get).toHaveBeenCalledWith('lab')
+    expect(h.children[0].args.at(-1)).toBe(discoveryCommand('/old/bin/mira'))
+    await vi.waitFor(() => expect(h.lastPaths.lab).toBe('/opt/conda/envs/mira/bin/mira'))
+    // Paths are not logged.
+    expect(JSON.stringify(h.log.mock.calls)).not.toContain('/opt/conda')
+    expect(h.log).toHaveBeenCalledWith('remote_ssh.mira_found', { source: 'path', ok: true })
+  })
+
+  it('does not remember a path that failed or is already remembered', async () => {
+    const tooOld = harness({ attach: [{ code: 2, stdout: 'mira-remote-path: path /usr/bin/mira\n', stderr: "Error: No such command 'remote'." }] })
+    const status = await tooOld.manager.connect('lab')
+    expect(status.error?.code).toBe('too_old')
+    expect(status.miraPath).toBe('/usr/bin/mira')
+    expect(tooOld.deps.lastMiraPaths!.set).not.toHaveBeenCalled()
+
+    const same = harness({ attach: [{ code: 0, stdout: found('last', '/srv/bin/mira') }], lastPaths: { lab: '/srv/bin/mira' } })
+    await same.manager.connect('lab')
+    expect(same.deps.lastMiraPaths!.set).not.toHaveBeenCalled()
+  })
+
+  it('short-circuits discovery when a path is set by hand', async () => {
+    const h = harness({ attach: [{ code: 0, stdout: attachJson() }], lastPaths: { lab: '/old/bin/mira' } })
+    const status = await h.manager.connect('lab', { miraCommand: '/opt/mira/bin/mira' })
+    expect(h.children[0].args.at(-1)).toBe("sh -lc '/opt/mira/bin/mira remote attach --json'")
+    expect(h.deps.lastMiraPaths!.get).not.toHaveBeenCalled()
+    expect(h.deps.lastMiraPaths!.set).not.toHaveBeenCalled()
+    expect(status.miraPath).toBe('/opt/mira/bin/mira')
+  })
+
+  it('reports the wrapper not_installed result', async () => {
+    const h = harness({ attach: [{ code: 127, stdout: '{"protocol":1,"ok":false,"error":{"code":"not_installed","message":"mira was not found on the server."}}' }] })
+    const status = await h.manager.connect('lab')
+    expect(status).toMatchObject({ phase: 'error', error: { code: 'not_installed' }, miraPath: null })
+  })
+})
+
+describe('install script', () => {
+  it('targets an isolated venv, prefers uv, and needs no sudo', () => {
+    const script = buildInstallScript(DEFAULT_INSTALL_SPEC)
+    expect(script).toContain('MIRA_HOME="${MIRA_HOME:-$HOME/.mira}"')
+    expect(script).toContain('venv="$MIRA_HOME/venv"')
+    expect(script).toContain("spec='mira-engine>=0.4.0rc1'")
+    expect(script).toContain('set -e')
+    expect(script).toContain(`uv venv --python '>=3.11' "$venv"`)
+    expect(script).toContain('uv pip install --python "$venv/bin/python" -U "$spec"')
+    expect(script).toContain('for candidate in python3.13 python3.12 python3.11 python3; do')
+    expect(script).toContain('"$py" -m venv "$venv"')
+    expect(script).toContain('"$venv/bin/python" -m pip install -U pip')
+    expect(script).toContain('"$venv/bin/python" -m pip install -U "$spec"')
+    expect(script).toContain('"$venv/bin/mira" remote setup --json')
+    expect(script).toContain('main </dev/null')
+    expect(script).not.toMatch(/^\s*sudo\b|conda (install|activate)/m)
+    // The uv installer is shown as advice, never run.
+    expect(script).toMatch(/echo '  - install uv:  curl -LsSf https:\/\/astral\.sh\/uv\/install\.sh \| sh' >&2/)
+    expect(INSTALL_REMOTE_COMMAND).toBe("sh -lc 'exec sh -s'")
+  })
+
+  it('quotes the package spec and accepts an override from the environment', () => {
+    expect(installSpec({})).toBe(DEFAULT_INSTALL_SPEC)
+    expect(installSpec({ MIRA_REMOTE_INSTALL_SPEC: ' git+https://github.com/MIRA-Intelligence/mira@feat/server-edition ' }))
+      .toBe('git+https://github.com/MIRA-Intelligence/mira@feat/server-edition')
+    for (const bad of ['', '   ', '--index-url=http://evil', 'a\nb']) {
+      expect(installSpec({ MIRA_REMOTE_INSTALL_SPEC: bad })).toBe(DEFAULT_INSTALL_SPEC)
+    }
+    expect(buildInstallScript("pkg @ file:///srv/it's here")).toContain(`spec='pkg @ file:///srv/it'\\''s here'`)
+  })
+
+  it('parses setup results, missing setup, missing python and ssh failures', () => {
+    const setup = '{"protocol":1,"ok":true,"launcher":"/h/.mira/bin/mira","executable":"/h/.mira/venv/bin/python","version":"0.5.0"}'
+    expect(parseInstallOutput({ code: 0, stdout: `Installed mira-engine 0.5.0\n${setup}\n`, stderr: 'noise' }))
+      .toEqual({ ok: true, version: '0.5.0', launcher: '/h/.mira/bin/mira', executable: '/h/.mira/venv/bin/python' })
+    expect(parseInstallOutput({ code: 2, stdout: 'Installed mira-engine 0.3.5rc1\n', stderr: "Error: No such command 'setup'." }))
+      .toEqual({ ok: false, code: 'too_old', message: "Error: No such command 'setup'.", version: '0.3.5rc1' })
+    expect(parseInstallOutput({ code: 3, stdout: '{"protocol":1,"ok":false,"error":{"code":"no_python","message":"none"}}', stderr: '' }))
+      .toMatchObject({ ok: false, code: 'no_python' })
+    expect(parseInstallOutput({ code: 1, stdout: '{"protocol":1,"ok":false,"error":{"code":"internal","message":"disk full"}}', stderr: '' }))
+      .toMatchObject({ ok: false, code: 'install_failed', message: 'disk full' })
+    expect(parseInstallOutput({ code: 1, stdout: '', stderr: 'ERROR: No matching distribution found for mira-engine>=0.4.0rc1' }))
+      .toMatchObject({ ok: false, code: 'install_failed', message: 'ERROR: No matching distribution found for mira-engine>=0.4.0rc1' })
+    expect(parseInstallOutput({ code: 255, stdout: '', stderr: 'Permission denied (publickey).' })).toMatchObject({ code: 'auth_required' })
+    expect(parseInstallOutput({ code: 255, stdout: '', stderr: 'Connection reset' })).toMatchObject({ code: 'ssh_failed' })
+  })
+})
+
+// Runs the real install script with `sh -s` (as on the server) against stub
+// uv / python / mira executables that record what they were asked to do.
+describe.skipIf(process.platform === 'win32')('install script (real sh, stub tools)', () => {
+  const VENV_PYTHON = `#!/bin/sh
+echo "venv-python $*" >> "$LOG"
+case "$*" in *importlib*) echo "\${STUB_VERSION:-0.5.0}" ;; esac
+exit 0
+`
+  const VENV_MIRA = `#!/bin/sh
+echo "venv-mira $*" >> "$LOG"
+if [ -n "$STUB_NO_SETUP" ]; then echo "Error: No such command 'setup'." >&2; exit 2; fi
+printf '{"protocol":1,"ok":true,"launcher":"%s","executable":"%s","version":"0.5.0"}\\n' "$MIRA_HOME/bin/mira" "$MIRA_HOME/venv/bin/python"
+`
+  const MAKE_VENV = 'mkdir -p "$d/bin"; touch "$d/pyvenv.cfg"; cp "$STUBS/venv-python" "$d/bin/python"; cp "$STUBS/venv-mira" "$d/bin/mira"'
+  const UV = `#!/bin/sh
+echo "uv $*" >> "$LOG"
+if [ "$1" = venv ]; then d="$4"; ${MAKE_VENV}; fi
+`
+  const GOOD_PYTHON = `#!/bin/sh
+echo "$(basename "$0") $*" >> "$LOG"
+case "$1" in -c) exit 0 ;; -m) d="$3"; ${MAKE_VENV} ;; esac
+`
+  const OLD_PYTHON = '#!/bin/sh\nexit 1\n'
+
+  async function sandbox(tools: Record<string, string>) {
+    const root = await mkdtemp(path.join(tmpdir(), 'mira install '))
+    const stubs = path.join(root, 'stubs')
+    const bin = path.join(root, 'bin')
+    await mkdir(stubs, { recursive: true })
+    await mkdir(bin, { recursive: true })
+    const write = async (file: string, body: string) => { await writeFile(file, body); await chmod(file, 0o755) }
+    await write(path.join(stubs, 'venv-python'), VENV_PYTHON)
+    await write(path.join(stubs, 'venv-mira'), VENV_MIRA)
+    // Shadow every python the script looks for, so the host's own never count.
+    for (const name of ['python3.13', 'python3.12', 'python3.11', 'python3']) await write(path.join(bin, name), OLD_PYTHON)
+    for (const [name, body] of Object.entries(tools)) await write(path.join(bin, name), body)
+    const log = path.join(root, 'log')
+    const miraHome = path.join(root, "mira home's")
+    const run = (spec = DEFAULT_INSTALL_SPEC, env: Record<string, string> = {}) => {
+      const result = spawnSync('/bin/sh', ['-s'], {
+        input: buildInstallScript(spec),
+        env: { HOME: root, MIRA_HOME: miraHome, PATH: `${bin}:/usr/bin:/bin`, LOG: log, STUBS: stubs, ...env },
+        encoding: 'utf8',
+      })
+      return { code: result.status, stdout: result.stdout, stderr: result.stderr }
+    }
+    const calls = async () => (await readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean)
+    return { root, miraHome, run, calls, cleanup: () => rm(root, { recursive: true, force: true }) }
+  }
+
+  it('creates the venv with uv, installs the spec and runs remote setup', async () => {
+    const box = await sandbox({ uv: UV })
+    try {
+      const out = box.run('git+https://example.invalid/mira@branch')
+      expect(out.code).toBe(0)
+      const venv = path.join(box.miraHome, 'venv')
+      expect(await box.calls()).toEqual([
+        `uv venv --python >=3.11 ${venv}`,
+        `uv pip install --python ${venv}/bin/python -U git+https://example.invalid/mira@branch`,
+        `venv-python -c import importlib.metadata as m; print(m.version("mira-engine"))`,
+        'venv-mira remote setup --json',
+      ])
+      expect(parseInstallOutput(out)).toEqual({ ok: true, version: '0.5.0', launcher: path.join(box.miraHome, 'bin', 'mira'), executable: path.join(venv, 'bin', 'python') })
+
+      // Run again: the existing venv is upgraded in place.
+      const again = box.run()
+      expect(again.code).toBe(0)
+      expect(again.stdout).toContain(`Upgrading the existing ${venv}`)
+      expect((await box.calls()).filter((line) => line.startsWith('uv venv'))).toHaveLength(1)
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('falls back to the first Python 3.11+ with venv and pip', async () => {
+    const box = await sandbox({ 'python3.12': GOOD_PYTHON })
+    try {
+      const out = box.run()
+      expect(out.code).toBe(0)
+      const venv = path.join(box.miraHome, 'venv')
+      const calls = await box.calls()
+      expect(calls).toContain(`python3.12 -m venv ${venv}`)
+      expect(calls).toContain('venv-python -m pip install -U pip')
+      expect(calls).toContain('venv-python -m pip install -U mira-engine>=0.4.0rc1')
+      expect(calls.at(-1)).toBe('venv-mira remote setup --json')
+      expect(parseInstallOutput(out)).toMatchObject({ ok: true })
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('fails with guidance when neither uv nor Python 3.11+ exists', async () => {
+    const box = await sandbox({})
+    try {
+      const out = box.run()
+      expect(out.code).toBe(3)
+      expect(out.stderr).toContain('curl -LsSf https://astral.sh/uv/install.sh | sh')
+      expect(out.stderr).toContain('mira remote setup')
+      expect(parseInstallOutput(out)).toMatchObject({ ok: false, code: 'no_python' })
+      expect(await box.calls()).toEqual([])
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('reports an engine without `remote setup` as too old', async () => {
+    const box = await sandbox({ uv: UV })
+    try {
+      const out = box.run(DEFAULT_INSTALL_SPEC, { STUB_NO_SETUP: '1', STUB_VERSION: '0.3.5rc1' })
+      expect(out.code).toBe(2)
+      expect(parseInstallOutput(out)).toEqual({ ok: false, code: 'too_old', message: "Error: No such command 'setup'.", version: '0.3.5rc1' })
+    } finally {
+      await box.cleanup()
+    }
+  })
+
+  it('stops at the first failing step', async () => {
+    const box = await sandbox({ uv: `${UV}[ "$1" = pip ] && { echo 'error: No solution found' >&2; exit 1; }\nexit 0\n` })
+    try {
+      const out = box.run()
+      expect(out.code).toBe(1)
+      expect(parseInstallOutput(out)).toMatchObject({ ok: false, code: 'install_failed', message: 'error: No solution found' })
+      expect((await box.calls()).some((line) => line.startsWith('venv-mira'))).toBe(false)
+    } finally {
+      await box.cleanup()
+    }
+  })
+})
+
+describe('RemoteSshManager install', () => {
+  const NOT_INSTALLED = { code: 127, stdout: '{"protocol":1,"ok":false,"error":{"code":"not_installed","message":"mira was not found on the server."}}' }
+  const SETUP_OK = 'Installed mira-engine 0.5.0\n{"protocol":1,"ok":true,"launcher":"/h/.mira/bin/mira","executable":"/h/.mira/venv/bin/python","version":"0.5.0"}\n'
+
+  it('installs over the logged-in master, streams output and reconnects without a new prompt', async () => {
+    let install: FakeChild | null = null
+    const h = muxHarness({
+      attach: [NOT_INSTALLED, { code: 0, stdout: `mira-remote-path: launcher /h/.mira/bin/mira\n${attachJson()}` }],
+      onInstall: (child) => { install = child },
+    })
+    const connecting = h.manager.connect('lab')
+    await h.askAndLogin()
+    expect((await connecting).error?.code).toBe('not_installed')
+
+    const chunks: string[] = []
+    h.manager.onInstallOutput((chunk) => chunks.push(chunk))
+    const installing = h.manager.install()
+    await vi.waitFor(() => expect(install).not.toBeNull())
+    const child = install as unknown as FakeChild
+    // Over the master: BatchMode client, the script on stdin.
+    expect(child.args).toContain('ControlPath=/tmp/mira-ssh-x/m1')
+    expect(child.args).toContain('BatchMode=yes')
+    await vi.waitFor(() => expect(child.input).toBe(h.manager.installPlan().script))
+    child.stderr.write('Resolved 42 packages\n')
+    child.finish(0, SETUP_OK)
+    expect(await installing).toEqual({ ok: true, version: '0.5.0', launcher: '/h/.mira/bin/mira', executable: '/h/.mira/venv/bin/python' })
+    expect(chunks.join('')).toContain('Resolved 42 packages')
+    expect(chunks.join('')).toContain('Installed mira-engine 0.5.0')
+
+    await vi.waitFor(() => expect(h.manager.status()).toMatchObject({ phase: 'connected', miraPath: '/h/.mira/bin/mira' }))
+    expect(h.prompt).toHaveBeenCalledTimes(1)
+    expect(h.masters()).toHaveLength(1)
+    expect(h.log).toHaveBeenCalledWith('remote_ssh.install', { phase: 'done', code: null })
+  })
+
+  it('can be cancelled, and refuses to run twice or before a failed attach', async () => {
+    const h = harness({ attach: [NOT_INSTALLED], onInstall: () => {} })
+    expect(await h.manager.install()).toMatchObject({ ok: false, code: 'not_ready' })
+    await h.manager.connect('lab')
+    const installing = h.manager.install()
+    await vi.waitFor(() => expect(h.children.some((child) => child.args.at(-1) === INSTALL_REMOTE_COMMAND)).toBe(true))
+    expect(await h.manager.install()).toMatchObject({ ok: false, code: 'busy' })
+    expect(h.manager.cancelInstall()).toBe(true)
+    expect(await installing).toMatchObject({ ok: false, code: 'cancelled' })
+    expect(h.children.find((child) => child.args.at(-1) === INSTALL_REMOTE_COMMAND)!.killed).toBe(true)
+    expect(h.manager.status().phase).toBe('error')
+    expect(h.manager.cancelInstall()).toBe(false)
+  })
+
+  it('times out, reports failures and stays in the error state', async () => {
+    const timeout = harness({ attach: [NOT_INSTALLED], onInstall: () => {} })
+    const timers: Array<{ callback: () => void; ms: number }> = []
+    timeout.deps.setTimer = (callback, ms) => { timers.push({ callback, ms }); return { ms } }
+    await timeout.manager.connect('lab')
+    const installing = timeout.manager.install()
+    await vi.waitFor(() => expect(timers.some((timer) => timer.ms === 900)).toBe(true))
+    timers.find((timer) => timer.ms === 900)!.callback()
+    expect(await installing).toMatchObject({ ok: false, code: 'timeout' })
+
+    const failing = harness({ attach: [NOT_INSTALLED], onInstall: (child) => child.finish(1, '', 'ERROR: Could not find a version that satisfies the requirement mira-engine>=0.4.0rc1') })
+    await failing.manager.connect('lab')
+    expect(await failing.manager.install()).toMatchObject({ ok: false, code: 'install_failed' })
+    expect(failing.manager.status()).toMatchObject({ phase: 'error', error: { code: 'not_installed' } })
+  })
+
+  it('logs in through askpass on Windows (no master)', async () => {
+    let install: FakeChild | null = null
+    const h = muxHarness({
+      platform: 'win32',
+      version: { major: 9, minor: 5, windows: true, raw: 'OpenSSH_for_Windows_9.5' },
+      attach: [NOT_INSTALLED, { code: 0, stdout: attachJson() }],
+      onInstall: (child) => { install = child; child.finish(0, SETUP_OK) },
+    })
+    expect((await h.manager.connect('lab')).error?.code).toBe('not_installed')
+    expect(await h.manager.install()).toMatchObject({ ok: true })
+    const child = install as unknown as FakeChild
+    expect(child.args).not.toContain('BatchMode=yes')
+    expect(h.envs[h.children.indexOf(child)]).toMatchObject({ SSH_ASKPASS: '/askpass.sh' })
+    await vi.waitFor(() => expect(h.manager.status().phase).toBe('connected'))
   })
 })

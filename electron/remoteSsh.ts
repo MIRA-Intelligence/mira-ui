@@ -32,17 +32,93 @@ export const DEFAULT_MIRA_COMMAND = 'mira'
 // Guidance for exit 127 lives in MIRA-Intelligence/mira docs/remote-ssh.md.
 export const REMOTE_SSH_DOC = 'docs/remote-ssh.md'
 
-// The remote command runs inside `sh -lc '...'`, so only plain path
-// characters are allowed (a leading ~ still expands in the inner shell).
+// A remote mira command the user set by hand for a host. It runs inside
+// `sh -lc '...'`, so only plain path characters are allowed (a leading ~ still
+// expands in the inner shell). '' means "not set": find mira (discovery).
 export function parseMiraCommand(value: string | null | undefined): string | null {
-  const command = (value ?? '').trim() || DEFAULT_MIRA_COMMAND
+  const command = (value ?? '').trim()
+  if (!command) return ''
   if (command.length > 255 || command.startsWith('-')) return null
   return /^[A-Za-z0-9_./~+-]+$/.test(command) ? command : null
 }
 
-export function attachCommand(miraCommand = DEFAULT_MIRA_COMMAND): string {
-  return `sh -lc '${miraCommand} remote attach --json'`
+// POSIX single quoting. The result also survives the user's login shell when
+// it is bash, zsh, fish or csh, as long as the text has no backslashes, which
+// rememberable paths and the discovery script never contain.
+export function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }
+
+// Where the remote mira was found (MIRA-Intelligence/mira-ui#81). `manual` is
+// the per-host path set in Settings; the others come from discovery.
+export type MiraSource = 'manual' | 'launcher' | 'last' | 'path'
+export interface FoundMira {
+  source: MiraSource
+  path: string
+}
+
+// The discovery wrapper reports the executable it is about to run on a stdout
+// line of its own, before the engine's output. The JSON result stays the last
+// line, so this never changes how that line is read.
+export const DISCOVERY_MARKER = 'mira-remote-path:'
+
+// Absolute paths reported by the server that can be remembered for a host and
+// sent back as an argument next time. Anything with control characters or
+// backslashes is not remembered (discovery still finds it each time).
+export function isRememberablePath(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 1 && value.length <= 1024
+    && value.startsWith('/') && !/[\u0000-\u001f\u007f\\]/.test(value)
+}
+
+const NOT_INSTALLED_JSON = JSON.stringify({
+  protocol: REMOTE_PROTOCOL,
+  ok: false,
+  error: { code: 'not_installed', message: 'mira was not found on the server.' },
+})
+
+// Runs as `sh -lc <script> mira <last path>`, so the login shell's PATH is
+// used and the remembered path arrives as $1 instead of being spliced into
+// code. Order: the launcher kept by `mira remote setup`
+// (MIRA-Intelligence/mira#173), the last path that worked for this host,
+// then `mira` on PATH. Nothing else is searched. One line, no backslashes and
+// no '' pairs, so quoting it once keeps it intact through any login shell.
+export const DISCOVERY_SCRIPT = [
+  'm="${MIRA_HOME:-$HOME/.mira}/bin/mira"',
+  'if [ -f "$m" ] && [ -x "$m" ]; then s=launcher',
+  'elif [ -n "$1" ] && [ -f "$1" ] && [ -x "$1" ]; then m="$1"; s=last',
+  'elif m="$(command -v mira 2>/dev/null)" && [ -n "$m" ] && [ -x "$m" ]; then s=path',
+  `else printf '%s\\n' '${NOT_INSTALLED_JSON}'; exit 127`,
+  'fi',
+  `printf '${DISCOVERY_MARKER} %s %s\\n' "$s" "$m"`,
+  'exec "$m" remote attach --json',
+].join('; ')
+
+export function discoveryCommand(lastPath?: string | null): string {
+  return `sh -lc ${shQuote(DISCOVERY_SCRIPT)} mira ${shQuote(isRememberablePath(lastPath) ? lastPath : '')}`
+}
+
+// A manual command is used on its own, exactly as before discovery existed.
+export function attachCommand(miraCommand = '', lastPath: string | null = null): string {
+  return miraCommand ? `sh -lc '${miraCommand} remote attach --json'` : discoveryCommand(lastPath)
+}
+
+// The last marker line on stdout, if discovery ran and found something.
+export function parseFoundMira(stdout: string): FoundMira | null {
+  let found: FoundMira | null = null
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.startsWith(`${DISCOVERY_MARKER} `)) continue
+    const rest = line.slice(DISCOVERY_MARKER.length + 1)
+    const space = rest.indexOf(' ')
+    const source = rest.slice(0, space)
+    const foundPath = rest.slice(space + 1)
+    if (space > 0 && (source === 'launcher' || source === 'last' || source === 'path') && foundPath) {
+      found = { source, path: foundPath }
+    }
+  }
+  return found
+}
+
+const withoutMarkers = (stdout: string) => stdout.split(/\r?\n/).filter((line) => !line.startsWith(`${DISCOVERY_MARKER} `)).join('\n')
 
 export type RemoteSshErrorCode =
   | 'invalid_host'
@@ -54,6 +130,9 @@ export type RemoteSshErrorCode =
   | 'host_key_changed'
   | 'ssh_failed'
   | 'not_installed'
+  // The remote engine predates Remote-SSH (no `remote attach`, older protocol).
+  | 'too_old'
+  // The remote engine speaks a newer protocol than this app.
   | 'incompatible'
   | 'invalid_output'
   | 'tunnel_failed'
@@ -63,7 +142,10 @@ export type RemoteSshErrorCode =
   | 'config_invalid'
   | 'internal'
 
-const ENGINE_ERROR_CODES = new Set<RemoteSshErrorCode>(['start_failed', 'health_timeout', 'lease_conflict', 'config_invalid', 'internal'])
+// Codes the engine (or the discovery wrapper, for not_installed) may report.
+const ENGINE_ERROR_CODES = new Set<RemoteSshErrorCode>(['start_failed', 'health_timeout', 'lease_conflict', 'config_invalid', 'internal', 'not_installed'])
+// Typer/argparse rejecting `remote attach`, `--json` or `remote setup`.
+const TOO_OLD_PATTERN = /No such command|No such option|invalid choice|unrecognized arguments/i
 // Transient failures are retried while a connection is being kept alive;
 // everything else needs the user to act (keys, install, upgrade, config).
 const RETRYABLE_CODES = new Set<RemoteSshErrorCode>(['ssh_failed', 'tunnel_failed', 'start_failed', 'health_timeout'])
@@ -87,6 +169,8 @@ export interface RemoteSshStatus {
   version: string | null
   error: { code: RemoteSshErrorCode; message: string } | null
   attempt: number
+  // The remote mira executable used by the last attach (not a secret).
+  miraPath: string | null
 }
 
 // Accepts an ~/.ssh/config alias, host, user@host, and an optional :port
@@ -125,8 +209,8 @@ function baseOptions(target: SshTarget, interactive: boolean): string[] {
   ]
 }
 
-export function buildAttachArgs(target: SshTarget, miraCommand = DEFAULT_MIRA_COMMAND, interactive = false): string[] {
-  return [...baseOptions(target, interactive), target.destination, '--', attachCommand(miraCommand)]
+export function buildAttachArgs(target: SshTarget, miraCommand = '', interactive = false, lastPath: string | null = null): string[] {
+  return [...baseOptions(target, interactive), target.destination, '--', attachCommand(miraCommand, lastPath)]
 }
 
 export function buildTunnelArgs(target: SshTarget, localPort: number, remotePort: number, interactive = false): string[] {
@@ -160,8 +244,8 @@ function muxOptions(target: SshTarget, controlPath: string): string[] {
   return ['-o', 'ControlMaster=no', '-o', `ControlPath=${controlPath}`, '-o', 'BatchMode=yes', ...portArgs(target)]
 }
 
-export function buildMuxAttachArgs(target: SshTarget, controlPath: string, miraCommand = DEFAULT_MIRA_COMMAND): string[] {
-  return [...muxOptions(target, controlPath), target.destination, '--', attachCommand(miraCommand)]
+export function buildMuxAttachArgs(target: SshTarget, controlPath: string, miraCommand = '', lastPath: string | null = null): string[] {
+  return [...muxOptions(target, controlPath), target.destination, '--', attachCommand(miraCommand, lastPath)]
 }
 
 // The forward lives in the master and ends with it.
@@ -176,6 +260,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function lastLine(text: string): string {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
   return (lines.at(-1) ?? '').slice(0, 500)
+}
+
+// Typer draws errors in a box (│ No such command 'remote'. │); report the
+// matching line without the frame rather than the box's bottom border.
+function tooOldMessage(stderr: string): string {
+  const line = stderr.split(/\r?\n/).find((candidate) => TOO_OLD_PATTERN.test(candidate)) ?? ''
+  return line.replace(/^[\s│|]+|[\s│|]+$/g, '').slice(0, 500) || lastLine(stderr)
 }
 
 // The engine prints exactly one JSON line and it is the last one; login-shell
@@ -208,10 +299,14 @@ export function classifySshFailure(code: number | null, stderr: string): Extract
 }
 
 export function parseAttachOutput(result: { code: number | null; stdout: string; stderr: string }): AttachOutcome {
-  const payload = lastJsonLine(result.stdout)
+  const stdout = withoutMarkers(result.stdout)
+  const payload = lastJsonLine(stdout)
   if (payload) {
     if (payload.protocol !== REMOTE_PROTOCOL) {
-      return { ok: false, code: 'incompatible', message: `Unsupported remote protocol ${String(payload.protocol)}` }
+      // An older protocol is fixed by upgrading the engine; a newer one needs
+      // a newer desktop app.
+      const older = typeof payload.protocol === 'number' && payload.protocol < REMOTE_PROTOCOL
+      return { ok: false, code: older ? 'too_old' : 'incompatible', message: `Unsupported remote protocol ${String(payload.protocol)}` }
     }
     if (payload.ok === true) {
       const { port, token, version, pid, mira_home: miraHome, started } = payload
@@ -242,15 +337,179 @@ export function parseAttachOutput(result: { code: number | null; stdout: string;
 
   const stderr = result.stderr
   if (result.code === 255 || result.code === null) return classifySshFailure(result.code, stderr)
-  if (result.code === 127 || /not found|No such file or directory/i.test(stderr)) {
+  if (result.code === 127) return { ok: false, code: 'not_installed', message: lastLine(stderr) }
+  // An engine that predates Remote-SSH has no `remote attach` command.
+  if (TOO_OLD_PATTERN.test(stderr)) return { ok: false, code: 'too_old', message: tooOldMessage(stderr) }
+  if (/not found|No such file or directory/i.test(stderr)) {
     return { ok: false, code: 'not_installed', message: lastLine(stderr) }
   }
-  // An engine that predates Remote-SSH has no `remote` command.
-  if (/No such command|invalid choice|unrecognized arguments/i.test(stderr)) {
-    return { ok: false, code: 'incompatible', message: lastLine(stderr) }
-  }
-  const unexpected = lastLine(result.stdout) || lastLine(stderr)
+  const unexpected = lastLine(stdout) || lastLine(stderr)
   return { ok: false, code: 'invalid_output', message: unexpected ? `Unexpected output from server: ${unexpected}` : 'Unexpected output from server.' }
+}
+
+// ---------------------------------------------------------------------------
+// Installing Mira on the server (MIRA-Intelligence/mira-ui#81). Only ever run
+// after the user agreed in the install dialog, as the user, without sudo.
+
+// Engine versions come from git tags. PyPI's newest release (0.3.5rc1) has no
+// `remote attach`, so require the first line with Remote-SSH; the prerelease
+// in the specifier lets pip and uv pick rc builds.
+export const DEFAULT_INSTALL_SPEC = 'mira-engine>=0.4.0rc1'
+// For testing unreleased engines, e.g.
+// git+https://github.com/MIRA-Intelligence/mira@feat/server-edition or a wheel URL.
+export const INSTALL_SPEC_ENV = 'MIRA_REMOTE_INSTALL_SPEC'
+export const INSTALL_VENV = '${MIRA_HOME:-$HOME/.mira}/venv'
+export const INSTALL_TIMEOUT_MS = 15 * 60_000
+// The script goes over stdin, so only the server's POSIX sh parses it (never
+// the user's login shell); `sh -l` first loads ~/.profile for PATH (uv, python).
+export const INSTALL_REMOTE_COMMAND = "sh -lc 'exec sh -s'"
+
+export function installSpec(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[INSTALL_SPEC_ENV]?.trim()
+  return override && override.length <= 2048 && !override.startsWith('-') && !/[\u0000-\u001f\u007f]/.test(override)
+    ? override
+    : DEFAULT_INSTALL_SPEC
+}
+
+const NO_PYTHON_JSON = JSON.stringify({
+  protocol: REMOTE_PROTOCOL,
+  ok: false,
+  error: { code: 'no_python', message: 'Neither uv nor Python 3.11+ was found on the server.' },
+})
+
+// The exact script the install dialog shows and pipes to the server.
+export function buildInstallScript(spec: string): string {
+  return `# Install Mira for this user into its own virtual environment.
+# No sudo; your own conda envs and virtualenvs are not touched.
+set -e
+
+py_ok() {
+  "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1
+}
+
+# Replace an unusable venv, but only one this installer could have made.
+fresh_venv() {
+  if [ -e "$venv" ]; then
+    if [ -f "$venv/pyvenv.cfg" ]; then
+      echo "Replacing $venv"
+      rm -rf "$venv"
+    else
+      echo "$venv exists and is not a virtual environment; move it away and try again." >&2
+      exit 1
+    fi
+  fi
+}
+
+no_python() {
+  echo 'Neither uv nor Python 3.11 or newer was found on the PATH of a login shell.' >&2
+  echo 'To continue, do one of the following, then connect again:' >&2
+  echo '  - install uv:  curl -LsSf https://astral.sh/uv/install.sh | sh' >&2
+  echo '  - install Python 3.11 or newer' >&2
+  echo '  - install mira-engine yourself, then run: mira remote setup' >&2
+  printf '%s\\n' '${NO_PYTHON_JSON}'
+  exit 3
+}
+
+main() {
+  MIRA_HOME="\${MIRA_HOME:-$HOME/.mira}"
+  venv="$MIRA_HOME/venv"
+  spec=${shQuote(spec)}
+  echo "Installing $spec into $venv"
+  mkdir -p "$MIRA_HOME"
+  if command -v uv >/dev/null 2>&1; then
+    echo "Using uv: $(command -v uv)"
+    if py_ok "$venv/bin/python"; then
+      echo "Upgrading the existing $venv"
+    else
+      fresh_venv
+      uv venv --python '>=3.11' "$venv"
+    fi
+    uv pip install --python "$venv/bin/python" -U "$spec"
+  else
+    py=
+    for candidate in python3.13 python3.12 python3.11 python3; do
+      if py_ok "$candidate"; then
+        py="$(command -v "$candidate")"
+        break
+      fi
+    done
+    [ -n "$py" ] || no_python
+    echo "Using Python: $py"
+    if py_ok "$venv/bin/python"; then
+      echo "Upgrading the existing $venv"
+    else
+      fresh_venv
+      "$py" -m venv "$venv"
+    fi
+    "$venv/bin/python" -m pip install -U pip
+    "$venv/bin/python" -m pip install -U "$spec"
+  fi
+  version="$("$venv/bin/python" -c 'import importlib.metadata as m; print(m.version("mira-engine"))' 2>/dev/null || true)"
+  echo "Installed mira-engine \${version:-(unknown version)}"
+  # Writes the launcher \${MIRA_HOME:-$HOME/.mira}/bin/mira that Remote-SSH looks for first.
+  "$venv/bin/mira" remote setup --json
+}
+
+# Commands must not read the rest of this script from stdin.
+main </dev/null
+`
+}
+
+export type InstallErrorCode =
+  | 'no_python'
+  | 'too_old'
+  | 'install_failed'
+  | 'cancelled'
+  | 'timeout'
+  | 'busy'
+  | 'not_ready'
+  | 'auth_required'
+  | 'auth_cancelled'
+  | 'host_key'
+  | 'host_key_changed'
+  | 'ssh_failed'
+
+export type InstallOutcome =
+  | { ok: true; version: string | null; launcher: string | null; executable: string | null }
+  | { ok: false; code: InstallErrorCode; message: string; version: string | null }
+
+export interface InstallPlan {
+  spec: string
+  venv: string
+  script: string
+  defaultSpec: boolean
+}
+
+export function installPlan(spec: string): InstallPlan {
+  return { spec, venv: INSTALL_VENV, script: buildInstallScript(spec), defaultSpec: spec === DEFAULT_INSTALL_SPEC }
+}
+
+const optionalString = (value: unknown) => (typeof value === 'string' && value ? value.slice(0, 1024) : null)
+
+// The script's last stdout line is `mira remote setup --json`'s result (or its
+// own no_python error); anything else is described from stderr.
+export function parseInstallOutput(result: { code: number | null; stdout: string; stderr: string }): InstallOutcome {
+  const installed = result.stdout.match(/^Installed mira-engine (\S+)\s*$/m)?.[1] ?? null
+  const version = installed && installed !== '(unknown' ? installed : null
+  const payload = lastJsonLine(result.stdout)
+  if (payload) {
+    if (payload.ok === true && result.code === 0) {
+      return { ok: true, version: optionalString(payload.version) ?? version, launcher: optionalString(payload.launcher), executable: optionalString(payload.executable) }
+    }
+    const error = isRecord(payload.error) ? payload.error : {}
+    const message = typeof error.message === 'string' && error.message.trim() ? error.message.trim().slice(0, 500) : 'mira remote setup failed.'
+    return { ok: false, code: error.code === 'no_python' ? 'no_python' : 'install_failed', message, version }
+  }
+  if (result.code === 255 || result.code === null) {
+    const failure = classifySshFailure(result.code, result.stderr)
+    const code = failure.code === 'host_key' || failure.code === 'host_key_changed' || failure.code === 'auth_required' ? failure.code : 'ssh_failed'
+    return { ok: false, code, message: failure.message, version }
+  }
+  // Installed, but this engine has no `mira remote setup` yet.
+  if (TOO_OLD_PATTERN.test(result.stderr)) {
+    return { ok: false, code: 'too_old', message: tooOldMessage(result.stderr), version }
+  }
+  return { ok: false, code: 'install_failed', message: lastLine(result.stderr) || lastLine(result.stdout) || `exit code ${result.code}`, version }
 }
 
 // Host aliases from ~/.ssh/config, in file order. Patterns (*, ?, !) are not
@@ -309,6 +568,8 @@ export async function waitForPort(port: number, timeoutMs: number, intervalMs = 
 }
 
 export interface SshChild {
+  // Only for processes spawned with { stdin: true } (the install script).
+  stdin?: NodeJS.WritableStream | null
   stdout?: NodeJS.ReadableStream | null
   stderr?: NodeJS.ReadableStream | null
   kill: (signal?: NodeJS.Signals) => boolean
@@ -337,7 +598,7 @@ export interface RemoteSshDeps {
   executable: string
   platform: NodeJS.Platform
   // `env` is added to the inherited environment (askpass variables).
-  spawn: (command: string, args: string[], env?: Record<string, string>) => SshChild
+  spawn: (command: string, args: string[], env?: Record<string, string>, options?: { stdin?: boolean }) => SshChild
   getFreePort: (preferred?: number | null) => Promise<number>
   waitForPort: (port: number, timeoutMs: number) => Promise<boolean>
   waitForFile: (file: string, timeoutMs: number) => Promise<boolean>
@@ -355,6 +616,13 @@ export interface RemoteSshDeps {
   // process logs in on its own.
   controlDir?: () => Promise<string>
   sshVersion?: () => Promise<SshVersion | null>
+  // The last remote mira path that worked, per host (not a secret).
+  lastMiraPaths?: {
+    get: (host: string) => Promise<string | null>
+    set: (host: string, path: string) => Promise<void>
+  }
+  installSpec?: () => string
+  installTimeoutMs?: number
 }
 
 export const RECONNECT_DELAYS_MS = [1000, 2000, 5000, 10000, 30000]
@@ -374,8 +642,8 @@ export function defaultRemoteSshDeps(log: RemoteSshDeps['log']): RemoteSshDeps {
     platform: process.platform,
     // Own session on macOS/Linux: without a controlling terminal every
     // OpenSSH release asks through SSH_ASKPASS instead of /dev/tty.
-    spawn: (command, args, env) => nodeSpawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
+    spawn: (command, args, env, options) => nodeSpawn(command, args, {
+      stdio: [options?.stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
       detached: process.platform !== 'win32',
       env: env ? { ...process.env, ...env } : process.env,
@@ -390,6 +658,8 @@ export function defaultRemoteSshDeps(log: RemoteSshDeps['log']): RemoteSshDeps {
     tunnelReadyTimeoutMs: 20_000,
     loginTimeoutMs: 300_000,
     sshVersion: () => detectSshVersion(executable),
+    installSpec: () => installSpec(process.env),
+    installTimeoutMs: INSTALL_TIMEOUT_MS,
   }
 }
 
@@ -400,9 +670,15 @@ interface ConnectMode {
 }
 
 export class RemoteSshManager {
-  private state: RemoteSshStatus = { phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0 }
+  private state: RemoteSshStatus = { phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0, miraPath: null }
   private target: SshTarget | null = null
-  private miraCommand = DEFAULT_MIRA_COMMAND
+  // '' = discover; otherwise the per-host manual command.
+  private miraCommand = ''
+  // undefined until read for the current host.
+  private lastPath: string | null | undefined = undefined
+  private foundPath: string | null = null
+  private installation: { child: SshChild | null; cancelled: boolean } | null = null
+  private readonly outputListeners = new Set<(chunk: string) => void>()
   private token: string | null = null
   // Direct mode: the `ssh -N -L` tunnel. Multiplexed mode: the master.
   private tunnel: SshChild | null = null
@@ -436,14 +712,15 @@ export class RemoteSshManager {
     return () => this.listeners.delete(listener)
   }
 
-  // `miraCommand` is the remote path of the mira CLI for this host (default
-  // `mira`, e.g. /opt/mira/bin/mira when it is not on the login-shell PATH).
+  // `miraCommand` is the remote path of the mira CLI the user set for this
+  // host (e.g. /opt/mira/bin/mira). It is used on its own; when it is empty the
+  // server looks for mira itself (DISCOVERY_SCRIPT).
   connect(host: string, options: { miraCommand?: string | null } = {}): Promise<RemoteSshStatus> {
     const target = parseSshTarget(host)
     const miraCommand = parseMiraCommand(options.miraCommand)
-    if (!target || !miraCommand) {
+    if (!target || miraCommand === null) {
       this.stop()
-      this.update({ phase: 'error', host: host.trim() || null, localPort: null, version: null, attempt: 0,
+      this.update({ phase: 'error', host: host.trim() || null, localPort: null, version: null, attempt: 0, miraPath: null,
         error: target
           ? { code: 'invalid_command', message: 'The remote mira command must be a plain path such as /opt/mira/bin/mira.' }
           : { code: 'invalid_host', message: 'Enter an SSH host alias or user@host[:port].' } })
@@ -455,15 +732,87 @@ export class RemoteSshManager {
     this.stop()
     this.target = target
     this.miraCommand = miraCommand
-    this.update({ phase: 'connecting', host: host.trim(), localPort: null, version: null, error: null, attempt: 0 })
+    this.lastPath = undefined
+    this.foundPath = null
+    this.update({ phase: 'connecting', host: host.trim(), localPort: null, version: null, error: null, attempt: 0, miraPath: null })
     return this.establish(this.generation)
   }
 
   disconnect(): RemoteSshStatus {
     this.stop()
     this.target = null
-    this.update({ phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0 })
+    this.update({ phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0, miraPath: null })
     return this.status()
+  }
+
+  installPlan(): InstallPlan {
+    return installPlan(this.deps.installSpec?.() ?? DEFAULT_INSTALL_SPEC)
+  }
+
+  onInstallOutput(listener: (chunk: string) => void): () => void {
+    this.outputListeners.add(listener)
+    return () => this.outputListeners.delete(listener)
+  }
+
+  // Installs Mira on the current host (buildInstallScript), then connects
+  // again. Only offered after attach failed (not installed / too old), and
+  // only called once the user agreed. On macOS/Linux it runs over the master
+  // that is still logged in, so a password is not asked again.
+  async install(): Promise<InstallOutcome> {
+    const fail = (code: InstallErrorCode, message: string): InstallOutcome => ({ ok: false, code, message, version: null })
+    if (this.installation) return fail('busy', 'An installation is already running.')
+    const target = this.target
+    if (!target || this.state.phase !== 'error') return fail('not_ready', 'Connect to a server first.')
+    const generation = this.generation
+    const installation: { child: SshChild | null; cancelled: boolean } = { child: null, cancelled: false }
+    this.installation = installation
+    this.deps.log('remote_ssh.install', { phase: 'start' })
+    let askpass: AskpassSession | null = null
+    try {
+      const mode = await this.mode()
+      const script = this.installPlan().script
+      let args: string[]
+      if (mode.multiplex && this.master && this.controlPath) {
+        args = [...muxOptions(target, this.controlPath), target.destination, '--', INSTALL_REMOTE_COMMAND]
+      } else {
+        this.abort = new AbortController()
+        this.cancelled = false
+        this.seenPrompts = new Set()
+        askpass = mode.interactive ? await this.deps.openAskpass!((text) => this.onPrompt(generation, text)) : null
+        args = [...baseOptions(target, mode.interactive), target.destination, '--', INSTALL_REMOTE_COMMAND]
+      }
+      if (installation.cancelled || generation !== this.generation) return this.installDone(fail('cancelled', 'Installation cancelled.'))
+      const output = await this.run(args, this.deps.installTimeoutMs ?? INSTALL_TIMEOUT_MS, askpass?.env, {
+        input: script,
+        onSpawn: (child) => { installation.child = child },
+        onOutput: (chunk) => { for (const listener of this.outputListeners) listener(chunk) },
+      })
+      if (installation.cancelled || generation !== this.generation) return this.installDone(fail('cancelled', 'Installation cancelled.'))
+      if (this.cancelled) return this.installDone(fail('auth_cancelled', 'Login cancelled.'))
+      if (output.code === null) return this.installDone(fail('timeout', 'The installation did not finish in time.'))
+      const outcome = this.installDone(parseInstallOutput(output))
+      if (outcome.ok) {
+        this.update({ phase: 'connecting', error: null, attempt: 0 })
+        void this.establish(generation)
+      }
+      return outcome
+    } finally {
+      askpass?.dispose()
+      if (this.installation === installation) this.installation = null
+    }
+  }
+
+  cancelInstall(): boolean {
+    const installation = this.installation
+    if (!installation) return false
+    installation.cancelled = true
+    installation.child?.kill()
+    return true
+  }
+
+  private installDone(outcome: InstallOutcome): InstallOutcome {
+    this.deps.log('remote_ssh.install', { phase: outcome.ok ? 'done' : 'failed', code: outcome.ok ? null : outcome.code })
+    return outcome
   }
 
   // After sleep the forwarded TCP connections are usually dead. A master that
@@ -618,9 +967,11 @@ export class RemoteSshManager {
     const controlPath = this.controlPath!
     // Every (re)connect re-runs attach and takes port and token from its
     // answer: a server-side restart can move the engine to another port.
-    const output = await this.run(buildMuxAttachArgs(target, controlPath, this.miraCommand), resuming ? RESUME_CHECK_MS : this.deps.attachTimeoutMs)
+    const lastPath = await this.loadLastPath()
     if (generation !== this.generation) return this.status()
-    const attach = parseAttachOutput(output)
+    const output = await this.run(buildMuxAttachArgs(target, controlPath, this.miraCommand, lastPath), resuming ? RESUME_CHECK_MS : this.deps.attachTimeoutMs)
+    if (generation !== this.generation) return this.status()
+    const attach = this.readAttach(output)
     if (!attach.ok) {
       if (CONNECTION_CODES.has(attach.code)) this.dropMaster()
       return this.fail(generation, attach.code, attach.message)
@@ -652,10 +1003,12 @@ export class RemoteSshManager {
     const target = this.target!
     // Every (re)connect re-runs attach and takes port and token from its
     // answer: a server-side restart can move the engine to another port.
-    const output = await this.run(buildAttachArgs(target, this.miraCommand, mode.interactive), this.deps.attachTimeoutMs + (mode.interactive ? this.deps.loginTimeoutMs : 0), env)
+    const lastPath = await this.loadLastPath()
+    if (generation !== this.generation) return this.status()
+    const output = await this.run(buildAttachArgs(target, this.miraCommand, mode.interactive, lastPath), this.deps.attachTimeoutMs + (mode.interactive ? this.deps.loginTimeoutMs : 0), env)
     if (generation !== this.generation) return this.status()
     if (this.cancelled) return this.fail(generation, 'auth_cancelled', 'Login cancelled.')
-    const attach = parseAttachOutput(output)
+    const attach = this.readAttach(output)
     if (!attach.ok) {
       // Windows OpenSSH too old for prompts: say why a password cannot work.
       if (attach.code === 'auth_required' && !mode.interactive && this.deps.openAskpass) {
@@ -689,10 +1042,33 @@ export class RemoteSshManager {
     return this.connected(attach, localPort)
   }
 
+  private async loadLastPath(): Promise<string | null> {
+    if (this.miraCommand) return null
+    if (this.lastPath === undefined) {
+      const stored = await this.deps.lastMiraPaths?.get(this.state.host ?? '').catch(() => null)
+      this.lastPath = isRememberablePath(stored) ? stored : null
+    }
+    return this.lastPath
+  }
+
+  // Which mira answered: the manual command, or what discovery reported.
+  private readAttach(output: { code: number | null; stdout: string; stderr: string }): AttachOutcome {
+    const found: FoundMira | null = this.miraCommand ? { source: 'manual', path: this.miraCommand } : parseFoundMira(output.stdout)
+    this.foundPath = found?.path ?? null
+    const attach = parseAttachOutput(output)
+    if (attach.ok && found && found.source !== 'manual' && isRememberablePath(found.path) && found.path !== this.lastPath) {
+      // Remembered only once it worked; paths are never logged.
+      this.lastPath = found.path
+      void this.deps.lastMiraPaths?.set(this.state.host ?? '', found.path).catch(() => {})
+    }
+    if (found) this.deps.log('remote_ssh.mira_found', { source: found.source, ok: attach.ok })
+    return attach
+  }
+
   private connected(attach: Extract<AttachOutcome, { ok: true }>, localPort: number): RemoteSshStatus {
     this.token = attach.token
     this.deps.log('remote_ssh.connected', { phase: 'connected', version: attach.version, operation: attach.started ? 'start' : 'attach' })
-    this.update({ phase: 'connected', localPort, version: attach.version, error: null, attempt: 0 })
+    this.update({ phase: 'connected', localPort, version: attach.version, error: null, attempt: 0, miraPath: this.foundPath })
     return this.status()
   }
 
@@ -705,7 +1081,7 @@ export class RemoteSshManager {
       this.scheduleReconnect(generation, { code, message })
       return this.status()
     }
-    this.update({ phase: 'error', error: { code, message } })
+    this.update({ phase: 'error', error: { code, message }, miraPath: this.foundPath })
     return this.status()
   }
 
@@ -738,13 +1114,25 @@ export class RemoteSshManager {
     }, delay)
   }
 
-  private run(args: string[], timeoutMs: number, env?: Record<string, string>): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  private run(
+    args: string[],
+    timeoutMs: number,
+    env?: Record<string, string>,
+    options: { input?: string; onSpawn?: (child: SshChild) => void; onOutput?: (chunk: string) => void } = {},
+  ): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
       let stdout = ''
       let stderr = ''
       let settled = false
-      const child = this.deps.spawn(this.deps.executable, args, env)
+      const child = this.deps.spawn(this.deps.executable, args, env, options.input === undefined ? undefined : { stdin: true })
       this.children.add(child)
+      options.onSpawn?.(child)
+      if (options.input !== undefined && child.stdin) {
+        // ssh may exit before reading everything (login failed); that is
+        // reported from its exit code, not as a write error.
+        child.stdin.on('error', () => {})
+        child.stdin.end(options.input)
+      }
       const finish = (code: number | null) => {
         if (settled) return
         settled = true
@@ -756,8 +1144,14 @@ export class RemoteSshManager {
         child.kill()
         finish(null)
       }, timeoutMs)
-      child.stdout?.on('data', (chunk: Buffer | string) => { stdout = (stdout + String(chunk)).slice(-OUTPUT_LIMIT) })
-      child.stderr?.on('data', (chunk: Buffer | string) => { stderr = (stderr + String(chunk)).slice(-OUTPUT_LIMIT) })
+      child.stdout?.on('data', (chunk: Buffer | string) => {
+        stdout = (stdout + String(chunk)).slice(-OUTPUT_LIMIT)
+        options.onOutput?.(String(chunk))
+      })
+      child.stderr?.on('data', (chunk: Buffer | string) => {
+        stderr = (stderr + String(chunk)).slice(-OUTPUT_LIMIT)
+        options.onOutput?.(String(chunk))
+      })
       child.once('error', (error) => {
         // ENOENT: no ssh client on this machine.
         stderr += `\n${error.message}`
