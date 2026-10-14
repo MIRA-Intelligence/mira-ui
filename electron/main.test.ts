@@ -59,6 +59,14 @@ const electronMock = vi.hoisted(() => {
       setApplicationMenu: vi.fn(),
       buildFromTemplate: vi.fn(() => ({})),
     },
+    net: {
+      fetch: vi.fn(),
+    },
+    safeStorage: {
+      isEncryptionAvailable: vi.fn(() => true),
+      encryptString: vi.fn((value: string) => Buffer.from(`enc:${value}`)),
+      decryptString: vi.fn((value: Buffer) => value.toString().replace(/^enc:/, '')),
+    },
   }
 })
 
@@ -70,7 +78,28 @@ vi.mock('electron', () => ({
   shell: electronMock.shell,
   powerMonitor: electronMock.powerMonitor,
   Menu: electronMock.Menu,
+  net: electronMock.net,
+  safeStorage: electronMock.safeStorage,
 }))
+
+const teamServerMock = vi.hoisted(() => ({
+  info: vi.fn(async (origin: string) => ({ ok: true, origin })),
+  login: vi.fn(async () => ({ ok: true, session: { accessToken: 'access-1', expiresIn: 900, user: { name: 'alice', displayName: 'Alice', roles: ['user'] }, persistent: true } })),
+  session: vi.fn(async () => ({ ok: false, code: 'signed_out' })),
+  refresh: vi.fn(async () => ({ ok: false, code: 'signed_out' })),
+  logout: vi.fn(async () => true),
+  onSession: vi.fn(),
+  handleResume: vi.fn(),
+  dispose: vi.fn(),
+}))
+
+vi.mock('./teamServer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./teamServer')>()
+  return {
+    ...actual,
+    TeamServerManager: class { constructor() { return teamServerMock } },
+  }
+})
 
 const remoteSshMock = vi.hoisted(() => ({
   deps: null as null | {
@@ -101,6 +130,7 @@ vi.mock('./engine/manager', () => ({
 }))
 
 vi.mock('./appState', () => ({
+  isDeploymentModeHint: (value: unknown) => ['localBundle', 'remoteManual', 'remoteSsh', 'teamServer'].includes(value as string),
   getLastDeploymentMode: vi.fn(),
   setLastDeploymentMode: vi.fn(),
   getSshMiraPath: vi.fn(async () => '/opt/conda/bin/mira'),
@@ -264,7 +294,53 @@ describe('Electron single-instance lifecycle', () => {
     const onResume = vi.mocked(electronMock.powerMonitor.on).mock.calls.find(([event]) => event === 'resume')?.[1] as () => void
     onResume()
     expect(remoteSshMock.handleResume).toHaveBeenCalled()
+    expect(teamServerMock.handleResume).toHaveBeenCalled()
     electronMock.handlers.get('will-quit')?.()
     expect(remoteSshMock.dispose).toHaveBeenCalled()
+    expect(teamServerMock.dispose).toHaveBeenCalled()
+  })
+
+  it('serves Team server sign-in only to the main window top-level frame', async () => {
+    const { getLastDeploymentMode } = await import('./appState')
+    vi.mocked(getLastDeploymentMode).mockResolvedValue('teamServer')
+    electronMock.app.whenReady.mockReturnValueOnce(Promise.resolve())
+    Object.assign(electronMock.app, { getPath: vi.fn(() => '/home/test') })
+    await import('./main')
+    await vi.waitFor(() => expect(electronMock.windows).toHaveLength(1))
+
+    const handlers = new Map(vi.mocked(electronMock.ipcMain.handle).mock.calls as Array<[string, (...args: unknown[]) => unknown]>)
+    const window = electronMock.windows[0] as unknown as { webContents: { mainFrame?: object; send: ReturnType<typeof vi.fn> } }
+    const mainFrame = {}
+    window.webContents.mainFrame = mainFrame
+    const trusted = { sender: window.webContents, senderFrame: mainFrame }
+    const subframe = { sender: window.webContents, senderFrame: {} }
+    const otherWindow = { sender: {}, senderFrame: mainFrame }
+    const origin = 'https://mira.example.com'
+
+    for (const channel of ['team-server:info', 'team-server:login', 'team-server:session', 'team-server:refresh', 'team-server:logout']) {
+      await expect(handlers.get(channel)?.(subframe, origin, 'alice', 'pw')).rejects.toThrow('Invalid team server sender')
+      await expect(handlers.get(channel)?.(otherWindow, origin, 'alice', 'pw')).rejects.toThrow('Invalid team server sender')
+    }
+    expect(teamServerMock.login).not.toHaveBeenCalled()
+
+    expect(await handlers.get('team-server:info')?.(trusted, origin)).toEqual({ ok: true, origin })
+    expect(await handlers.get('team-server:login')?.(trusted, origin, ' alice ', 'pw')).toMatchObject({ ok: true })
+    expect(teamServerMock.login).toHaveBeenCalledWith(origin, 'alice', 'pw')
+    await expect(handlers.get('team-server:login')?.(trusted, origin, 'alice', 42)).rejects.toThrow('Invalid password')
+    await expect(handlers.get('team-server:login')?.(trusted, origin, '', 'pw')).rejects.toThrow('Invalid user name')
+    await expect(handlers.get('team-server:info')?.(trusted, 7)).rejects.toThrow('Invalid team server URL')
+    await handlers.get('team-server:refresh')?.(trusted, origin, 'old-token')
+    expect(teamServerMock.refresh).toHaveBeenCalledWith(origin, 'old-token')
+    await expect(handlers.get('team-server:refresh')?.(trusted, origin, 5)).rejects.toThrow('Invalid access token')
+    expect(await handlers.get('team-server:logout')?.(trusted, origin)).toBe(true)
+
+    // Session changes go to the main window only, and never include a refresh token.
+    const onSession = teamServerMock.onSession.mock.calls[0][0] as (event: unknown) => void
+    const event = { origin, session: null, reason: 'logout' }
+    onSession(event)
+    expect(window.webContents.send).toHaveBeenCalledWith('team-server:session-changed', event)
+
+    // Team server mode does not pre-warm the local engine.
+    expect(await handlers.get('engine:set-mode-hint')?.(trusted, 'teamServer')).toBe(true)
   })
 })

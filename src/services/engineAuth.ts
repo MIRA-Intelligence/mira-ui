@@ -1,4 +1,12 @@
 import { engineTokenOrigin, useSettingsStore } from '@/stores/settingsStore'
+import {
+  activeTeamServerOrigin,
+  checkTeamServerAfterDisconnect,
+  ensureTeamServerSession,
+  refreshTeamServerAccess,
+  teamServerAccessToken,
+} from './teamServer'
+import { useTeamServerStore } from '@/stores/teamServerStore'
 
 // The engine gateway requires a per-install token on /api/* and /ws (see
 // MIRA-Intelligence/mira#149). Headers carry it on fetch; URLs that cannot set
@@ -65,15 +73,23 @@ export function forgetRemoteSshToken(): void {
   sshToken = null
 }
 
-// Re-read every token the desktop app manages (local engine file, Remote-SSH).
+// Team server: every request to the Mira Server origin (/api, /server, /ws)
+// carries the user's access token, which the main process refreshes.
+function usesTeamServerToken(origin: string): boolean {
+  return origin === activeTeamServerOrigin()
+}
+
+// Re-read every token the desktop app manages (local engine file, Remote-SSH,
+// Team server session).
 export function refreshManagedEngineTokens(): Promise<unknown> {
   const settings = useSettingsStore.getState()
+  if (settings.deploymentMode === 'teamServer') return checkTeamServerAfterDisconnect()
   return settings.deploymentMode === 'remoteSsh' ? refreshRemoteSshToken() : refreshDesktopEngineToken()
 }
 
 function usesDesktopToken(origin: string): boolean {
   if (origin !== LOCAL_ENGINE_ORIGIN || !hasDesktopTokenBridge()) return false
-  if (usesRemoteSshToken(origin)) return false
+  if (usesRemoteSshToken(origin) || usesTeamServerToken(origin)) return false
   const settings = useSettingsStore.getState()
   // A remote profile pointing at the local engine may carry its own token;
   // otherwise the desktop app can read the local engine's token file.
@@ -89,6 +105,7 @@ export function usesDesktopEngineToken(value: string): boolean {
 export function engineTokenFor(value: string): string | null {
   const origin = engineOrigin(value)
   if (!origin) return null
+  if (usesTeamServerToken(origin)) return teamServerAccessToken(origin)
   if (usesRemoteSshToken(origin)) return sshToken
   if (usesDesktopToken(origin)) return desktopToken
   return useSettingsStore.getState().engineTokens[origin] || null
@@ -97,6 +114,12 @@ export function engineTokenFor(value: string): string | null {
 async function resolveEngineToken(value: string): Promise<string | null> {
   const origin = engineOrigin(value)
   if (!origin) return null
+  if (usesTeamServerToken(origin)) {
+    const current = teamServerAccessToken(origin)
+    if (current) return current
+    const session = await ensureTeamServerSession(origin)
+    return session.ok ? session.session.accessToken : null
+  }
   if (usesRemoteSshToken(origin)) return sshToken ?? refreshRemoteSshToken()
   if (usesDesktopToken(origin)) return desktopToken ?? refreshDesktopEngineToken()
   return useSettingsStore.getState().engineTokens[origin] || null
@@ -152,6 +175,63 @@ function authorized(input: RequestInfo | URL, init: RequestInit | undefined, tok
 
 export type EngineUnauthorizedHandler = (origin: string, desktop: boolean) => void
 
+// Mira Server answers /api/* with 503 engine_starting (Retry-After: 2) while
+// it starts the user's engine; the request never reached the engine, so it is
+// sent again until the engine is up instead of failing as "unreachable".
+const ENGINE_START_TIMEOUT_MS = 180_000
+const ENGINE_START_MAX_DELAY_MS = 10_000
+const ENGINE_START_DEFAULT_DELAY_S = 2
+
+async function serverErrorCode(response: Response): Promise<{ code: string; message: string | null }> {
+  try {
+    const body = await response.clone().json() as { error?: unknown; message?: unknown }
+    return {
+      code: typeof body.error === 'string' ? body.error : '',
+      message: typeof body.message === 'string' ? body.message : null,
+    }
+  } catch {
+    return { code: '', message: null }
+  }
+}
+
+function retryAfterMs(response: Response, attempt: number): number {
+  const header = Number(response.headers.get('Retry-After'))
+  // Retry-After needs Access-Control-Expose-Headers to be readable cross-origin.
+  const seconds = Number.isFinite(header) && header > 0 ? header : ENGINE_START_DEFAULT_DELAY_S
+  const backoff = seconds * 1000 * Math.pow(1.5, Math.min(attempt, 6))
+  return Math.min(ENGINE_START_MAX_DELAY_MS, Math.max(seconds * 1000, backoff))
+}
+
+let sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+export async function sendWhileEngineStarts(send: () => Promise<Response>, replayable: boolean): Promise<Response> {
+  const store = useTeamServerStore.getState()
+  const deadline = Date.now() + ENGINE_START_TIMEOUT_MS
+  let waiting = false
+  try {
+    for (let attempt = 0; ; attempt += 1) {
+      const response = await send()
+      if (response.status !== 503 && response.status !== 409) {
+        if (response.ok) store.setEngineIssue(null)
+        return response
+      }
+      const { code, message } = await serverErrorCode(response)
+      if (code === 'engine_unavailable' || code === 'engine_conflict') {
+        store.setEngineIssue({ code, message })
+        return response
+      }
+      if (code !== 'engine_starting' || !replayable || Date.now() >= deadline) return response
+      if (!waiting) {
+        waiting = true
+        store.beginStarting()
+      }
+      await sleep(retryAfterMs(response, attempt))
+    }
+  } finally {
+    if (waiting) store.endStarting()
+  }
+}
+
 // Wraps window.fetch so every request to a known engine origin carries the
 // gateway token. A desktop 401 re-reads the token file once (it is rotated when
 // the engine is reinstalled) before reporting the failure.
@@ -173,6 +253,29 @@ export function installEngineAuth(onUnauthorized: EngineUnauthorizedHandler): ()
       return response
     }
     const replayable = canReplay(input, init)
+    if (usesTeamServerToken(url.origin)) {
+      const send = (current: string) => sendWhileEngineStarts(
+        () => originalFetch.call(window, ...authorized(input, init, current)), replayable,
+      )
+      let response = await send(token)
+      if (response.status !== 401) return response
+      // Expired or revoked access token: refresh once (shared by every request
+      // that failed meanwhile) and retry. If that fails, sign-in is shown.
+      let rejected = true
+      if (replayable) {
+        const fresh = await refreshTeamServerAccess(url.origin, token)
+        if (fresh && fresh !== token) {
+          response = await send(fresh)
+          if (response.status !== 401) return response
+        } else if (useTeamServerStore.getState().phase === 'signedIn') {
+          // Refresh failed for a transient reason (offline): the session
+          // itself was not rejected, so do not report it as signed out.
+          rejected = false
+        }
+      }
+      if (rejected) onUnauthorized(url.origin, true)
+      return response
+    }
     let response = await originalFetch.call(window, ...authorized(input, init, token))
     if (response.status !== 401) return response
     const desktop = usesDesktopToken(url.origin)
@@ -194,6 +297,10 @@ export function installEngineAuth(onUnauthorized: EngineUnauthorizedHandler): ()
     if (window.fetch === wrappedFetch) window.fetch = originalFetch
     installed = false
   }
+}
+
+export function setEngineStartSleepForTests(fn: (ms: number) => Promise<void>): void {
+  sleep = fn
 }
 
 export function resetEngineAuthForTests(): void {

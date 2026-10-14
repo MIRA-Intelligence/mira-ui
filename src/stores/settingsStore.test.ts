@@ -279,4 +279,63 @@ describe('settingsStore', () => {
     const reloaded = (await import('./settingsStore')).useSettingsStore.getState()
     expect(reloaded).toMatchObject({ deploymentMode: 'remoteSsh', sshHost: 'lab', sshManuallyDisconnected: true })
   })
+
+  describe('Team server mode', () => {
+    it('switches to a Mira Server with one profile per origin', () => {
+      const store = useSettingsStore.getState()
+      store.setTeamServer('https://mira.example.com/')
+      const state = useSettingsStore.getState()
+      expect(state).toMatchObject({
+        deploymentMode: 'teamServer',
+        serverUrl: 'https://mira.example.com',
+        apiUrl: 'https://mira.example.com/api',
+        wsUrl: 'wss://mira.example.com/ws',
+        activeEngineKey: 'server:https://mira.example.com',
+      })
+      expect(state.engineProfiles['server:https://mira.example.com']).toMatchObject({ deploymentMode: 'teamServer', serverUrl: 'https://mira.example.com' })
+    })
+
+    it('ignores an invalid or insecure server URL', () => {
+      useSettingsStore.getState().setTeamServer('http://mira.example.com')
+      expect(useSettingsStore.getState().deploymentMode).not.toBe('teamServer')
+    })
+
+    it('keeps each server and the other modes apart when switching', () => {
+      const store = useSettingsStore.getState()
+      store.setTeamServer('https://a.example.com')
+      store.setRuntimeConfig(runtimePayload('/srv/a', '/srv/a/config.json'))
+      useSettingsStore.getState().setTeamServer('https://b.example.com')
+      expect(useSettingsStore.getState().workspacePath).not.toBe('/srv/a')
+      useSettingsStore.getState().setDeploymentMode('localBundle')
+      expect(useSettingsStore.getState().apiUrl).toBe('http://127.0.0.1:18790/api')
+      useSettingsStore.getState().setDeploymentMode('teamServer')
+      expect(useSettingsStore.getState()).toMatchObject({ serverUrl: 'https://b.example.com', apiUrl: 'https://b.example.com/api' })
+      useSettingsStore.getState().setTeamServer('https://a.example.com')
+      expect(useSettingsStore.getState().workspacePath).toBe('/srv/a')
+      // Leaving for a direct URL does not reuse the Mira Server URL as an engine URL.
+      useSettingsStore.getState().setDeploymentMode('remoteManual')
+      expect(useSettingsStore.getState().apiUrl).not.toContain('a.example.com')
+    })
+
+    it('persists the server and user name but no tokens, and restores them at launch', async () => {
+      useSettingsStore.getState().setTeamServer('http://127.0.0.1:8080')
+      useSettingsStore.getState().setServerUsername(' alice ')
+      const raw = vi.mocked(localStorage.setItem).mock.calls.at(-1)![1]
+      const persisted = JSON.parse(raw)
+      expect(persisted).toMatchObject({ deploymentMode: 'teamServer', serverUrl: 'http://127.0.0.1:8080', serverUsername: 'alice' })
+      expect(raw).not.toMatch(/access_token|refresh_token|accessToken|refreshToken|password/i)
+
+      vi.resetModules()
+      const reloaded = (await import('./settingsStore')).useSettingsStore.getState()
+      // A loopback dev server survives the stale-localhost cleanup.
+      expect(reloaded).toMatchObject({
+        deploymentMode: 'teamServer',
+        serverUrl: 'http://127.0.0.1:8080',
+        apiUrl: 'http://127.0.0.1:8080/api',
+        wsUrl: 'ws://127.0.0.1:8080/ws',
+        activeEngineKey: 'server:http://127.0.0.1:8080',
+        serverUsername: 'alice',
+      })
+    })
+  })
 })

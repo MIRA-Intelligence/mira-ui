@@ -1,13 +1,14 @@
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, net, powerMonitor, safeStorage, shell } from 'electron'
 import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
-import { getLastDeploymentMode, getSshMiraPath, setLastDeploymentMode, setSshMiraPath } from './appState'
+import { getLastDeploymentMode, getSshMiraPath, isDeploymentModeHint, setLastDeploymentMode, setSshMiraPath } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 import { isMainFrameSender, readGatewayToken } from './engineToken'
 import { RemoteSshManager, defaultRemoteSshDeps, readSshConfigHosts } from './remoteSsh'
 import { AskpassService } from './sshAskpass'
 import { SshPromptBroker } from './sshPrompt'
+import { SESSION_FILE, TEAM_SERVER_CHANNELS, TeamServerManager, registerTeamServerIpc, safeStorageCodec } from './teamServer'
 import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, recordRendererDiagnostic } from './diagnostics'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -61,6 +62,16 @@ const remoteSsh = hasSingleInstanceLock
     lastMiraPaths: { get: getSshMiraPath, set: setSshMiraPath },
   })
   : null
+// Mira Server sign-in: login and refresh run here so the refresh token never
+// reaches the renderer (see teamServer.ts).
+const teamServer = hasSingleInstanceLock
+  ? new TeamServerManager({
+    fetch: (url, init) => net.fetch(url, init),
+    storePath: () => path.join(app.getPath('userData'), SESSION_FILE),
+    codec: safeStorageCodec(safeStorage),
+    log: (event, fields) => logDesktopEvent(event, fields),
+  })
+  : null
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -108,15 +119,19 @@ function createWindow() {
 }
 
 function initializeApp() {
-  if (!engineManager || !remoteSsh) return
+  if (!engineManager || !remoteSsh || !teamServer) return
   // OS shutdown/logoff can end the process without emitting will-quit; Windows
   // reports it per window (session-end), Linux/macOS through powerMonitor.
   powerMonitor.on('shutdown', () => diagnostics?.markCleanShutdown())
   // Remote-SSH: forwarded connections rarely survive sleep; ssh children must
   // not outlive the app.
-  powerMonitor.on('resume', () => remoteSsh.handleResume())
+  powerMonitor.on('resume', () => {
+    remoteSsh.handleResume()
+    teamServer.handleResume()
+  })
   app.on('will-quit', () => {
     remoteSsh.dispose()
+    teamServer.dispose()
     sshPrompts.cancelAll()
     void sshAskpass.close()
   })
@@ -125,6 +140,10 @@ function initializeApp() {
   })
   // Install output (pip/uv progress) goes to the install dialog only; it is
   // not written to the desktop log.
+  // Access tokens (never refresh tokens) follow sign-in, refresh and sign-out.
+  teamServer.onSession((event) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(TEAM_SERVER_CHANNELS.changed, event)
+  })
   remoteSsh.onInstallOutput((chunk) => {
     if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('remote-ssh:install-output', chunk)
   })
@@ -188,7 +207,7 @@ function initializeApp() {
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
     { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
     { role: 'help', submenu: [{ label: 'Export diagnostics / 导出诊断文件', click: () => {
-      void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode !== 'remoteManual' && mode !== 'remoteSsh'))
+      void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode === null || mode === 'localBundle'))
         .catch((error) => {
           logDesktopEvent('diagnostics.export_failed', {}, error)
           dialog.showErrorBox('MIRA diagnostics', exportFailureMessage(error))
@@ -239,6 +258,7 @@ function initializeApp() {
   ipcMain.handle('remote-ssh:hosts', async (event) => (
     isMainFrameSender(event, mainWindow?.webContents) ? readSshConfigHosts(app.getPath('home')) : []
   ))
+  registerTeamServerIpc(ipcMain, teamServer, (event) => isMainFrameSender(event as IpcMainInvokeEvent, mainWindow?.webContents))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
   ipcMain.handle('engine:start', async () => engineManager.start())
@@ -251,7 +271,7 @@ function initializeApp() {
     return engineManager.upgrade(packageName || 'mira-engine')
   })
   ipcMain.handle('engine:set-mode-hint', async (_event, mode: unknown) => {
-    if (mode !== 'localBundle' && mode !== 'remoteManual' && mode !== 'remoteSsh') return false
+    if (!isDeploymentModeHint(mode)) return false
     await setLastDeploymentMode(mode)
     return true
   })
@@ -284,7 +304,7 @@ function initializeApp() {
   // still drives the actual connection from its persisted deploymentMode.
   void (async () => {
     const lastMode = await getLastDeploymentMode()
-    if (lastMode === 'remoteManual' || lastMode === 'remoteSsh') return
+    if (lastMode !== null && lastMode !== 'localBundle') return
     await engineManager.bootstrapLocalEngine().catch((error) => logDesktopEvent('engine.prewarm_failed', {}, error))
   })()
   createWindow()

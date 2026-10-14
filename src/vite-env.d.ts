@@ -26,7 +26,7 @@ interface Window {
       lastCommand: string[] | null
       error: string | null
     }>
-    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => Promise<boolean>
+    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh' | 'teamServer') => Promise<boolean>
     getEngineToken?: () => Promise<string | null>
     remoteSshConnect?: (host: string, miraCommand?: string) => Promise<import('./services/remoteSsh').RemoteSshStatus>
     remoteSshDisconnect?: () => Promise<import('./services/remoteSsh').RemoteSshStatus>
@@ -41,6 +41,12 @@ interface Window {
     installRemoteMira?: () => Promise<unknown>
     cancelRemoteInstall?: () => Promise<boolean>
     onRemoteInstallOutput?: (listener: (chunk: unknown) => void) => () => void
+    teamServerInfo?: (origin: string) => Promise<unknown>
+    teamServerLogin?: (origin: string, username: string, password: string) => Promise<unknown>
+    teamServerSession?: (origin: string) => Promise<unknown>
+    teamServerRefresh?: (origin: string, rejectedToken?: string | null) => Promise<unknown>
+    teamServerLogout?: (origin: string) => Promise<boolean>
+    onTeamServerSession?: (listener: (event: unknown) => void) => () => void
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string

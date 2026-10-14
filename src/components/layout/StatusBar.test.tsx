@@ -10,6 +10,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
 import { useTokenUsageStore } from '@/stores/tokenUsageStore'
+import { useTeamServerStore } from '@/stores/teamServerStore'
 
 function pushUsage(sessionId: string, tokensUsed: number, maxTokens: number | null) {
   useAgentStore.getState().handleWsMessage({
@@ -292,5 +293,36 @@ describe('StatusBar', () => {
     expect(screen.getByText(/token is missing or invalid/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
     expect(useSettingsStore.getState().settingsOpen).toBe(true)
+  })
+
+  describe('Team server', () => {
+    const initialTeam = useTeamServerStore.getState()
+    beforeEach(() => {
+      useTeamServerStore.setState(initialTeam, true)
+      useSettingsStore.getState().setTeamServer('https://mira.example.com')
+    })
+
+    it('shows that the workspace is starting while requests wait for the engine', () => {
+      render(<StatusBar />)
+      act(() => useTeamServerStore.getState().beginStarting())
+      expect(screen.getByText('Starting your workspace on mira.example.com…')).toBeInTheDocument()
+      act(() => useTeamServerStore.getState().endStarting())
+      expect(screen.queryByText('Starting your workspace on mira.example.com…')).toBeNull()
+    })
+
+    it('explains an engine conflict', () => {
+      useTeamServerStore.getState().setEngineIssue({ code: 'engine_conflict', message: null })
+      render(<StatusBar />)
+      expect(screen.getByText(/already running outside Mira Server/)).toBeInTheDocument()
+    })
+
+    it('offers Sign in when the session was rejected', () => {
+      useSettingsStore.setState({ engineAuthRejected: true })
+      render(<StatusBar />)
+      expect(screen.getByText('Your session on mira.example.com has ended. Sign in again to continue.')).toBeInTheDocument()
+      const banner = screen.getByText(/Your session on/).parentElement ?? document.body
+      fireEvent.click(within(banner as HTMLElement).getAllByRole('button', { name: 'Sign in' })[0])
+      expect(useTeamServerStore.getState().login).toEqual({ origin: 'https://mira.example.com', reason: 'manual' })
+    })
   })
 })

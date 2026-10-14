@@ -60,7 +60,7 @@ export async function bootstrapLocalEngine(options?: { force?: boolean }): Promi
 // Record the deployment mode the user is currently on so the main process can
 // decide, on the next launch, whether to pre-warm the bundled local engine.
 // No-op outside the desktop bundle.
-export async function setEngineModeHint(mode: 'localBundle' | 'remoteManual' | 'remoteSsh'): Promise<void> {
+export async function setEngineModeHint(mode: 'localBundle' | 'remoteManual' | 'remoteSsh' | 'teamServer'): Promise<void> {
   await getElectronApi()?.setEngineModeHint?.(mode)
 }
 

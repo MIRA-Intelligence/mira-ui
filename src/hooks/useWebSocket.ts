@@ -25,6 +25,16 @@ import {
 import { forgetRemoteSshToken } from '@/services/engineAuth'
 import { useRemoteSshStore } from '@/stores/remoteSshStore'
 import { remoteSshMessage } from '@/lib/remoteSshMessages'
+import {
+  ensureTeamServerSession,
+  fetchTeamServerMe,
+  hasTeamServerBridge,
+  onTeamServerSession,
+  teamServerEngineIssueMessage,
+  teamServerFailureMessage,
+} from '@/services/teamServer'
+import { useTeamServerStore } from '@/stores/teamServerStore'
+import { serverHost, serverOrigin } from '@/lib/teamServerUrl'
 
 async function syncOnConnect() {
   const {
@@ -82,6 +92,9 @@ export function useWebSocket() {
   // Bumped when a Remote-SSH connection comes back on the same tunnel port, so
   // the engine is probed again even though apiUrl did not change.
   const [sshEpoch, setSshEpoch] = useState(0)
+  const serverUrl = useSettingsStore((s) => s.serverUrl)
+  // Bumped by every successful Team server sign-in.
+  const teamServerEpoch = useTeamServerStore((s) => s.sessionEpoch)
 
   useLayoutEffect(() => {
     useSkillHistoryStore.getState().reset()
@@ -132,6 +145,22 @@ export function useWebSocket() {
       void disconnectRemoteSsh()
     }
   }, [deploymentMode, sshHost])
+
+  // Team server: follow sign-out and session expiry pushed by the main
+  // process. A refreshed access token is adopted silently (an open WebSocket
+  // keeps running; the next reconnect uses the new token).
+  useEffect(() => {
+    if (deploymentMode !== 'teamServer') return
+    return onTeamServerSession((event) => {
+      const settings = useSettingsStore.getState()
+      const origin = serverOrigin(settings.serverUrl)
+      if (event.session || event.origin !== origin || settings.deploymentMode !== 'teamServer') return
+      const host = serverHost(origin)
+      const message = t(event.reason === 'logout' ? 'teamServerSignedOut' : 'teamServerSessionExpired', settings.language, { host })
+      settings.setEngineBootstrap({ status: 'unreachable', message, version: null })
+      settings.setConnectionMessage(message)
+    })
+  }, [deploymentMode])
 
   useEffect(() => {
     let disposed = false
@@ -192,6 +221,37 @@ export function useWebSocket() {
             forgetRemoteSshToken()
             settings.setConnectionEndpoints(endpoints.apiUrl, endpoints.wsUrl)
             return
+          }
+        }
+
+        if (deploymentMode === 'teamServer') {
+          const unreachable = (message: string) => {
+            setEngineBootstrap({ status: 'unreachable', message, version: null })
+            setConnectionMessage(message)
+            setConnected(false)
+          }
+          const origin = serverOrigin(serverUrl)
+          if (!hasTeamServerBridge()) return unreachable(t('teamServerDesktopRequired', lang))
+          if (!origin) return unreachable(t('teamServerUrlRequired', lang))
+          const host = serverHost(origin)
+          setConnectionMessage(t('teamServerConnecting', lang, { host }))
+          // Uses the stored refresh token silently. Without one the app stays
+          // signed out until the user clicks Sign in (no prompt at launch).
+          const session = await ensureTeamServerSession(origin)
+          if (disposed) return
+          if (!session.ok) {
+            return unreachable(session.code === 'signed_out'
+              ? t('teamServerSignedOut', lang, { host })
+              : teamServerFailureMessage(session, lang, origin))
+          }
+          const engine = await fetchTeamServerMe(origin)
+          if (disposed) return
+          if (engine?.state === 'conflict') {
+            return unreachable(teamServerEngineIssueMessage('engine_conflict', lang, origin))
+          }
+          if (engine && engine.state !== 'running') {
+            // The probe below starts it (any /api request does) and waits.
+            setConnectionMessage(t('teamServerEngineStarting', lang, { host }))
           }
         }
 
@@ -276,7 +336,7 @@ export function useWebSocket() {
       disposed = true
       clearBootstrapPoll()
     }
-  }, [apiUrl, deploymentMode, sshHost, sshMiraCommand, sshEpoch, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
+  }, [apiUrl, deploymentMode, sshHost, sshMiraCommand, sshEpoch, serverUrl, teamServerEpoch, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 
   useEffect(() => {
     const localBundle = deploymentMode === 'localBundle'

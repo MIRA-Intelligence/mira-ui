@@ -48,6 +48,18 @@ This UI is designed to connect to the [Mira](https://github.com/MIRA-Intelligenc
 
 If you are running locally, defaults are expected on `127.0.0.1:18790` unless you override URLs via env.
 
+### Connecting to a Mira Server (Team server)
+
+In the desktop app, **Settings → Deployment mode → Team server** connects to a Mira Server run by your team instead of an engine on this computer (client contract: MIRA-Intelligence/mira#152).
+
+1. Enter the server URL, e.g. `https://mira.example.com`. `https://` is required; `http://` is accepted only for a server on this computer (`localhost`, `127.0.0.1`), for development. The app checks `GET /server/info` before signing in.
+2. Click **Sign in** and use your account on the server (for PAM servers, your Unix account; you must be in the `mira-users` group).
+3. The status bar shows who is signed in (with an *Admin* badge for `mira-admins`), the server, and **Sign out**.
+
+All API and WebSocket traffic then goes to `<server>/api` and `<server>/ws`, and the server starts your engine on demand ("Starting your workspace…").
+
+Sign-in runs in the Electron main process. The password is sent to the server only and never stored. The refresh token stays in the main process, encrypted with the OS keychain (Electron `safeStorage`) in `team-server-sessions.json` under the app's user-data directory; without a keychain it is kept in memory and you sign in again at the next launch. The short-lived access token is kept in memory only. None of them are written to `localStorage`, logs or diagnostic exports. After **Sign out** (or with no saved session) the app stays signed out until you click **Sign in**.
+
 ## 3) Environment configuration
 
 The app reads variables prefixed with `VITE_` from Vite.

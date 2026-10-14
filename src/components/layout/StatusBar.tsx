@@ -8,6 +8,10 @@ import { cn } from '@/lib/utils'
 import { useChatStore } from '@/stores/chatStore'
 import { SkillHistoryChip } from './SkillHistoryChip'
 import { useTokenUsageStore, type TokenUsage } from '@/stores/tokenUsageStore'
+import { TeamServerUserMenu } from './TeamServerUserMenu'
+import { requestTeamServerLogin, useTeamServerStore } from '@/stores/teamServerStore'
+import { teamServerEngineIssueMessage } from '@/services/teamServer'
+import { serverHost, serverOrigin } from '@/lib/teamServerUrl'
 
 const SYSTEM_MESSAGE_TICK_MS = 500
 
@@ -38,13 +42,25 @@ export function StatusBar() {
     if (connected && skillSessionId) void loadUsage(skillSessionId)
   }, [connected, skillSessionId, workspace, apiUrl, loadUsage])
 
+  const serverUrl = useSettingsStore((s) => s.serverUrl)
+  const teamOrigin = deploymentMode === 'teamServer' ? serverOrigin(serverUrl) : null
+  const teamStarting = useTeamServerStore((s) => s.startingRequests > 0)
+  const teamIssue = useTeamServerStore((s) => s.engineIssue)
   const authMessage = engineAuthRejected
-    ? t(deploymentMode === 'remoteManual'
-      ? 'engineTokenRejectedRemote'
-      : deploymentMode === 'remoteSsh' ? 'engineTokenRejectedSsh' : 'engineTokenRejectedDesktop', lang)
+    ? teamOrigin
+      ? t('teamServerSessionExpired', lang, { host: serverHost(teamOrigin) })
+      : t(deploymentMode === 'remoteManual'
+        ? 'engineTokenRejectedRemote'
+        : deploymentMode === 'remoteSsh' ? 'engineTokenRejectedSsh' : 'engineTokenRejectedDesktop', lang)
     : null
-  const bannerMessage = authMessage || connectionMessage || engineMessage
-  const showEngineWarning = Boolean(authMessage) || (Boolean(bannerMessage) && (
+  // Team server: Mira Server is starting the engine, or cannot right now.
+  const teamMessage = teamOrigin
+    ? teamStarting
+      ? t('teamServerEngineStarting', lang, { host: serverHost(teamOrigin) })
+      : teamIssue ? teamServerEngineIssueMessage(teamIssue.code, lang, teamOrigin, teamIssue.message) : null
+    : null
+  const bannerMessage = authMessage || teamMessage || connectionMessage || engineMessage
+  const showEngineWarning = Boolean(authMessage) || Boolean(teamMessage) || (Boolean(bannerMessage) && (
     engineStatus === 'incompatible'
       || engineStatus === 'unreachable'
       || engineStatus === 'setup_required'
@@ -68,7 +84,12 @@ export function StatusBar() {
       {showEngineWarning && (
         <div className="px-6 py-2 text-xs text-amber-300 bg-amber-950/40 border-b border-amber-500/30">
           {bannerMessage || t('engineWarningFallback', lang)}
-          {authMessage && (
+          {authMessage && teamOrigin && (
+            <button type="button" onClick={() => void requestTeamServerLogin(teamOrigin, 'manual')} className="ml-2 underline hover:text-amber-200">
+              {t('teamServerSignIn', lang)}
+            </button>
+          )}
+          {authMessage && !teamOrigin && (
             <button type="button" onClick={openSettings} className="ml-2 underline hover:text-amber-200">
               {t('engineTokenOpenSettings', lang)}
             </button>
@@ -82,6 +103,7 @@ export function StatusBar() {
         <SystemMessageSlot />
 
         <div className="flex items-stretch gap-0.5 shrink-0">
+          <TeamServerUserMenu />
           <EngineChip
             label={engineChipLabel}
             status={engineStatus}

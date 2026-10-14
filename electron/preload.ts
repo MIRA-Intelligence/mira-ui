@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recordDiagnostic: (record: unknown) => ipcRenderer.send('diagnostics:record',record),
   exportDiagnostics: (options?: { includeLocalEngine?: boolean }) => ipcRenderer.invoke('diagnostics:export',options),
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
-  setEngineModeHint: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => ipcRenderer.invoke('engine:set-mode-hint', mode),
+  setEngineModeHint: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh' | 'teamServer') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getEngineToken: () => ipcRenderer.invoke('engine:gateway-token'),
   remoteSshConnect: (host: string, miraCommand?: string) => ipcRenderer.invoke('remote-ssh:connect', host, miraCommand),
@@ -37,6 +37,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const wrapped = (_event: IpcRendererEvent, chunk: unknown) => listener(chunk)
     ipcRenderer.on('remote-ssh:install-output', wrapped)
     return () => ipcRenderer.removeListener('remote-ssh:install-output', wrapped)
+  },
+  // Mira Server sign-in. The main process keeps the refresh token; these
+  // return { accessToken, expiresIn, user } or an error code.
+  teamServerInfo: (origin: string) => ipcRenderer.invoke('team-server:info', origin),
+  teamServerLogin: (origin: string, username: string, password: string) => ipcRenderer.invoke('team-server:login', origin, username, password),
+  teamServerSession: (origin: string) => ipcRenderer.invoke('team-server:session', origin),
+  teamServerRefresh: (origin: string, rejectedToken?: string | null) => ipcRenderer.invoke('team-server:refresh', origin, rejectedToken ?? null),
+  teamServerLogout: (origin: string) => ipcRenderer.invoke('team-server:logout', origin),
+  onTeamServerSession: (listener: (event: unknown) => void) => {
+    const wrapped = (_event: IpcRendererEvent, payload: unknown) => listener(payload)
+    ipcRenderer.on('team-server:session-changed', wrapped)
+    return () => ipcRenderer.removeListener('team-server:session-changed', wrapped)
   },
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),

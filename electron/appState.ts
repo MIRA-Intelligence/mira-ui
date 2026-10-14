@@ -8,7 +8,11 @@ import { isRememberablePath } from './remoteSsh'
 // localStorage is available — e.g. the update skip-list and a hint for which
 // engine deployment mode the user last used, so the boot-time local-engine
 // pre-warm can be skipped in remote mode.
-export type DeploymentModeHint = 'localBundle' | 'remoteManual' | 'remoteSsh'
+export type DeploymentModeHint = 'localBundle' | 'remoteManual' | 'remoteSsh' | 'teamServer'
+
+export function isDeploymentModeHint(value: unknown): value is DeploymentModeHint {
+  return value === 'localBundle' || value === 'remoteManual' || value === 'remoteSsh' || value === 'teamServer'
+}
 
 export interface AppState {
   skippedVersions: string[]
@@ -42,10 +46,7 @@ function sanitize(parsed: unknown): AppState {
   const skippedVersions = Array.isArray(obj.skippedVersions)
     ? obj.skippedVersions.filter((v): v is string => typeof v === 'string')
     : []
-  const lastDeploymentMode =
-    obj.lastDeploymentMode === 'localBundle' || obj.lastDeploymentMode === 'remoteManual' || obj.lastDeploymentMode === 'remoteSsh'
-      ? obj.lastDeploymentMode
-      : null
+  const lastDeploymentMode = isDeploymentModeHint(obj.lastDeploymentMode) ? obj.lastDeploymentMode : null
   const sshMiraPaths: Record<string, string> = {}
   if (obj.sshMiraPaths && typeof obj.sshMiraPaths === 'object' && !Array.isArray(obj.sshMiraPaths)) {
     for (const [host, value] of Object.entries(obj.sshMiraPaths as Record<string, unknown>)) {

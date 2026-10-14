@@ -25,6 +25,15 @@ import { isUnencryptedRemoteEndpoint, sshTunnelSuggestion } from '@/lib/connecti
 import { connectRemoteSsh, disconnectRemoteSsh, hasRemoteSshBridge, listSshHosts } from '@/services/remoteSsh'
 import { useRemoteSshStore } from '@/stores/remoteSshStore'
 import { remoteSshMessage } from '@/lib/remoteSshMessages'
+import { parseServerUrl, serverHost, serverOrigin } from '@/lib/teamServerUrl'
+import {
+  fetchTeamServerInfo,
+  hasTeamServerBridge,
+  serverUrlErrorMessage,
+  signOutTeamServer,
+  teamServerFailureMessage,
+} from '@/services/teamServer'
+import { requestTeamServerLogin, useTeamServerStore } from '@/stores/teamServerStore'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -39,6 +48,7 @@ type SettingsDraft = {
   engineToken: string
   sshHost: string
   sshMiraCommand: string
+  serverUrl: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
@@ -75,6 +85,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     engineToken: storedEngineToken(store, store.apiUrl),
     sshHost: store.sshHost ?? '',
     sshMiraCommand: store.sshMiraCommand ?? '',
+    serverUrl: store.serverUrl ?? '',
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
@@ -237,6 +248,8 @@ export function SettingsModal() {
     if (hasRemoteSshBridge()) void listSshHosts().then(setSshHosts)
     // A Remote-SSH engine is only reachable while its tunnel is up.
     if (store.deploymentMode === 'remoteSsh' && useRemoteSshStore.getState().status.phase !== 'connected') return
+    // A Team server engine is only reachable while signed in.
+    if (store.deploymentMode === 'teamServer' && useTeamServerStore.getState().phase !== 'signedIn') return
     void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true, true)
   }, [settingsOpen])
 
@@ -253,6 +266,17 @@ export function SettingsModal() {
 
   const handleSwitchMode = (mode: DeploymentMode) => {
     if (busy) return
+    if (mode === 'teamServer') {
+      const storedServer = latestStoredProfile(store.engineProfiles, 'teamServer')
+      setDraft((current) => ({
+        ...current,
+        deploymentMode: mode,
+        serverUrl: current.serverUrl || store.serverUrl || storedServer?.serverUrl || '',
+        workspacePath: storedServer?.workspacePath ?? current.workspacePath,
+      }))
+      setWorkspaceEdited(false)
+      return
+    }
     if (mode === 'remoteSsh') {
       const storedSsh = latestStoredProfile(store.engineProfiles, 'remoteSsh')
       setDraft((current) => ({
@@ -280,10 +304,10 @@ export function SettingsModal() {
         deploymentMode: mode,
         apiUrl: mode === 'localBundle'
           ? LOCAL_API_URL
-          : storedRemote?.apiUrl ?? (current.apiUrl === LOCAL_API_URL ? remoteApiFallback() : current.apiUrl),
+          : storedRemote?.apiUrl ?? (current.apiUrl === LOCAL_API_URL || current.deploymentMode === 'teamServer' ? remoteApiFallback() : current.apiUrl),
         wsUrl: mode === 'localBundle'
           ? LOCAL_WS_URL
-          : storedRemote?.wsUrl ?? (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
+          : storedRemote?.wsUrl ?? (current.wsUrl === LOCAL_WS_URL || current.deploymentMode === 'teamServer' ? remoteWsFallback() : current.wsUrl),
         workspacePath: storedRemote?.workspacePath ?? base.workspacePath,
         engineToken: mode === 'localBundle'
           ? current.engineToken
@@ -319,6 +343,12 @@ export function SettingsModal() {
 
       if (draft.deploymentMode === 'remoteSsh') {
         await saveRemoteSsh(nextWorkspacePath)
+        closeSettings()
+        return
+      }
+
+      if (draft.deploymentMode === 'teamServer') {
+        await saveTeamServer(nextWorkspacePath)
         closeSettings()
         return
       }
@@ -416,6 +446,72 @@ export function SettingsModal() {
     store.setDeploymentMode('remoteSsh')
     store.setSshHost(host)
     store.setSshMiraCommand(draft.sshMiraCommand)
+  }
+
+  const sameTeamServer = (origin: string) => store.deploymentMode === 'teamServer' && store.serverUrl === origin
+
+  // Switching to (or between) Team servers checks the URL and updates
+  // settings; useWebSocket then signs in silently with a stored session, or
+  // shows "Signed out" until the user clicks Sign in.
+  const saveTeamServer = async (nextWorkspacePath: string) => {
+    const parsed = parseServerUrl(draft.serverUrl)
+    if (!parsed.ok) throw new Error(serverUrlErrorMessage(parsed.error, curLang))
+    if (sameTeamServer(parsed.origin)) {
+      const signedIn = useTeamServerStore.getState().phase === 'signedIn' && store.engineStatus === 'compatible'
+      if (signedIn && workspaceEdited && customProjectDirsAllowed
+        && workspacePathChanged(store.workspacePath, nextWorkspacePath)) {
+        const payload = await updateProjectsRoot(nextWorkspacePath, store.apiUrl)
+        resetWorkspaceScopedState()
+        store.setRuntimeConfig(payload)
+        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+      }
+      return
+    }
+    const info = await fetchTeamServerInfo(parsed.origin)
+    if (!info.ok) throw new Error(teamServerFailureMessage(info, curLang, parsed.origin))
+    resetWorkspaceScopedState()
+    store.setTeamServer(parsed.origin)
+  }
+
+  const handleTeamServerSignIn = async () => {
+    setFeedback(null)
+    setFeedbackError(false)
+    const parsed = parseServerUrl(draft.serverUrl)
+    if (!parsed.ok) {
+      setFeedbackError(true)
+      setFeedback(serverUrlErrorMessage(parsed.error, curLang))
+      return
+    }
+    setBusy(true)
+    setFeedback(t('teamServerChecking', curLang, { host: parsed.host }))
+    try {
+      const info = await fetchTeamServerInfo(parsed.origin)
+      if (!info.ok) {
+        setFeedbackError(true)
+        setFeedback(teamServerFailureMessage(info, curLang, parsed.origin))
+        return
+      }
+      setFeedback(null)
+      setDraft((current) => ({ ...current, serverUrl: parsed.origin }))
+      if (!(await requestTeamServerLogin(parsed.origin, 'settings'))) return
+      if (!sameTeamServer(parsed.origin)) {
+        resetWorkspaceScopedState()
+        store.setTeamServer(parsed.origin)
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleTeamServerSignOut = async () => {
+    const origin = serverOrigin(store.serverUrl)
+    if (!origin) return
+    setBusy(true)
+    try {
+      await signOutTeamServer(origin)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const handleSshConnect = async () => {
@@ -555,6 +651,8 @@ export function SettingsModal() {
   const localMode = draft.deploymentMode === 'localBundle'
   const sshMode = draft.deploymentMode === 'remoteSsh'
   const directMode = draft.deploymentMode === 'remoteManual'
+  const teamMode = draft.deploymentMode === 'teamServer'
+  const draftServerOrigin = serverOrigin(draft.serverUrl)
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -578,7 +676,7 @@ export function SettingsModal() {
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
                   <DeploymentModeSelector mode={draft.deploymentMode} onChange={handleSwitchMode} lang={curLang} />
                   <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
-                    {t(localMode ? 'deploymentLocalHint' : sshMode ? 'deploymentSshHint' : 'deploymentDirectHint', curLang)}
+                    {t(localMode ? 'deploymentLocalHint' : sshMode ? 'deploymentSshHint' : teamMode ? 'deploymentTeamServerHint' : 'deploymentDirectHint', curLang)}
                   </p>
                 </div>
               </Section>
@@ -778,6 +876,37 @@ export function SettingsModal() {
                 </Section>
               )}
 
+              {teamMode && (
+                <Section title={t('connection', curLang)}>
+                  <Label text={t('teamServerUrlLabel', curLang)} />
+                  <input
+                    aria-label={t('teamServerUrlLabel', curLang)}
+                    value={draft.serverUrl}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={t('teamServerUrlPlaceholder', curLang)}
+                    onChange={(e) => setDraft((current) => ({ ...current, serverUrl: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                    {t('teamServerUrlHint', curLang)}
+                  </p>
+                  <TeamServerStatusLine
+                    lang={curLang}
+                    origin={draftServerOrigin}
+                    active={draftServerOrigin !== null && sameTeamServer(draftServerOrigin)}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <ActionButton disabled={busy || !draft.serverUrl.trim()} onClick={() => void handleTeamServerSignIn()}>
+                      {t('teamServerSignIn', curLang)}
+                    </ActionButton>
+                    {draftServerOrigin && sameTeamServer(draftServerOrigin) && (
+                      <TeamServerSignOutButton disabled={busy} lang={curLang} origin={draftServerOrigin} onClick={() => void handleTeamServerSignOut()} />
+                    )}
+                  </div>
+                </Section>
+              )}
+
               {directMode && (
                 <Section title={t('connection', curLang)}>
                   <Label text={t('apiUrl', curLang)} />
@@ -941,6 +1070,8 @@ function DeploymentModeSelector(
     { value: 'localBundle', label: t('deploymentLocal', lang) },
     // Remote-SSH needs the desktop app's ssh bridge.
     ...(hasRemoteSshBridge() || mode === 'remoteSsh' ? [{ value: 'remoteSsh' as const, label: t('deploymentSsh', lang) }] : []),
+    // Team server sign-in runs in the desktop app's main process.
+    ...(hasTeamServerBridge() || mode === 'teamServer' ? [{ value: 'teamServer' as const, label: t('deploymentTeamServer', lang) }] : []),
     { value: 'remoteManual', label: t('deploymentDirect', lang), deprecated: true },
   ]
   return (
@@ -989,6 +1120,47 @@ function RemoteSshStatusLine({ lang, host, active }: { lang: Language; host: str
         </p>
       )}
     </>
+  )
+}
+
+function TeamServerStatusLine({ lang, origin, active }: { lang: Language; origin: string | null; active: boolean }) {
+  const phase = useTeamServerStore((s) => s.phase)
+  const sessionOrigin = useTeamServerStore((s) => s.origin)
+  const user = useTeamServerStore((s) => s.user)
+  const persistent = useTeamServerStore((s) => s.persistent)
+  if (!origin || !active || sessionOrigin !== origin) return null
+  const host = serverHost(origin)
+  if (phase === 'signedIn' && user) {
+    return (
+      <>
+        <p role="status" className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)] break-words">
+          {t('teamServerSignedInAs', lang, { host, user: user.displayName || user.name })}
+        </p>
+        {!persistent && (
+          <p className="mt-1 text-[11px] leading-relaxed text-amber-300">{t('teamServerNotPersistent', lang)}</p>
+        )}
+      </>
+    )
+  }
+  if (phase === 'signedOut') {
+    return (
+      <p role="status" className="mt-2 text-[11px] leading-relaxed text-amber-300 break-words">
+        {t('teamServerSignedOut', lang, { host })}
+      </p>
+    )
+  }
+  return null
+}
+
+function TeamServerSignOutButton(
+  { disabled, lang, origin, onClick }: { disabled: boolean; lang: Language; origin: string; onClick: () => void },
+) {
+  const signedIn = useTeamServerStore((s) => s.phase === 'signedIn' && s.origin === origin)
+  if (!signedIn) return null
+  return (
+    <ActionButton disabled={disabled} onClick={onClick}>
+      {t('teamServerSignOut', lang)}
+    </ActionButton>
   )
 }
 

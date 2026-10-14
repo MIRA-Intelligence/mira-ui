@@ -1,12 +1,14 @@
 import { create } from 'zustand'
 import type { LocalEngineOperation, LocalEnginePhase } from '@/services/desktop'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
+import { serverOrigin, teamServerEndpoints } from '@/lib/teamServerUrl'
 
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
 // remoteManual (direct http/ws URLs) is deprecated in favour of remoteSsh.
-export type DeploymentMode = 'localBundle' | 'remoteManual' | 'remoteSsh'
+// teamServer: a Mira Server (sign in; all traffic goes through the server).
+export type DeploymentMode = 'localBundle' | 'remoteManual' | 'remoteSsh' | 'teamServer'
 export type SendShortcut = 'enter' | 'shift_enter'
 
 export interface EngineProfile {
@@ -20,6 +22,8 @@ export interface EngineProfile {
   sshHost: string | null
   // Remote path of the mira CLI on that host; '' means `mira` on the PATH.
   sshMiraCommand: string
+  // Mira Server origin (https://host[:port]) for teamServer profiles, else null.
+  serverUrl: string | null
   workspacePath: string
   runtimeConfig: RuntimeConfigPayload | null
   engineVersion: string | null
@@ -53,7 +57,20 @@ function defaultRemoteWsUrl(): string {
 }
 
 function isDeploymentMode(value: unknown): value is DeploymentMode {
-  return value === 'localBundle' || value === 'remoteManual' || value === 'remoteSsh'
+  return value === 'localBundle' || value === 'remoteManual' || value === 'remoteSsh' || value === 'teamServer'
+}
+
+// A Team server profile's apiUrl is always <origin>/api.
+function teamServerOriginOf(apiUrl: string): string | null {
+  try {
+    return serverOrigin(new URL(apiUrl).origin)
+  } catch {
+    return null
+  }
+}
+
+function teamServerUrls(origin: string | null): { apiUrl: string; wsUrl: string } {
+  return origin ? teamServerEndpoints(origin) : { apiUrl: '', wsUrl: '' }
 }
 
 function defaultDeploymentMode(): DeploymentMode {
@@ -80,6 +97,11 @@ interface SettingsState {
   // host again on its own (e.g. at the next launch) until they click Connect.
   // Unexpected drops leave it unset and keep reconnecting automatically.
   sshManuallyDisconnected: boolean
+  // Team server: the Mira Server origin, and the user name last used to sign
+  // in there (to prefill the sign-in dialog). Tokens are never kept here; the
+  // main process holds the refresh token and the access token is in memory.
+  serverUrl: string
+  serverUsername: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   // Stream assistant replies token-by-token. Default on for responsiveness.
@@ -115,6 +137,9 @@ interface SettingsState {
   setSshHost: (host: string) => void
   setSshMiraCommand: (command: string) => void
   setSshManuallyDisconnected: (value: boolean) => void
+  // Switch to (or between) Team servers in one step.
+  setTeamServer: (origin: string) => void
+  setServerUsername: (username: string) => void
   setEngineToken: (apiUrl: string, token: string) => void
   setEngineAuthRejected: (rejected: boolean) => void
   setShowProgressMessages: (v: boolean) => void
@@ -211,6 +236,7 @@ function sanitizeEngineTokens(value: unknown): Record<string, string> {
 function engineProfileKey(mode: DeploymentMode, apiUrl: string, sshHost?: string | null): string {
   if (mode === 'localBundle') return 'localBundle'
   if (mode === 'remoteSsh') return `ssh:${(sshHost ?? '').trim()}`
+  if (mode === 'teamServer') return `server:${teamServerOriginOf(apiUrl) ?? ''}`
   return `remote:${normalizeEndpoint(apiUrl)}`
 }
 
@@ -239,6 +265,7 @@ function createEngineProfile(input: {
     wsUrl: input.wsUrl,
     sshHost,
     sshMiraCommand: input.deploymentMode === 'remoteSsh' ? (input.sshMiraCommand ?? '').trim() : '',
+    serverUrl: input.deploymentMode === 'teamServer' ? teamServerOriginOf(input.apiUrl) : null,
     workspacePath: input.workspacePath ?? (runtimeConfig ? workspaceFromRuntime(runtimeConfig) : DEFAULT_WORKSPACE_PATH),
     runtimeConfig,
     engineVersion: input.engineVersion ?? null,
@@ -393,6 +420,12 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.sshManuallyDisconnected === 'boolean') {
       sanitized.sshManuallyDisconnected = parsed.sshManuallyDisconnected
     }
+    if (typeof parsed.serverUrl === 'string') {
+      sanitized.serverUrl = serverOrigin(parsed.serverUrl) ?? ''
+    }
+    if (typeof parsed.serverUsername === 'string') {
+      sanitized.serverUsername = parsed.serverUsername.slice(0, 256)
+    }
 
     const apiUrl = typeof parsed.apiUrl === 'string' ? parsed.apiUrl : undefined
     if (apiUrl && !isStaleLocalhost(apiUrl)) {
@@ -440,6 +473,8 @@ function persist(state: SettingsState) {
     wsUrl,
     sshHost,
     sshManuallyDisconnected,
+    serverUrl,
+    serverUsername,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -459,6 +494,8 @@ function persist(state: SettingsState) {
     wsUrl,
     sshHost,
     sshManuallyDisconnected,
+    serverUrl,
+    serverUsername,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -469,12 +506,17 @@ function persist(state: SettingsState) {
 
 const saved = loadPersisted()
 const initialDeploymentMode = saved.deploymentMode ?? defaultDeploymentMode()
+const initialServerUrl = saved.serverUrl ?? ''
 const initialApiUrl = initialDeploymentMode === 'localBundle'
   ? localApiUrl()
-  : saved.apiUrl ?? defaultRemoteApiUrl()
+  : initialDeploymentMode === 'teamServer'
+    ? teamServerUrls(serverOrigin(initialServerUrl)).apiUrl
+    : saved.apiUrl ?? defaultRemoteApiUrl()
 const initialWsUrl = initialDeploymentMode === 'localBundle'
   ? localWsUrl()
-  : saved.wsUrl ?? defaultRemoteWsUrl()
+  : initialDeploymentMode === 'teamServer'
+    ? teamServerUrls(serverOrigin(initialServerUrl)).wsUrl
+    : saved.wsUrl ?? defaultRemoteWsUrl()
 const initialEngineProfiles = saved.engineProfiles ?? {}
 const initialSshHost = saved.sshHost ?? ''
 const initialEngineKey = saved.activeEngineKey ?? engineProfileKey(initialDeploymentMode, initialApiUrl, initialSshHost)
@@ -504,6 +546,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   sshHost: seededInitialProfile.sshHost ?? initialSshHost,
   sshMiraCommand: seededInitialProfile.sshMiraCommand,
   sshManuallyDisconnected: saved.sshManuallyDisconnected ?? false,
+  serverUrl: initialServerUrl,
+  serverUsername: saved.serverUsername ?? '',
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
@@ -562,6 +606,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           runtimeConfigLoaded: Boolean(profile.runtimeConfig),
         }
       }
+      if (mode === 'teamServer') {
+        const latestServer = latestProfileForMode(profiles, mode)
+        const origin = serverOrigin(state.serverUrl) ?? latestServer?.serverUrl ?? null
+        const urls = teamServerUrls(origin)
+        const profile = selectProfile(profiles, mode, urls.apiUrl, urls.wsUrl)
+        return {
+          deploymentMode: mode,
+          serverUrl: origin ?? '',
+          activeEngineKey: profile.key,
+          engineProfiles: { ...profiles, [profile.key]: profile },
+          apiUrl: profile.apiUrl,
+          wsUrl: profile.wsUrl,
+          workspacePath: profile.workspacePath,
+          runtimeConfig: profile.runtimeConfig,
+          runtimeConfigLoaded: Boolean(profile.runtimeConfig),
+        }
+      }
       if (mode === 'remoteSsh') {
         const latestSsh = latestProfileForMode(profiles, mode)
         const host = latestSsh?.sshHost ?? state.sshHost
@@ -580,10 +641,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         }
       }
       const latestRemote = latestProfileForMode(profiles, mode)
-      const nextApiUrl = isStaleLocalhost(state.apiUrl)
+      // A Mira Server URL is not an engine URL; do not carry it over.
+      const fromServer = state.deploymentMode === 'teamServer'
+      const nextApiUrl = fromServer || isStaleLocalhost(state.apiUrl)
         ? latestRemote?.apiUrl ?? defaultRemoteApiUrl()
         : state.apiUrl
-      const nextWsUrl = isStaleLocalhost(state.wsUrl)
+      const nextWsUrl = fromServer || isStaleLocalhost(state.wsUrl)
         ? latestRemote?.wsUrl ?? defaultRemoteWsUrl()
         : state.wsUrl
       const profile = profiles[engineProfileKey(mode, nextApiUrl)]
@@ -699,6 +762,34 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSshManuallyDisconnected: (value) => {
     if (get().sshManuallyDisconnected === value) return
     set({ sshManuallyDisconnected: value })
+    persist(get())
+  },
+  setTeamServer: (input) => {
+    const origin = serverOrigin(input)
+    if (!origin) return
+    set((state) => {
+      if (state.deploymentMode === 'teamServer' && state.serverUrl === origin) return state
+      const profiles = profilesWithCurrent(state)
+      const urls = teamServerUrls(origin)
+      const profile = selectProfile(profiles, 'teamServer', urls.apiUrl, urls.wsUrl)
+      return {
+        deploymentMode: 'teamServer' as const,
+        serverUrl: origin,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...profiles, [profile.key]: profile },
+        apiUrl: profile.apiUrl,
+        wsUrl: profile.wsUrl,
+        workspacePath: profile.workspacePath,
+        runtimeConfig: profile.runtimeConfig,
+        runtimeConfigLoaded: Boolean(profile.runtimeConfig),
+      }
+    })
+    persist(get())
+  },
+  setServerUsername: (username) => {
+    const next = username.trim().slice(0, 256)
+    if (get().serverUsername === next) return
+    set({ serverUsername: next })
     persist(get())
   },
   setEngineToken: (apiUrl, token) => {
