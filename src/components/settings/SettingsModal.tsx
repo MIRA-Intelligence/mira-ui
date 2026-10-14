@@ -21,6 +21,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { EngineLifecycleControls } from './EngineLifecycleControls'
 import { exportDiagnostics, recordDiagnostic } from '@/services/diagnostics'
+import { isUnencryptedRemoteEndpoint, sshTunnelSuggestion } from '@/lib/connectionSecurity'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -643,6 +644,7 @@ export function SettingsModal() {
                     onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
                     className={inputClass}
                   />
+                  <InsecureRemoteWarning apiUrl={draft.apiUrl} wsUrl={draft.wsUrl} lang={curLang} />
                   <Label text={t('engineToken', curLang)} className="mt-3" />
                   <input
                     type="password"
@@ -746,6 +748,21 @@ export function SettingsModal() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function InsecureRemoteWarning({ apiUrl, wsUrl, lang }: { apiUrl: string; wsUrl: string; lang: Language }) {
+  const insecureUrl = [apiUrl, wsUrl].find(isUnencryptedRemoteEndpoint)
+  const suggestion = insecureUrl ? sshTunnelSuggestion(insecureUrl) : null
+  if (!insecureUrl || !suggestion) return null
+  const scheme = new URL(insecureUrl.trim()).protocol.replace(':', '')
+  return (
+    <div role="alert" className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+      <p className="text-xs font-medium text-amber-300">{t('insecureRemoteTitle', lang)}</p>
+      <p className="text-[11px] text-[var(--color-text-secondary)] mt-1 leading-relaxed break-words">
+        {t('insecureRemoteWarning', lang, { scheme, ...suggestion })}
+      </p>
     </div>
   )
 }

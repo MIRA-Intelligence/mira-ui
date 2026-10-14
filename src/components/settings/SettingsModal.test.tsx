@@ -184,4 +184,40 @@ describe('SettingsModal remote runtime config', () => {
       expect(useSettingsStore.getState().workspacePath).toBe('/changed/workspace')
     })
   })
+
+  it('warns when a remote engine is reached over plaintext http/ws', async () => {
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/old/workspace', '/old/config.json'))
+
+    openRemoteSettings('http://10.0.0.5:18790/api', 'ws://10.0.0.5:18790/ws', '/old/workspace')
+    render(<SettingsModal />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Unencrypted connection')
+    expect(alert).toHaveTextContent('ssh -N -L 18791:127.0.0.1:18790 <user>@10.0.0.5')
+    expect(alert).toHaveTextContent('http://127.0.0.1:18791/api')
+  })
+
+  it('does not warn for TLS endpoints or loopback tunnels', async () => {
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/old/workspace', '/old/config.json'))
+
+    openRemoteSettings('https://old.example/api', 'wss://old.example/ws', '/old/workspace')
+    render(<SettingsModal />)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.change(screen.getByDisplayValue('https://old.example/api'), {
+      target: { value: 'http://127.0.0.1:18791/api' },
+    })
+    fireEvent.change(screen.getByDisplayValue('wss://old.example/ws'), {
+      target: { value: 'ws://127.0.0.1:18791/ws' },
+    })
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    fireEvent.change(screen.getByDisplayValue('ws://127.0.0.1:18791/ws'), {
+      target: { value: 'ws://server.lab.example:18790/ws' },
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('<user>@server.lab.example')
+  })
 })
