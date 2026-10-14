@@ -3,8 +3,9 @@ name: Test
 on:
   push:
     branches: [dev, main, release]
+  # Run for PRs into any branch (e.g. feat/server-edition), matching the mira repo.
   pull_request:
-    branches: [dev, main, release]
+  workflow_dispatch:
 
 permissions:
   contents: read
