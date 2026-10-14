@@ -53,6 +53,21 @@ describe('SshPromptDialog', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('renders above the Settings modal, outside its stacking context', () => {
+    // Connecting starts from Settings (z-[100]); the prompt was hidden behind it.
+    render(
+      <div className="fixed inset-0 z-[100]" data-testid="settings" style={{ transform: 'translateZ(0)' }}>
+        <SshPromptDialog />
+      </div>,
+    )
+    prompt()
+    const dialog = screen.getByRole('dialog')
+    expect(dialog.parentElement).toBe(document.body)
+    expect(screen.getByTestId('settings').contains(dialog)).toBe(false)
+    const zIndex = Number(/z-\[(\d+)\]/.exec(dialog.className)?.[1])
+    expect(zIndex).toBeGreaterThan(1000)
+  })
+
   it('cancels on Escape and on the Cancel button', () => {
     render(<SshPromptDialog />)
     prompt()

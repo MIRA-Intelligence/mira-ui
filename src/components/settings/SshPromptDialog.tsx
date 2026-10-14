@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { t } from '@/i18n'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { answerSshPrompt, onSshPrompt, onSshPromptCancel, type SshPrompt } from '@/services/remoteSsh'
@@ -41,14 +42,18 @@ export function SshPromptDialog() {
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
       event.preventDefault()
+      event.stopPropagation()
       respond(null)
     }
   }
   const hostKey = prompt.kind === 'host_key'
 
-  return (
+  // Connecting usually starts from Settings, so the prompt must sit above every
+  // other overlay (Settings, Providers, the image lightbox at z-[1000]). It is
+  // portalled to <body> so no ancestor stacking context can hide it.
+  return createPortal(
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 px-4"
+      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/45 px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="ssh-prompt-title"
@@ -114,6 +119,7 @@ export function SshPromptDialog() {
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   )
 }
