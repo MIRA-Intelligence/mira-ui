@@ -4,7 +4,7 @@ import type { IpcMainInvokeEvent, WebContents } from 'electron'
 
 // The engine writes its gateway token here (mode 0600) when the gateway starts;
 // see MIRA-Intelligence/mira#149. The renderer receives it only over IPC.
-const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{16,512}$/
+export const TOKEN_PATTERN = /^[A-Za-z0-9._~+/=-]{16,512}$/
 
 export function gatewayTokenPath(miraHome: string): string {
   return path.join(miraHome, 'runtime', 'gateway-token')

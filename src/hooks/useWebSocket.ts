@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
 import { useTokenUsageStore } from '@/stores/tokenUsageStore'
 import { wsClient } from '@/services/websocket'
@@ -13,6 +13,18 @@ import { useChatStore } from '@/stores/chatStore'
 import { useOrganizationStore } from '@/stores/organizationStore'
 import { useUiStore } from '@/stores/uiStore'
 import { t } from '@/i18n'
+import {
+  IDLE_REMOTE_SSH_STATUS,
+  connectRemoteSsh,
+  disconnectRemoteSsh,
+  getRemoteSshStatus,
+  hasRemoteSshBridge,
+  onRemoteSshStatus,
+  tunnelEndpoints,
+} from '@/services/remoteSsh'
+import { forgetRemoteSshToken } from '@/services/engineAuth'
+import { useRemoteSshStore } from '@/stores/remoteSshStore'
+import { remoteSshMessage } from '@/lib/remoteSshMessages'
 
 async function syncOnConnect() {
   const {
@@ -64,7 +76,11 @@ export function useWebSocket() {
   const deploymentMode = useSettingsStore((s) => s.deploymentMode)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
+  const sshHost = useSettingsStore((s) => s.sshHost)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
+  // Bumped when a Remote-SSH connection comes back on the same tunnel port, so
+  // the engine is probed again even though apiUrl did not change.
+  const [sshEpoch, setSshEpoch] = useState(0)
 
   useLayoutEffect(() => {
     useSkillHistoryStore.getState().reset()
@@ -77,6 +93,44 @@ export function useWebSocket() {
   useEffect(() => {
     void setEngineModeHint(deploymentMode)
   }, [deploymentMode])
+
+  // Remote-SSH: mirror the main process's connection state, follow tunnel
+  // endpoint changes, and drop the connection when leaving the mode/host.
+  useEffect(() => {
+    const setStatus = useRemoteSshStore.getState().setStatus
+    if (deploymentMode !== 'remoteSsh') {
+      setStatus(IDLE_REMOTE_SSH_STATUS)
+      return
+    }
+    let active = true
+    void getRemoteSshStatus().then((status) => { if (active) setStatus(status) })
+    const unsubscribe = onRemoteSshStatus((status) => {
+      if (!active) return
+      setStatus(status)
+      forgetRemoteSshToken()
+      const settings = useSettingsStore.getState()
+      if (settings.deploymentMode !== 'remoteSsh' || status.host !== settings.sshHost.trim()) return
+      const message = remoteSshMessage(status, settings.language)
+      if (status.phase === 'connected' && status.localPort) {
+        const endpoints = tunnelEndpoints(status.localPort)
+        if (endpoints.apiUrl !== settings.apiUrl || endpoints.wsUrl !== settings.wsUrl) {
+          settings.setConnectionEndpoints(endpoints.apiUrl, endpoints.wsUrl)
+        } else if (settings.engineStatus !== 'compatible') {
+          setSshEpoch((epoch) => epoch + 1)
+        }
+      } else if (status.phase === 'reconnecting') {
+        settings.setConnectionMessage(message)
+      } else if (status.phase === 'error' || status.phase === 'idle') {
+        settings.setEngineBootstrap({ status: 'unreachable', message, version: null })
+        settings.setConnectionMessage(message)
+      }
+    })
+    return () => {
+      active = false
+      unsubscribe()
+      void disconnectRemoteSsh()
+    }
+  }, [deploymentMode, sshHost])
 
   useEffect(() => {
     let disposed = false
@@ -107,6 +161,31 @@ export function useWebSocket() {
         const safeApiUrl = localBundle
           ? 'http://127.0.0.1:18790/api'
           : (typeof apiUrl === 'string' ? apiUrl : 'http://127.0.0.1:18790/api')
+
+        if (deploymentMode === 'remoteSsh') {
+          const unreachable = (message: string) => {
+            setEngineBootstrap({ status: 'unreachable', message, version: null })
+            setConnectionMessage(message)
+            setConnected(false)
+          }
+          if (!hasRemoteSshBridge()) return unreachable(t('sshErrorUnavailable', lang))
+          if (!sshHost.trim()) return unreachable(t('sshHostRequired', lang))
+          setConnectionMessage(t('sshStatusConnecting', lang, { host: sshHost.trim() }))
+          const status = await connectRemoteSsh(sshHost)
+          if (disposed) return
+          useRemoteSshStore.getState().setStatus(status)
+          if (status.phase !== 'connected' || !status.localPort) {
+            return unreachable(remoteSshMessage(status, lang, sshHost.trim()))
+          }
+          const endpoints = tunnelEndpoints(status.localPort)
+          const settings = useSettingsStore.getState()
+          if (endpoints.apiUrl !== settings.apiUrl || endpoints.wsUrl !== settings.wsUrl) {
+            // This effect runs again for the new endpoint and probes it there.
+            forgetRemoteSshToken()
+            settings.setConnectionEndpoints(endpoints.apiUrl, endpoints.wsUrl)
+            return
+          }
+        }
 
         if (localBundle) {
           if (!hasDesktopEngineManager()) {
@@ -189,7 +268,7 @@ export function useWebSocket() {
       disposed = true
       clearBootstrapPoll()
     }
-  }, [apiUrl, deploymentMode, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
+  }, [apiUrl, deploymentMode, sshHost, sshEpoch, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 
   useEffect(() => {
     const localBundle = deploymentMode === 'localBundle'

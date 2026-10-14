@@ -419,7 +419,7 @@ export function NewProjectModal() {
   }
 
   const useNativePathPicker = deploymentMode === 'localBundle' && Boolean(window.electronAPI?.selectDataPath)
-  const allowDataUpload = deploymentMode === 'remoteManual'
+  const allowDataUpload = deploymentMode !== 'localBundle'
   const dataPathPlaceholderKey = deploymentMode === 'localBundle'
     ? 'localDataPathPlaceholder'
     : 'remoteDataPathPlaceholder'

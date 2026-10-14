@@ -5,7 +5,8 @@ import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 export type Theme = 'dark' | 'light'
 export type Language = 'en' | 'zh'
 export type EngineStatus = 'unknown' | 'compatible' | 'incompatible' | 'unreachable' | 'setup_required'
-export type DeploymentMode = 'localBundle' | 'remoteManual'
+// remoteManual (direct http/ws URLs) is deprecated in favour of remoteSsh.
+export type DeploymentMode = 'localBundle' | 'remoteManual' | 'remoteSsh'
 export type SendShortcut = 'enter' | 'shift_enter'
 
 export interface EngineProfile {
@@ -13,6 +14,10 @@ export interface EngineProfile {
   deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
+  // Remote-SSH target (ssh alias or user@host[:port]); null for other modes.
+  // The tunnel's local port can change between connections, so Remote-SSH
+  // profiles are keyed by host rather than by URL.
+  sshHost: string | null
   workspacePath: string
   runtimeConfig: RuntimeConfigPayload | null
   engineVersion: string | null
@@ -45,6 +50,10 @@ function defaultRemoteWsUrl(): string {
   return `${proto}://${host}:${GATEWAY_PORT}/ws`
 }
 
+function isDeploymentMode(value: unknown): value is DeploymentMode {
+  return value === 'localBundle' || value === 'remoteManual' || value === 'remoteSsh'
+}
+
 function defaultDeploymentMode(): DeploymentMode {
   return typeof window !== 'undefined' && window.electronAPI ? 'localBundle' : 'remoteManual'
 }
@@ -63,6 +72,7 @@ interface SettingsState {
   deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
+  sshHost: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   // Stream assistant replies token-by-token. Default on for responsiveness.
@@ -95,6 +105,7 @@ interface SettingsState {
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
+  setSshHost: (host: string) => void
   setEngineToken: (apiUrl: string, token: string) => void
   setEngineAuthRejected: (rejected: boolean) => void
   setShowProgressMessages: (v: boolean) => void
@@ -188,8 +199,9 @@ function sanitizeEngineTokens(value: unknown): Record<string, string> {
   return tokens
 }
 
-function engineProfileKey(mode: DeploymentMode, apiUrl: string): string {
+function engineProfileKey(mode: DeploymentMode, apiUrl: string, sshHost?: string | null): string {
   if (mode === 'localBundle') return 'localBundle'
+  if (mode === 'remoteSsh') return `ssh:${(sshHost ?? '').trim()}`
   return `remote:${normalizeEndpoint(apiUrl)}`
 }
 
@@ -201,18 +213,21 @@ function createEngineProfile(input: {
   deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
+  sshHost?: string | null
   workspacePath?: string
   runtimeConfig?: RuntimeConfigPayload | null
   engineVersion?: string | null
   configPath?: string | null
 }): EngineProfile {
-  const key = engineProfileKey(input.deploymentMode, input.apiUrl)
+  const sshHost = input.deploymentMode === 'remoteSsh' ? (input.sshHost ?? '').trim() : null
+  const key = engineProfileKey(input.deploymentMode, input.apiUrl, sshHost)
   const runtimeConfig = input.runtimeConfig ?? null
   return {
     key,
     deploymentMode: input.deploymentMode,
     apiUrl: input.apiUrl,
     wsUrl: input.wsUrl,
+    sshHost,
     workspacePath: input.workspacePath ?? (runtimeConfig ? workspaceFromRuntime(runtimeConfig) : DEFAULT_WORKSPACE_PATH),
     runtimeConfig,
     engineVersion: input.engineVersion ?? null,
@@ -223,9 +238,7 @@ function createEngineProfile(input: {
 
 function sanitizeEngineProfile(value: unknown): EngineProfile | null {
   if (!isRecord(value)) return null
-  const deploymentMode = value.deploymentMode === 'localBundle' || value.deploymentMode === 'remoteManual'
-    ? value.deploymentMode
-    : null
+  const deploymentMode = isDeploymentMode(value.deploymentMode) ? value.deploymentMode : null
   const apiUrl = typeof value.apiUrl === 'string' ? value.apiUrl : null
   const wsUrl = typeof value.wsUrl === 'string' ? value.wsUrl : null
   if (!deploymentMode || !apiUrl || !wsUrl) return null
@@ -235,6 +248,7 @@ function sanitizeEngineProfile(value: unknown): EngineProfile | null {
     deploymentMode,
     apiUrl,
     wsUrl,
+    sshHost: typeof value.sshHost === 'string' ? value.sshHost : null,
     workspacePath: typeof value.workspacePath === 'string' ? value.workspacePath : undefined,
     runtimeConfig,
     engineVersion: typeof value.engineVersion === 'string' ? value.engineVersion : null,
@@ -254,6 +268,7 @@ function currentProfileFromState(state: SettingsState): EngineProfile {
     deploymentMode: state.deploymentMode,
     apiUrl: state.apiUrl,
     wsUrl: state.wsUrl,
+    sshHost: state.sshHost,
     workspacePath: state.workspacePath,
     runtimeConfig: state.runtimeConfig,
     engineVersion: state.engineVersion,
@@ -275,12 +290,14 @@ function selectProfile(
   apiUrl: string,
   wsUrl: string,
   fallbackWorkspace = DEFAULT_WORKSPACE_PATH,
+  sshHost?: string | null,
 ): EngineProfile {
-  const key = engineProfileKey(mode, apiUrl)
+  const key = engineProfileKey(mode, apiUrl, sshHost)
   return profiles[key] ?? createEngineProfile({
     deploymentMode: mode,
     apiUrl,
     wsUrl,
+    sshHost,
     workspacePath: fallbackWorkspace,
   })
 }
@@ -354,8 +371,11 @@ function loadPersisted(): Partial<SettingsState> {
     if (parsed.language === 'en' || parsed.language === 'zh') {
       sanitized.language = parsed.language
     }
-    if (parsed.deploymentMode === 'localBundle' || parsed.deploymentMode === 'remoteManual') {
+    if (isDeploymentMode(parsed.deploymentMode)) {
       sanitized.deploymentMode = parsed.deploymentMode
+    }
+    if (typeof parsed.sshHost === 'string') {
+      sanitized.sshHost = parsed.sshHost
     }
 
     const apiUrl = typeof parsed.apiUrl === 'string' ? parsed.apiUrl : undefined
@@ -402,6 +422,7 @@ function persist(state: SettingsState) {
     deploymentMode,
     apiUrl,
     wsUrl,
+    sshHost,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -419,6 +440,7 @@ function persist(state: SettingsState) {
     deploymentMode,
     apiUrl,
     wsUrl,
+    sshHost,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -436,12 +458,14 @@ const initialWsUrl = initialDeploymentMode === 'localBundle'
   ? localWsUrl()
   : saved.wsUrl ?? defaultRemoteWsUrl()
 const initialEngineProfiles = saved.engineProfiles ?? {}
-const initialEngineKey = saved.activeEngineKey ?? engineProfileKey(initialDeploymentMode, initialApiUrl)
+const initialSshHost = saved.sshHost ?? ''
+const initialEngineKey = saved.activeEngineKey ?? engineProfileKey(initialDeploymentMode, initialApiUrl, initialSshHost)
 const seededInitialProfile = initialEngineProfiles[initialEngineKey]
   ?? createEngineProfile({
     deploymentMode: initialDeploymentMode,
     apiUrl: initialApiUrl,
     wsUrl: initialWsUrl,
+    sshHost: initialSshHost,
     workspacePath: saved.workspacePath ?? DEFAULT_WORKSPACE_PATH,
   })
 
@@ -459,6 +483,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   deploymentMode: initialDeploymentMode,
   apiUrl: seededInitialProfile.apiUrl,
   wsUrl: seededInitialProfile.wsUrl,
+  sshHost: seededInitialProfile.sshHost ?? initialSshHost,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
@@ -483,6 +508,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         deploymentMode: state.deploymentMode,
         apiUrl: state.apiUrl,
         wsUrl: state.wsUrl,
+        sshHost: state.sshHost,
         workspacePath: p,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -506,6 +532,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const profile = selectProfile(profiles, mode, localApiUrl(), localWsUrl())
         return {
           deploymentMode: mode,
+          activeEngineKey: profile.key,
+          engineProfiles: { ...profiles, [profile.key]: profile },
+          apiUrl: profile.apiUrl,
+          wsUrl: profile.wsUrl,
+          workspacePath: profile.workspacePath,
+          runtimeConfig: profile.runtimeConfig,
+          runtimeConfigLoaded: Boolean(profile.runtimeConfig),
+        }
+      }
+      if (mode === 'remoteSsh') {
+        const latestSsh = latestProfileForMode(profiles, mode)
+        const host = latestSsh?.sshHost ?? state.sshHost
+        const profile = selectProfile(profiles, mode, latestSsh?.apiUrl ?? '', latestSsh?.wsUrl ?? '', DEFAULT_WORKSPACE_PATH, host)
+        return {
+          deploymentMode: mode,
+          sshHost: host,
           activeEngineKey: profile.key,
           engineProfiles: { ...profiles, [profile.key]: profile },
           apiUrl: profile.apiUrl,
@@ -544,6 +586,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         deploymentMode: state.deploymentMode,
         apiUrl: u,
         wsUrl: state.wsUrl,
+        sshHost: state.sshHost,
         workspacePath: state.workspacePath,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -562,6 +605,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         deploymentMode: state.deploymentMode,
         apiUrl: state.apiUrl,
         wsUrl: u,
+        sshHost: state.sshHost,
         workspacePath: state.workspacePath,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -580,7 +624,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         return state
       }
       const profiles = profilesWithCurrent(state)
-      const profile = selectProfile(profiles, state.deploymentMode, apiUrl, wsUrl)
+      const selected = selectProfile(profiles, state.deploymentMode, apiUrl, wsUrl, DEFAULT_WORKSPACE_PATH, state.sshHost)
+      // A Remote-SSH profile keeps its identity (the host) while the tunnel
+      // endpoint moves, so adopt the new URLs instead of the stored ones.
+      const profile = state.deploymentMode === 'remoteSsh'
+        ? { ...selected, apiUrl, wsUrl, updatedAt: Date.now() }
+        : selected
       return {
         apiUrl: profile.apiUrl,
         wsUrl: profile.wsUrl,
@@ -589,6 +638,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         runtimeConfig: profile.runtimeConfig,
         runtimeConfigLoaded: Boolean(profile.runtimeConfig),
         engineProfiles: { ...profiles, [profile.key]: profile },
+      }
+    })
+    persist(get())
+  },
+  setSshHost: (host) => {
+    set((state) => {
+      const nextHost = host.trim()
+      if (state.sshHost === nextHost) return state
+      const profiles = profilesWithCurrent(state)
+      if (state.deploymentMode !== 'remoteSsh') return { sshHost: nextHost }
+      const profile = selectProfile(profiles, 'remoteSsh', '', '', DEFAULT_WORKSPACE_PATH, nextHost)
+      return {
+        sshHost: nextHost,
+        activeEngineKey: profile.key,
+        engineProfiles: { ...profiles, [profile.key]: profile },
+        apiUrl: profile.apiUrl,
+        wsUrl: profile.wsUrl,
+        workspacePath: profile.workspacePath,
+        runtimeConfig: profile.runtimeConfig,
+        runtimeConfigLoaded: Boolean(profile.runtimeConfig),
       }
     })
     persist(get())
@@ -681,6 +750,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         deploymentMode: state.deploymentMode,
         apiUrl: state.apiUrl,
         wsUrl: state.wsUrl,
+        sshHost: state.sshHost,
         workspacePath,
         runtimeConfig: payload,
         engineVersion: state.engineVersion,

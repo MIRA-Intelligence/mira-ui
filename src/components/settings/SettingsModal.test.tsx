@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/desktop', () => ({
   bootstrapLocalEngine: vi.fn(),
@@ -38,6 +38,8 @@ import {
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useRemoteSshStore } from '@/stores/remoteSshStore'
+import { IDLE_REMOTE_SSH_STATUS } from '@/services/remoteSsh'
 
 const initialSettingsState = useSettingsStore.getState()
 const initialProjectState = useProjectStore.getState()
@@ -219,5 +221,69 @@ describe('SettingsModal remote runtime config', () => {
       target: { value: 'ws://server.lab.example:18790/ws' },
     })
     expect(screen.getByRole('alert')).toHaveTextContent('<user>@server.lab.example')
+  })
+
+  describe('Remote server (SSH)', () => {
+    beforeEach(() => {
+      useRemoteSshStore.setState({ status: IDLE_REMOTE_SSH_STATUS })
+      window.electronAPI = {
+        platform: 'darwin',
+        remoteSshConnect: vi.fn(async (host: string) => ({ phase: 'connecting' as const, host, localPort: null, version: null, error: null, attempt: 0 })),
+        remoteSshDisconnect: vi.fn(async () => IDLE_REMOTE_SSH_STATUS),
+        listSshHosts: vi.fn(async () => ['lab', 'gpu02']),
+      }
+    })
+    afterEach(() => { delete window.electronAPI })
+
+    it('switches to an SSH host from ~/.ssh/config without asking for URLs or tokens', async () => {
+      vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/old/workspace', '/old/config.json'))
+      openRemoteSettings('https://old.example/api', 'wss://old.example/ws', '/old/workspace')
+      const { container } = render(<SettingsModal />)
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled())
+
+      fireEvent.click(screen.getByRole('radio', { name: 'Remote server (SSH)' }))
+      expect(screen.queryByText('API URL')).toBeNull()
+      expect(screen.queryByText('Engine token')).toBeNull()
+      await waitFor(() => expect(container.querySelectorAll('#mira-ssh-hosts option')).toHaveLength(2))
+
+      fireEvent.change(screen.getByPlaceholderText('Alias from ~/.ssh/config, or user@host[:port]'), { target: { value: 'lab' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+      const state = useSettingsStore.getState()
+      expect(state.deploymentMode).toBe('remoteSsh')
+      expect(state.sshHost).toBe('lab')
+      expect(state.activeEngineKey).toBe('ssh:lab')
+    })
+
+    it('shows connection status and errors for the active host', async () => {
+      useSettingsStore.getState().setDeploymentMode('remoteSsh')
+      useSettingsStore.getState().setSshHost('lab')
+      useRemoteSshStore.setState({ status: {
+        phase: 'error', host: 'lab', localPort: null, version: null, attempt: 0,
+        error: { code: 'not_installed', message: 'sh: 1: mira: not found' },
+      } })
+      useSettingsStore.getState().openSettings()
+      render(<SettingsModal />)
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Mira is not installed on lab')
+      expect(fetchRuntimeConfig).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
+      await waitFor(() => expect(window.electronAPI?.remoteSshConnect).toHaveBeenCalledWith('lab'))
+      expect(await screen.findByRole('status')).toHaveTextContent('Connecting to lab over SSH')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
+      expect(window.electronAPI?.remoteSshDisconnect).toHaveBeenCalled()
+    })
+
+    it('requires a host to save', async () => {
+      useSettingsStore.getState().setDeploymentMode('remoteSsh')
+      useSettingsStore.getState().setSshHost('')
+      useSettingsStore.getState().openSettings()
+      render(<SettingsModal />)
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByText('Enter an SSH host in Settings → Connection.')).toBeInTheDocument()
+      expect(useSettingsStore.getState().settingsOpen).toBe(true)
+    })
   })
 })

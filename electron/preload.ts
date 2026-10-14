@@ -6,9 +6,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   recordDiagnostic: (record: unknown) => ipcRenderer.send('diagnostics:record',record),
   exportDiagnostics: (options?: { includeLocalEngine?: boolean }) => ipcRenderer.invoke('diagnostics:export',options),
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
-  setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
+  setEngineModeHint: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getEngineToken: () => ipcRenderer.invoke('engine:gateway-token'),
+  remoteSshConnect: (host: string) => ipcRenderer.invoke('remote-ssh:connect', host),
+  remoteSshDisconnect: () => ipcRenderer.invoke('remote-ssh:disconnect'),
+  remoteSshStatus: () => ipcRenderer.invoke('remote-ssh:status'),
+  getRemoteSshToken: () => ipcRenderer.invoke('remote-ssh:token'),
+  listSshHosts: () => ipcRenderer.invoke('remote-ssh:hosts'),
+  onRemoteSshStatus: (listener: (status: unknown) => void) => {
+    const wrapped = (_event: IpcRendererEvent, status: unknown) => listener(status)
+    ipcRenderer.on('remote-ssh:status', wrapped)
+    return () => ipcRenderer.removeListener('remote-ssh:status', wrapped)
+  },
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),
   startLocalEngine: () => ipcRenderer.invoke('engine:start'),

@@ -214,4 +214,48 @@ describe('settingsStore', () => {
     useSettingsStore.getState().setEngineBootstrap({ status: 'compatible', message: null, version: '1.0.0' })
     expect(useSettingsStore.getState().engineAuthRejected).toBe(false)
   })
+
+  it('keys Remote-SSH profiles by host and follows the tunnel endpoint', () => {
+    const store = useSettingsStore.getState()
+    store.setDeploymentMode('remoteSsh')
+    store.setSshHost('lab')
+    store.setConnectionEndpoints('http://127.0.0.1:51000/api', 'ws://127.0.0.1:51000/ws')
+    store.setRuntimeConfig(runtimePayload('/home/ana/mira', '/home/ana/.mira/config.json'))
+
+    let state = useSettingsStore.getState()
+    expect(state.activeEngineKey).toBe('ssh:lab')
+    expect(state.engineProfiles['ssh:lab']).toMatchObject({ sshHost: 'lab', apiUrl: 'http://127.0.0.1:51000/api' })
+
+    // A later connection may get another local port; the profile stays the same.
+    state.setConnectionEndpoints('http://127.0.0.1:52000/api', 'ws://127.0.0.1:52000/ws')
+    state = useSettingsStore.getState()
+    expect(state.activeEngineKey).toBe('ssh:lab')
+    expect(state.apiUrl).toBe('http://127.0.0.1:52000/api')
+    expect(state.workspacePath).toBe('/home/ana/mira')
+
+    // Another host is a separate engine with its own workspace.
+    state.setSshHost('ana@gpu02')
+    state = useSettingsStore.getState()
+    expect(state.activeEngineKey).toBe('ssh:ana@gpu02')
+    expect(state.workspacePath).not.toBe('/home/ana/mira')
+
+    state.setSshHost('lab')
+    expect(useSettingsStore.getState().workspacePath).toBe('/home/ana/mira')
+
+    const persisted = JSON.parse(vi.mocked(localStorage.setItem).mock.calls.at(-1)![1])
+    expect(persisted.deploymentMode).toBe('remoteSsh')
+    expect(persisted.sshHost).toBe('lab')
+    expect(persisted.engineProfiles['ssh:lab'].sshHost).toBe('lab')
+  })
+
+  it('returns to the last Remote-SSH host when the mode is reselected', () => {
+    const store = useSettingsStore.getState()
+    store.setDeploymentMode('remoteSsh')
+    store.setSshHost('lab')
+    store.setDeploymentMode('localBundle')
+    useSettingsStore.getState().setDeploymentMode('remoteSsh')
+    const state = useSettingsStore.getState()
+    expect(state.sshHost).toBe('lab')
+    expect(state.activeEngineKey).toBe('ssh:lab')
+  })
 })

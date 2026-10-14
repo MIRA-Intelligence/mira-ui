@@ -162,7 +162,12 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       // Reachable and compatible, but our gateway token is missing or stale.
       return {
         status: 'unreachable',
-        message: t(usesDesktopEngineToken(base) ? 'engineTokenRejectedDesktop' : 'engineTokenRejectedRemote', lang),
+        message: t(
+          useSettingsStore.getState().deploymentMode === 'remoteSsh'
+            ? 'engineTokenRejectedSsh'
+            : usesDesktopEngineToken(base) ? 'engineTokenRejectedDesktop' : 'engineTokenRejectedRemote',
+          lang,
+        ),
         version,
         uptimeSeconds,
       }

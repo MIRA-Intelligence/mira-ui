@@ -7,7 +7,7 @@ import { join } from 'node:path'
 // localStorage is available — e.g. the update skip-list and a hint for which
 // engine deployment mode the user last used, so the boot-time local-engine
 // pre-warm can be skipped in remote mode.
-export type DeploymentModeHint = 'localBundle' | 'remoteManual'
+export type DeploymentModeHint = 'localBundle' | 'remoteManual' | 'remoteSsh'
 
 export interface AppState {
   skippedVersions: string[]
@@ -37,7 +37,7 @@ function sanitize(parsed: unknown): AppState {
     ? obj.skippedVersions.filter((v): v is string => typeof v === 'string')
     : []
   const lastDeploymentMode =
-    obj.lastDeploymentMode === 'localBundle' || obj.lastDeploymentMode === 'remoteManual'
+    obj.lastDeploymentMode === 'localBundle' || obj.lastDeploymentMode === 'remoteManual' || obj.lastDeploymentMode === 'remoteSsh'
       ? obj.lastDeploymentMode
       : null
   return { skippedVersions, lastDeploymentMode }

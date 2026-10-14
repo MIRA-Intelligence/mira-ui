@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { installRuntimeDiagnostics, recentDiagnostics } from './diagnostics'
 import {
+  forgetRemoteSshToken,
   installEngineAuth,
   redactEngineAuth,
   refreshDesktopEngineToken,
@@ -130,6 +131,58 @@ describe('engine gateway auth', () => {
 
     await fetch('http://127.0.0.1:18790/api/config')
     expect(onUnauthorized).toHaveBeenCalledWith('http://127.0.0.1:18790', true)
+  })
+
+  it('uses the Remote-SSH token from the main process for the tunnel origin only', async () => {
+    const SSH_TOKEN = 'ssh-token-0123456789abcd'
+    useSettingsStore.setState({
+      deploymentMode: 'remoteSsh',
+      sshHost: 'lab',
+      apiUrl: 'http://127.0.0.1:51000/api',
+      wsUrl: 'ws://127.0.0.1:51000/ws',
+      engineTokens: {},
+    })
+    const getRemoteSshToken = vi.fn(async () => SSH_TOKEN)
+    const getEngineToken = vi.fn(async () => LOCAL_TOKEN)
+    window.electronAPI = { platform: 'darwin', getRemoteSshToken, getEngineToken }
+    const nativeFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }))
+    vi.stubGlobal('fetch', nativeFetch)
+    disposers.push(installEngineAuth(vi.fn()))
+
+    await fetch('http://127.0.0.1:51000/api/projects')
+    expect(authHeader(nativeFetch.mock.calls[0])).toBe(`Bearer ${SSH_TOKEN}`)
+    expect(new URL(withEngineAuth('ws://127.0.0.1:51000/ws')).searchParams.get('access_token')).toBe(SSH_TOKEN)
+    expect(getEngineToken).not.toHaveBeenCalled()
+
+    await fetch('https://api.openai.example/v1/models')
+    expect(nativeFetch.mock.calls[1][1]).toBeUndefined()
+    // Never persisted with the other settings.
+    expect(JSON.stringify(useSettingsStore.getState().engineTokens)).not.toContain(SSH_TOKEN)
+  })
+
+  it('re-reads the Remote-SSH token once after a re-attach rotated it', async () => {
+    const FRESH = 'ssh-token-fresh-0123456789'
+    useSettingsStore.setState({ deploymentMode: 'remoteSsh', sshHost: 'lab', apiUrl: 'http://127.0.0.1:51000/api', engineTokens: {} })
+    const getRemoteSshToken = vi.fn().mockResolvedValueOnce('ssh-token-stale-0123456789').mockResolvedValueOnce(FRESH)
+    window.electronAPI = { platform: 'darwin', getRemoteSshToken }
+    const nativeFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => (
+      new Headers(init?.headers).get('Authorization') === `Bearer ${FRESH}`
+        ? Response.json({ ok: true })
+        : Response.json({ error: 'unauthorized' }, { status: 401 })
+    ))
+    vi.stubGlobal('fetch', nativeFetch)
+    const onUnauthorized = vi.fn()
+    disposers.push(installEngineAuth(onUnauthorized))
+
+    const response = await fetch('http://127.0.0.1:51000/api/config')
+    expect(response.status).toBe(200)
+    expect(getRemoteSshToken).toHaveBeenCalledTimes(2)
+    expect(onUnauthorized).not.toHaveBeenCalled()
+
+    forgetRemoteSshToken()
+    getRemoteSshToken.mockResolvedValueOnce(FRESH)
+    await fetch('http://127.0.0.1:51000/api/config')
+    expect(getRemoteSshToken).toHaveBeenCalledTimes(3)
   })
 
   it('treats a missing or failing desktop bridge as no token', async () => {

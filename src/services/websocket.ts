@@ -3,7 +3,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
 import { recordDiagnostic } from './diagnostics'
 import { createUuid } from '@/lib/uuid'
-import { refreshDesktopEngineToken, withEngineAuth } from './engineAuth'
+import { refreshManagedEngineTokens, withEngineAuth } from './engineAuth'
 
 type MessageHandler = (msg: WsResponse) => void
 type StatusHandler = (connected: boolean, detail: string | null) => void
@@ -114,8 +114,8 @@ class WebSocketClient {
   private _scheduleReconnect(): void {
     if (!this.shouldReconnect) return
     // A rejected handshake looks like any other close; pick up a rotated
-    // desktop token before trying again.
-    void refreshDesktopEngineToken()
+    // desktop or re-attached Remote-SSH token before trying again.
+    void refreshManagedEngineTokens()
     this.reconnectTimer = setTimeout(() => {
       this._connect()
     }, this.reconnectDelay)

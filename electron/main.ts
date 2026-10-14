@@ -1,10 +1,11 @@
 import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, powerMonitor, shell } from 'electron'
-import type { OpenDialogOptions } from 'electron'
+import type { IpcMainInvokeEvent, OpenDialogOptions } from 'electron'
 import { join } from 'path'
 import { LocalEngineManager } from './engine/manager'
 import { getLastDeploymentMode, setLastDeploymentMode } from './appState'
 import { registerUpdateCheck, scheduleBootCheck } from './updateCheck'
 import { isMainFrameSender, readGatewayToken } from './engineToken'
+import { RemoteSshManager, defaultRemoteSshDeps, readSshConfigHosts } from './remoteSsh'
 import { initializeDesktopDiagnostics, logDesktopEvent, pruneNativeCrashDumps, recordRendererDiagnostic } from './diagnostics'
 import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -35,6 +36,7 @@ if (hasSingleInstanceLock) {
   app.on('will-quit', () => diagnostics?.markCleanShutdown())
 }
 const engineManager = hasSingleInstanceLock ? new LocalEngineManager() : null
+const remoteSsh = hasSingleInstanceLock ? new RemoteSshManager(defaultRemoteSshDeps((event, fields) => logDesktopEvent(event, fields))) : null
 let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
@@ -81,10 +83,17 @@ function createWindow() {
 }
 
 function initializeApp() {
-  if (!engineManager) return
+  if (!engineManager || !remoteSsh) return
   // OS shutdown/logoff can end the process without emitting will-quit; Windows
   // reports it per window (session-end), Linux/macOS through powerMonitor.
   powerMonitor.on('shutdown', () => diagnostics?.markCleanShutdown())
+  // Remote-SSH: forwarded connections rarely survive sleep; ssh children must
+  // not outlive the app.
+  powerMonitor.on('resume', () => remoteSsh.handleResume())
+  app.on('will-quit', () => remoteSsh.dispose())
+  remoteSsh.onStatus((status) => {
+    if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('remote-ssh:status', status)
+  })
 
   let received = 0
   let dropped = 0
@@ -145,7 +154,7 @@ function initializeApp() {
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
     { role: 'fileMenu' }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
     { role: 'help', submenu: [{ label: 'Export diagnostics / 导出诊断文件', click: () => {
-      void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode !== 'remoteManual'))
+      void getLastDeploymentMode().then((mode) => exportDesktopDiagnostics(mode !== 'remoteManual' && mode !== 'remoteSsh'))
         .catch((error) => {
           logDesktopEvent('diagnostics.export_failed', {}, error)
           dialog.showErrorBox('MIRA diagnostics', exportFailureMessage(error))
@@ -156,6 +165,28 @@ function initializeApp() {
   ipcMain.handle('engine:bootstrap', async (_event, options?: { force?: boolean }) => engineManager.bootstrapLocalEngine(options))
   ipcMain.handle('engine:gateway-token', async (event) => (
     isMainFrameSender(event, mainWindow?.webContents) ? readGatewayToken(miraHome()) : null
+  ))
+  const requireMainFrame = (event: IpcMainInvokeEvent) => {
+    if (!isMainFrameSender(event, mainWindow?.webContents)) throw new Error('Invalid remote SSH sender')
+  }
+  ipcMain.handle('remote-ssh:connect', async (event, host: unknown) => {
+    requireMainFrame(event)
+    if (typeof host !== 'string') throw new Error('Invalid remote SSH host')
+    return remoteSsh.connect(host)
+  })
+  ipcMain.handle('remote-ssh:disconnect', async (event) => {
+    requireMainFrame(event)
+    return remoteSsh.disconnect()
+  })
+  ipcMain.handle('remote-ssh:status', async (event) => {
+    requireMainFrame(event)
+    return remoteSsh.status()
+  })
+  ipcMain.handle('remote-ssh:token', async (event) => (
+    isMainFrameSender(event, mainWindow?.webContents) ? remoteSsh.getToken() : null
+  ))
+  ipcMain.handle('remote-ssh:hosts', async (event) => (
+    isMainFrameSender(event, mainWindow?.webContents) ? readSshConfigHosts(app.getPath('home')) : []
   ))
   ipcMain.handle('engine:bootstrap-state', async () => engineManager.getState())
   ipcMain.handle('engine:status', async () => engineManager.status())
@@ -169,7 +200,7 @@ function initializeApp() {
     return engineManager.upgrade(packageName || 'mira-engine')
   })
   ipcMain.handle('engine:set-mode-hint', async (_event, mode: unknown) => {
-    if (mode !== 'localBundle' && mode !== 'remoteManual') return false
+    if (mode !== 'localBundle' && mode !== 'remoteManual' && mode !== 'remoteSsh') return false
     await setLastDeploymentMode(mode)
     return true
   })
@@ -201,7 +232,8 @@ function initializeApp() {
   // install/start a local service the user isn't connecting to — the renderer
   // still drives the actual connection from its persisted deploymentMode.
   void (async () => {
-    if ((await getLastDeploymentMode()) === 'remoteManual') return
+    const lastMode = await getLastDeploymentMode()
+    if (lastMode === 'remoteManual' || lastMode === 'remoteSsh') return
     await engineManager.bootstrapLocalEngine().catch((error) => logDesktopEvent('engine.prewarm_failed', {}, error))
   })()
   createWindow()

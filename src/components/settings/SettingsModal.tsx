@@ -22,6 +22,9 @@ import { useUiStore } from '@/stores/uiStore'
 import { EngineLifecycleControls } from './EngineLifecycleControls'
 import { exportDiagnostics, recordDiagnostic } from '@/services/diagnostics'
 import { isUnencryptedRemoteEndpoint, sshTunnelSuggestion } from '@/lib/connectionSecurity'
+import { connectRemoteSsh, disconnectRemoteSsh, hasRemoteSshBridge, listSshHosts } from '@/services/remoteSsh'
+import { useRemoteSshStore } from '@/stores/remoteSshStore'
+import { remoteSshMessage } from '@/lib/remoteSshMessages'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -34,6 +37,7 @@ type SettingsDraft = {
   apiUrl: string
   wsUrl: string
   engineToken: string
+  sshHost: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
@@ -68,6 +72,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
     engineToken: storedEngineToken(store, store.apiUrl),
+    sshHost: store.sshHost ?? '',
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
@@ -138,6 +143,8 @@ function latestStoredProfile(
 export function SettingsModal() {
   const store = useSettingsStore()
   const { settingsOpen, closeSettings } = store
+  const remoteSshStatus = useRemoteSshStore((s) => s.status)
+  const [sshHosts, setSshHosts] = useState<string[]>([])
   const openProviders = useUiStore((s) => s.openProviders)
   const showEngineWarning = store.engineStatus === 'incompatible' || store.engineStatus === 'unreachable' || store.engineStatus === 'setup_required' || store.localEnginePhase === 'error'
 
@@ -222,6 +229,9 @@ export function SettingsModal() {
     setFeedbackError(false)
     setFeedback(null)
     setWorkspaceEdited(false)
+    if (hasRemoteSshBridge()) void listSshHosts().then(setSshHosts)
+    // A Remote-SSH engine is only reachable while its tunnel is up.
+    if (store.deploymentMode === 'remoteSsh' && useRemoteSshStore.getState().status.phase !== 'connected') return
     void loadRuntimeConfig(store.deploymentMode, store.apiUrl, true, true)
   }, [settingsOpen])
 
@@ -229,6 +239,17 @@ export function SettingsModal() {
 
   const handleSwitchMode = (mode: DeploymentMode) => {
     if (busy) return
+    if (mode === 'remoteSsh') {
+      const storedSsh = latestStoredProfile(store.engineProfiles, 'remoteSsh')
+      setDraft((current) => ({
+        ...current,
+        deploymentMode: mode,
+        sshHost: current.sshHost || store.sshHost || storedSsh?.sshHost || '',
+        workspacePath: storedSsh?.workspacePath ?? current.workspacePath,
+      }))
+      setWorkspaceEdited(false)
+      return
+    }
     const storedRemote = mode === 'remoteManual'
       ? latestStoredProfile(store.engineProfiles, 'remoteManual')
       : null
@@ -280,6 +301,12 @@ export function SettingsModal() {
       store.setStreamResponses(draft.streamResponses)
       store.setSendShortcut(draft.sendShortcut)
       store.setReceivePrereleases(draft.receivePrereleases)
+
+      if (draft.deploymentMode === 'remoteSsh') {
+        await saveRemoteSsh(nextWorkspacePath)
+        closeSettings()
+        return
+      }
 
       if (!local && (!nextApiUrl || !nextWsUrl)) {
         throw new Error(t('settingsRemoteRequiresUrls', curLang))
@@ -346,6 +373,48 @@ export function SettingsModal() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const sameSshEngine = (host: string) => store.deploymentMode === 'remoteSsh' && store.sshHost.trim() === host
+
+  // Switching to (or between) Remote-SSH hosts only updates settings; the
+  // connection itself is driven by useWebSocket. The workspace root can only
+  // be moved on an engine that is connected right now.
+  const saveRemoteSsh = async (nextWorkspacePath: string) => {
+    const host = draft.sshHost.trim()
+    if (!host) throw new Error(t('sshHostRequired', curLang))
+    if (sameSshEngine(host)) {
+      const connected = remoteSshStatus.phase === 'connected' && remoteSshStatus.host === host
+      if (connected && workspaceEdited && customProjectDirsAllowed
+        && workspacePathChanged(store.workspacePath, nextWorkspacePath)) {
+        const payload = await updateProjectsRoot(nextWorkspacePath, store.apiUrl)
+        resetWorkspaceScopedState()
+        store.setRuntimeConfig(payload)
+        await useProjectStore.getState().loadProjects({ replaceMissing: true, refreshAll: true })
+      }
+      return
+    }
+    resetWorkspaceScopedState()
+    store.setDeploymentMode('remoteSsh')
+    store.setSshHost(host)
+  }
+
+  const handleSshConnect = async () => {
+    const host = draft.sshHost.trim()
+    setFeedback(null)
+    setFeedbackError(false)
+    if (!host) {
+      setFeedbackError(true)
+      setFeedback(t('sshHostRequired', curLang))
+      return
+    }
+    if (!sameSshEngine(host)) {
+      resetWorkspaceScopedState()
+      store.setDeploymentMode('remoteSsh')
+      store.setSshHost(host)
+      return
+    }
+    useRemoteSshStore.getState().setStatus(await connectRemoteSsh(host))
   }
 
   const handleRepairEngine = async () => {
@@ -452,6 +521,8 @@ export function SettingsModal() {
   }
 
   const localMode = draft.deploymentMode === 'localBundle'
+  const sshMode = draft.deploymentMode === 'remoteSsh'
+  const directMode = draft.deploymentMode === 'remoteManual'
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center">
@@ -471,19 +542,12 @@ export function SettingsModal() {
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
             <div className="space-y-6">
-              <Section title="Deployment">
+              <Section title={t('deploymentModeTitle', curLang)}>
                 <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)]">Deployment Mode</p>
-                      <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
-                        {localMode
-                          ? 'Bundle mode keeps MIRA and mira-engine on this machine, and starts the local engine automatically.'
-                          : 'Remote mode only connects to an already-deployed mira endpoint. Install mira separately on the remote server.'}
-                      </p>
-                    </div>
-                    <DeploymentModeSwitch mode={draft.deploymentMode} onChange={handleSwitchMode} />
-                  </div>
+                  <DeploymentModeSelector mode={draft.deploymentMode} onChange={handleSwitchMode} lang={curLang} />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
+                    {t(localMode ? 'deploymentLocalHint' : sshMode ? 'deploymentSshHint' : 'deploymentDirectHint', curLang)}
+                  </p>
                 </div>
               </Section>
 
@@ -630,7 +694,45 @@ export function SettingsModal() {
                 </ActionButton>
               </Section>
 
-              {!localMode && (
+              {sshMode && (
+                <Section title={t('connection', curLang)}>
+                  <Label text={t('sshHostLabel', curLang)} />
+                  <input
+                    value={draft.sshHost}
+                    list="mira-ssh-hosts"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={t('sshHostPlaceholder', curLang)}
+                    onChange={(e) => setDraft((current) => ({ ...current, sshHost: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <datalist id="mira-ssh-hosts">
+                    {sshHosts.map((host) => <option key={host} value={host} />)}
+                  </datalist>
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                    {t('sshHostHint', curLang)}
+                  </p>
+                  <RemoteSshStatusLine
+                    lang={curLang}
+                    host={draft.sshHost.trim()}
+                    active={sameSshEngine(draft.sshHost.trim())}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <ActionButton disabled={busy || !draft.sshHost.trim()} onClick={() => void handleSshConnect()}>
+                      {sameSshEngine(draft.sshHost.trim()) && remoteSshStatus.phase === 'error'
+                        ? t('sshReconnect', curLang)
+                        : t('sshConnect', curLang)}
+                    </ActionButton>
+                    {sameSshEngine(draft.sshHost.trim()) && remoteSshStatus.phase !== 'idle' && (
+                      <ActionButton disabled={busy} onClick={() => void disconnectRemoteSsh()}>
+                        {t('sshDisconnect', curLang)}
+                      </ActionButton>
+                    )}
+                  </div>
+                </Section>
+              )}
+
+              {directMode && (
                 <Section title={t('connection', curLang)}>
                   <Label text={t('apiUrl', curLang)} />
                   <input
@@ -786,38 +888,53 @@ function Label({ text, className }: { text: string; className?: string }) {
   )
 }
 
-function DeploymentModeSwitch(
-  { mode, onChange }: { mode: DeploymentMode; onChange: (mode: DeploymentMode) => void },
+function DeploymentModeSelector(
+  { mode, onChange, lang }: { mode: DeploymentMode; onChange: (mode: DeploymentMode) => void; lang: Language },
 ) {
-  const local = mode === 'localBundle'
-
+  const options: Array<{ value: DeploymentMode; label: string; deprecated?: boolean }> = [
+    { value: 'localBundle', label: t('deploymentLocal', lang) },
+    // Remote-SSH needs the desktop app's ssh bridge.
+    ...(hasRemoteSshBridge() || mode === 'remoteSsh' ? [{ value: 'remoteSsh' as const, label: t('deploymentSsh', lang) }] : []),
+    { value: 'remoteManual', label: t('deploymentDirect', lang), deprecated: true },
+  ]
   return (
-    <div className="flex items-center gap-3 shrink-0">
-      <span className={cn('text-xs font-medium transition-colors', local ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-        Local
-      </span>
-      <button
-        type="button"
-        role="switch"
-        aria-label="Deployment mode"
-        aria-checked={!local}
-        onClick={() => onChange(local ? 'remoteManual' : 'localBundle')}
-        className={cn(
-          'inline-flex h-6 w-11 items-center rounded-full p-0.5 transition-colors',
-          local ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-bg-tertiary)]',
-        )}
-      >
-        <span
+    <div role="radiogroup" aria-label={t('deploymentModeTitle', lang)} className="flex flex-wrap gap-2">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={mode === option.value}
+          onClick={() => onChange(option.value)}
           className={cn(
-            'block h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200',
-            local ? 'translate-x-0' : 'translate-x-5',
+            'flex-1 min-w-[120px] py-2 px-2 text-xs rounded-lg border transition-colors',
+            mode === option.value
+              ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+              : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:border-[var(--color-text-muted)]',
           )}
-        />
-      </button>
-      <span className={cn('text-xs font-medium transition-colors', !local ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-muted)]')}>
-        Remote
-      </span>
+        >
+          {option.label}
+          {option.deprecated && (
+            <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">({t('deploymentDeprecated', lang)})</span>
+          )}
+        </button>
+      ))}
     </div>
+  )
+}
+
+function RemoteSshStatusLine({ lang, host, active }: { lang: Language; host: string; active: boolean }) {
+  const status = useRemoteSshStore((s) => s.status)
+  // Status belongs to the host the store is connected to; an edited, not yet
+  // connected host has no status to show.
+  if (!active || status.phase === 'idle') return null
+  const tone = status.phase === 'error'
+    ? 'text-red-300'
+    : status.phase === 'connected' ? 'text-[var(--color-text-secondary)]' : 'text-amber-300'
+  return (
+    <p role="status" className={cn('mt-2 text-[11px] leading-relaxed break-words', tone)}>
+      {remoteSshMessage(status, lang, host)}
+    </p>
   )
 }
 

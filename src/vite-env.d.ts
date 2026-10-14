@@ -26,8 +26,14 @@ interface Window {
       lastCommand: string[] | null
       error: string | null
     }>
-    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual') => Promise<boolean>
+    setEngineModeHint?: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => Promise<boolean>
     getEngineToken?: () => Promise<string | null>
+    remoteSshConnect?: (host: string) => Promise<import('./services/remoteSsh').RemoteSshStatus>
+    remoteSshDisconnect?: () => Promise<import('./services/remoteSsh').RemoteSshStatus>
+    remoteSshStatus?: () => Promise<import('./services/remoteSsh').RemoteSshStatus>
+    getRemoteSshToken?: () => Promise<string | null>
+    listSshHosts?: () => Promise<string[]>
+    onRemoteSshStatus?: (listener: (status: unknown) => void) => () => void
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string

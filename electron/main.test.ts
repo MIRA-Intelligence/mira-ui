@@ -45,12 +45,17 @@ const electronMock = vi.hoisted(() => {
     },
     ipcMain: {
       handle: vi.fn(),
+      on: vi.fn(),
     },
     shell: {
       openExternal: vi.fn(async (_url: string) => {}),
     },
     powerMonitor: {
       on: vi.fn(),
+    },
+    Menu: {
+      setApplicationMenu: vi.fn(),
+      buildFromTemplate: vi.fn(() => ({})),
     },
   }
 })
@@ -62,6 +67,23 @@ vi.mock('electron', () => ({
   ipcMain: electronMock.ipcMain,
   shell: electronMock.shell,
   powerMonitor: electronMock.powerMonitor,
+  Menu: electronMock.Menu,
+}))
+
+const remoteSshMock = vi.hoisted(() => ({
+  connect: vi.fn(async (host: string) => ({ phase: 'connected', host })),
+  disconnect: vi.fn(() => ({ phase: 'idle' })),
+  status: vi.fn(() => ({ phase: 'idle' })),
+  getToken: vi.fn(() => 'remote-token-0123456789'),
+  onStatus: vi.fn(),
+  handleResume: vi.fn(),
+  dispose: vi.fn(),
+}))
+
+vi.mock('./remoteSsh', () => ({
+  RemoteSshManager: class { constructor() { return remoteSshMock } },
+  defaultRemoteSshDeps: vi.fn(() => ({})),
+  readSshConfigHosts: vi.fn(async () => ['lab']),
 }))
 
 vi.mock('./engine/manager', () => ({
@@ -172,5 +194,39 @@ describe('Electron single-instance lifecycle', () => {
     const { initializeDesktopDiagnostics } = await import('./diagnostics')
     const diagnostics = vi.mocked(initializeDesktopDiagnostics).mock.results[0]?.value as { markCleanShutdown: () => void }
     expect(diagnostics.markCleanShutdown).toHaveBeenCalled()
+  })
+
+  it('serves Remote-SSH IPC only to the main window top-level frame', async () => {
+    const { getLastDeploymentMode } = await import('./appState')
+    vi.mocked(getLastDeploymentMode).mockResolvedValue('remoteSsh')
+    electronMock.app.whenReady.mockReturnValueOnce(Promise.resolve())
+    Object.assign(electronMock.app, { getPath: vi.fn(() => '/home/test') })
+    await import('./main')
+    await vi.waitFor(() => expect(electronMock.windows).toHaveLength(1))
+
+    const handlers = new Map(vi.mocked(electronMock.ipcMain.handle).mock.calls as Array<[string, (...args: unknown[]) => unknown]>)
+    const window = electronMock.windows[0] as unknown as { webContents: { mainFrame?: object } }
+    const mainFrame = {}
+    window.webContents.mainFrame = mainFrame
+    const trusted = { sender: window.webContents, senderFrame: mainFrame }
+    const subframe = { sender: window.webContents, senderFrame: {} }
+
+    expect(await handlers.get('remote-ssh:connect')?.(trusted, 'lab')).toEqual({ phase: 'connected', host: 'lab' })
+    expect(remoteSshMock.connect).toHaveBeenCalledWith('lab')
+    await expect(handlers.get('remote-ssh:connect')?.(subframe, 'lab')).rejects.toThrow('Invalid remote SSH sender')
+    await expect(handlers.get('remote-ssh:connect')?.(trusted, 42)).rejects.toThrow('Invalid remote SSH host')
+    expect(remoteSshMock.connect).toHaveBeenCalledOnce()
+
+    expect(await handlers.get('remote-ssh:token')?.(trusted)).toBe('remote-token-0123456789')
+    expect(await handlers.get('remote-ssh:token')?.(subframe)).toBeNull()
+    expect(await handlers.get('remote-ssh:hosts')?.(trusted)).toEqual(['lab'])
+    expect(await handlers.get('remote-ssh:hosts')?.(subframe)).toEqual([])
+    await expect(handlers.get('remote-ssh:disconnect')?.(subframe)).rejects.toThrow()
+
+    const onResume = vi.mocked(electronMock.powerMonitor.on).mock.calls.find(([event]) => event === 'resume')?.[1] as () => void
+    onResume()
+    expect(remoteSshMock.handleResume).toHaveBeenCalled()
+    electronMock.handlers.get('will-quit')?.()
+    expect(remoteSshMock.dispose).toHaveBeenCalled()
   })
 })

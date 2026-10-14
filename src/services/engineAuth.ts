@@ -9,6 +9,9 @@ const UNAUTHENTICATED_PATHS = new Set(['/health', '/version', '/api/health', '/a
 
 let desktopToken: string | null = null
 let desktopTokenRead: Promise<string | null> | null = null
+// Remote-SSH: the main process holds the token for the forwarded engine.
+let sshToken: string | null = null
+let sshTokenRead: Promise<string | null> | null = null
 let installed = false
 
 // Engine tokens are keyed by gateway origin: the API and WebSocket endpoints of
@@ -36,8 +39,41 @@ export async function refreshDesktopEngineToken(): Promise<string | null> {
   return desktopTokenRead
 }
 
+function usesRemoteSshToken(origin: string): boolean {
+  const settings = useSettingsStore.getState()
+  return settings.deploymentMode === 'remoteSsh'
+    && typeof window !== 'undefined'
+    && typeof window.electronAPI?.getRemoteSshToken === 'function'
+    && origin === engineOrigin(settings.apiUrl)
+}
+
+export async function refreshRemoteSshToken(): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof window.electronAPI?.getRemoteSshToken !== 'function') return null
+  sshTokenRead ??= window.electronAPI.getRemoteSshToken()
+    .then((token) => (typeof token === 'string' && token ? token : null))
+    .catch(() => null)
+    .then((token) => {
+      sshToken = token
+      sshTokenRead = null
+      return token
+    })
+  return sshTokenRead
+}
+
+// Called when the Remote-SSH connection changes; the next request re-reads.
+export function forgetRemoteSshToken(): void {
+  sshToken = null
+}
+
+// Re-read every token the desktop app manages (local engine file, Remote-SSH).
+export function refreshManagedEngineTokens(): Promise<unknown> {
+  const settings = useSettingsStore.getState()
+  return settings.deploymentMode === 'remoteSsh' ? refreshRemoteSshToken() : refreshDesktopEngineToken()
+}
+
 function usesDesktopToken(origin: string): boolean {
   if (origin !== LOCAL_ENGINE_ORIGIN || !hasDesktopTokenBridge()) return false
+  if (usesRemoteSshToken(origin)) return false
   const settings = useSettingsStore.getState()
   // A remote profile pointing at the local engine may carry its own token;
   // otherwise the desktop app can read the local engine's token file.
@@ -53,6 +89,7 @@ export function usesDesktopEngineToken(value: string): boolean {
 export function engineTokenFor(value: string): string | null {
   const origin = engineOrigin(value)
   if (!origin) return null
+  if (usesRemoteSshToken(origin)) return sshToken
   if (usesDesktopToken(origin)) return desktopToken
   return useSettingsStore.getState().engineTokens[origin] || null
 }
@@ -60,6 +97,7 @@ export function engineTokenFor(value: string): string | null {
 async function resolveEngineToken(value: string): Promise<string | null> {
   const origin = engineOrigin(value)
   if (!origin) return null
+  if (usesRemoteSshToken(origin)) return sshToken ?? refreshRemoteSshToken()
   if (usesDesktopToken(origin)) return desktopToken ?? refreshDesktopEngineToken()
   return useSettingsStore.getState().engineTokens[origin] || null
 }
@@ -138,14 +176,17 @@ export function installEngineAuth(onUnauthorized: EngineUnauthorizedHandler): ()
     let response = await originalFetch.call(window, ...authorized(input, init, token))
     if (response.status !== 401) return response
     const desktop = usesDesktopToken(url.origin)
-    if (desktop && replayable) {
-      const fresh = await refreshDesktopEngineToken()
+    const remoteSsh = usesRemoteSshToken(url.origin)
+    if ((desktop || remoteSsh) && replayable) {
+      // The engine may have restarted with a new token (rotation, or a
+      // Remote-SSH re-attach); re-read once before reporting the failure.
+      const fresh = await (remoteSsh ? refreshRemoteSshToken() : refreshDesktopEngineToken())
       if (fresh && fresh !== token) {
         response = await originalFetch.call(window, ...authorized(input, init, fresh))
         if (response.status !== 401) return response
       }
     }
-    onUnauthorized(url.origin, desktop)
+    onUnauthorized(url.origin, desktop || remoteSsh)
     return response
   }
   window.fetch = wrappedFetch
@@ -158,4 +199,6 @@ export function installEngineAuth(onUnauthorized: EngineUnauthorizedHandler): ()
 export function resetEngineAuthForTests(): void {
   desktopToken = null
   desktopTokenRead = null
+  sshToken = null
+  sshTokenRead = null
 }

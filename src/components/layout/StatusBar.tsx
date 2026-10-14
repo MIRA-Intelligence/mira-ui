@@ -39,7 +39,9 @@ export function StatusBar() {
   }, [connected, skillSessionId, workspace, apiUrl, loadUsage])
 
   const authMessage = engineAuthRejected
-    ? t(deploymentMode === 'remoteManual' ? 'engineTokenRejectedRemote' : 'engineTokenRejectedDesktop', lang)
+    ? t(deploymentMode === 'remoteManual'
+      ? 'engineTokenRejectedRemote'
+      : deploymentMode === 'remoteSsh' ? 'engineTokenRejectedSsh' : 'engineTokenRejectedDesktop', lang)
     : null
   const bannerMessage = authMessage || connectionMessage || engineMessage
   const showEngineWarning = Boolean(authMessage) || (Boolean(bannerMessage) && (
@@ -48,7 +50,7 @@ export function StatusBar() {
       || engineStatus === 'setup_required'
       || localEnginePhase === 'error'
       || !connected
-      || deploymentMode === 'remoteManual'
+      || deploymentMode !== 'localBundle'
   ))
 
   const engineLabel = useMemo(() => {
