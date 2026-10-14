@@ -137,7 +137,7 @@ describe('useWebSocket', () => {
 
     beforeEach(() => {
       remoteSshMock.listeners = []
-      useSettingsStore.setState({ deploymentMode: 'remoteSsh', sshHost: 'lab', apiUrl: '', wsUrl: '' })
+      useSettingsStore.setState({ deploymentMode: 'remoteSsh', sshHost: 'lab', apiUrl: '', wsUrl: '', sshManuallyDisconnected: false })
       vi.mocked(probeEngineCompatibility).mockResolvedValue({ status: 'compatible', message: 'ok', version: '0.5.0', uptimeSeconds: null })
     })
 
@@ -155,6 +155,19 @@ describe('useWebSocket', () => {
       })
       expect(bootstrapLocalEngine).not.toHaveBeenCalled()
       await waitFor(() => expect(websocketMock.connect).toHaveBeenCalled())
+    })
+
+    it('does not log in again after a manual disconnect until the user connects', async () => {
+      // Endpoints of the tunnel from the previous session, as persisted.
+      useSettingsStore.setState({ sshManuallyDisconnected: true, apiUrl: 'http://127.0.0.1:51000/api', wsUrl: 'ws://127.0.0.1:51000/ws' })
+
+      render(<HookHarness />)
+
+      await waitFor(() => expect(useSettingsStore.getState().engineStatus).toBe('unreachable'))
+      expect(useSettingsStore.getState().connectionMessage).toContain('Disconnected from lab')
+      expect(remoteSshMock.connect).not.toHaveBeenCalled()
+      expect(probeEngineCompatibility).not.toHaveBeenCalled()
+      expect(websocketMock.connect).not.toHaveBeenCalled()
     })
 
     it('reports SSH failures without probing', async () => {

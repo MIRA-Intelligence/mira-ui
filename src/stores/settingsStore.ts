@@ -76,6 +76,10 @@ interface SettingsState {
   wsUrl: string
   sshHost: string
   sshMiraCommand: string
+  // Set when the user clicks Disconnect, so the app does not log in to the SSH
+  // host again on its own (e.g. at the next launch) until they click Connect.
+  // Unexpected drops leave it unset and keep reconnecting automatically.
+  sshManuallyDisconnected: boolean
   showProgressMessages: boolean
   showToolCallHistory: boolean
   // Stream assistant replies token-by-token. Default on for responsiveness.
@@ -110,6 +114,7 @@ interface SettingsState {
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setSshHost: (host: string) => void
   setSshMiraCommand: (command: string) => void
+  setSshManuallyDisconnected: (value: boolean) => void
   setEngineToken: (apiUrl: string, token: string) => void
   setEngineAuthRejected: (rejected: boolean) => void
   setShowProgressMessages: (v: boolean) => void
@@ -385,6 +390,9 @@ function loadPersisted(): Partial<SettingsState> {
     if (typeof parsed.sshHost === 'string') {
       sanitized.sshHost = parsed.sshHost
     }
+    if (typeof parsed.sshManuallyDisconnected === 'boolean') {
+      sanitized.sshManuallyDisconnected = parsed.sshManuallyDisconnected
+    }
 
     const apiUrl = typeof parsed.apiUrl === 'string' ? parsed.apiUrl : undefined
     if (apiUrl && !isStaleLocalhost(apiUrl)) {
@@ -431,6 +439,7 @@ function persist(state: SettingsState) {
     apiUrl,
     wsUrl,
     sshHost,
+    sshManuallyDisconnected,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -449,6 +458,7 @@ function persist(state: SettingsState) {
     apiUrl,
     wsUrl,
     sshHost,
+    sshManuallyDisconnected,
     showProgressMessages,
     showToolCallHistory,
     streamResponses,
@@ -493,6 +503,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   wsUrl: seededInitialProfile.wsUrl,
   sshHost: seededInitialProfile.sshHost ?? initialSshHost,
   sshMiraCommand: seededInitialProfile.sshMiraCommand,
+  sshManuallyDisconnected: saved.sshManuallyDisconnected ?? false,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
@@ -683,6 +694,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const nextState = { ...state, sshMiraCommand: next }
       return { sshMiraCommand: next, engineProfiles: profilesWithCurrent(nextState) }
     })
+    persist(get())
+  },
+  setSshManuallyDisconnected: (value) => {
+    if (get().sshManuallyDisconnected === value) return
+    set({ sshManuallyDisconnected: value })
     persist(get())
   },
   setEngineToken: (apiUrl, token) => {

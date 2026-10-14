@@ -279,6 +279,28 @@ describe('SettingsModal remote runtime config', () => {
       expect(window.electronAPI?.remoteSshDisconnect).toHaveBeenCalled()
     })
 
+    it('remembers a manual disconnect until the user connects again', async () => {
+      vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/home/ana/mira', '/home/ana/.mira/config.json'))
+      useSettingsStore.getState().setDeploymentMode('remoteSsh')
+      useSettingsStore.getState().setSshHost('lab')
+      useSettingsStore.getState().setSshManuallyDisconnected(false)
+      useRemoteSshStore.setState({ status: {
+        ...IDLE_REMOTE_SSH_STATUS, phase: 'connected', host: 'lab', localPort: 51000, version: '0.5.0',
+      } })
+      useSettingsStore.getState().openSettings()
+      render(<SettingsModal />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Disconnect' }))
+      await waitFor(() => expect(useSettingsStore.getState().sshManuallyDisconnected).toBe(true))
+      expect(window.electronAPI?.remoteSshDisconnect).toHaveBeenCalled()
+      await waitFor(() => expect(useSettingsStore.getState().engineStatus).toBe('unreachable'))
+      expect(useSettingsStore.getState().connectionMessage).toContain('Disconnected from lab')
+
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+      expect(useSettingsStore.getState().sshManuallyDisconnected).toBe(false)
+      await waitFor(() => expect(vi.mocked(window.electronAPI!.remoteSshConnect!).mock.calls.at(-1)?.[0]).toBe('lab'))
+    })
+
     it('focuses the remote mira command when the install dialog asks for a manual path', async () => {
       useSettingsStore.getState().setDeploymentMode('remoteSsh')
       useSettingsStore.getState().setSshHost('lab')

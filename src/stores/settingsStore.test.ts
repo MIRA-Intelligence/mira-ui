@@ -265,4 +265,18 @@ describe('settingsStore', () => {
     expect(state.sshHost).toBe('lab')
     expect(state.activeEngineKey).toBe('ssh:lab')
   })
+
+  it('remembers a manual Remote-SSH disconnect across launches', async () => {
+    useSettingsStore.getState().setDeploymentMode('remoteSsh')
+    useSettingsStore.getState().setSshHost('lab')
+    expect(useSettingsStore.getState().sshManuallyDisconnected).toBe(false)
+    useSettingsStore.getState().setSshManuallyDisconnected(true)
+
+    const persisted = JSON.parse(vi.mocked(localStorage.setItem).mock.calls.at(-1)![1])
+    expect(persisted.sshManuallyDisconnected).toBe(true)
+
+    vi.resetModules()
+    const reloaded = (await import('./settingsStore')).useSettingsStore.getState()
+    expect(reloaded).toMatchObject({ deploymentMode: 'remoteSsh', sshHost: 'lab', sshManuallyDisconnected: true })
+  })
 })

@@ -171,6 +171,11 @@ export function useWebSocket() {
           }
           if (!hasRemoteSshBridge()) return unreachable(t('sshErrorUnavailable', lang))
           if (!sshHost.trim()) return unreachable(t('sshHostRequired', lang))
+          // After a manual Disconnect, wait for the user to click Connect
+          // instead of logging in again (and asking for a password) on launch.
+          if (useSettingsStore.getState().sshManuallyDisconnected) {
+            return unreachable(t('sshStatusDisconnected', lang, { host: sshHost.trim() }))
+          }
           setConnectionMessage(t('sshStatusConnecting', lang, { host: sshHost.trim() }))
           // Idempotent: attach again re-reads port and token, so a changed
           // remote command or a restarted engine is picked up here.

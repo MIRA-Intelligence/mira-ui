@@ -412,6 +412,7 @@ export function SettingsModal() {
       return
     }
     resetWorkspaceScopedState()
+    store.setSshManuallyDisconnected(false)
     store.setDeploymentMode('remoteSsh')
     store.setSshHost(host)
     store.setSshMiraCommand(draft.sshMiraCommand)
@@ -426,6 +427,7 @@ export function SettingsModal() {
       setFeedback(t('sshHostRequired', curLang))
       return
     }
+    store.setSshManuallyDisconnected(false)
     if (!sameSshEngine(host)) {
       resetWorkspaceScopedState()
       store.setDeploymentMode('remoteSsh')
@@ -435,6 +437,16 @@ export function SettingsModal() {
     }
     store.setSshMiraCommand(draft.sshMiraCommand)
     useRemoteSshStore.getState().setStatus(await connectRemoteSsh(host, draft.sshMiraCommand))
+  }
+
+  // Remembered across launches: the app stays disconnected until Connect.
+  const handleSshDisconnect = async () => {
+    const host = store.sshHost.trim()
+    store.setSshManuallyDisconnected(true)
+    useRemoteSshStore.getState().setStatus(await disconnectRemoteSsh())
+    const message = t('sshStatusDisconnected', curLang, { host })
+    store.setEngineBootstrap({ status: 'unreachable', message, version: null })
+    store.setConnectionMessage(message)
   }
 
   const handleRepairEngine = async () => {
@@ -758,7 +770,7 @@ export function SettingsModal() {
                         : t('sshConnect', curLang)}
                     </ActionButton>
                     {sameSshEngine(draft.sshHost.trim()) && remoteSshStatus.phase !== 'idle' && (
-                      <ActionButton disabled={busy} onClick={() => void disconnectRemoteSsh()}>
+                      <ActionButton disabled={busy} onClick={() => void handleSshDisconnect()}>
                         {t('sshDisconnect', curLang)}
                       </ActionButton>
                     )}
