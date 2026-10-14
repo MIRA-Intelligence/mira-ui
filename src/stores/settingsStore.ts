@@ -18,6 +18,8 @@ export interface EngineProfile {
   // The tunnel's local port can change between connections, so Remote-SSH
   // profiles are keyed by host rather than by URL.
   sshHost: string | null
+  // Remote path of the mira CLI on that host; '' means `mira` on the PATH.
+  sshMiraCommand: string
   workspacePath: string
   runtimeConfig: RuntimeConfigPayload | null
   engineVersion: string | null
@@ -73,6 +75,7 @@ interface SettingsState {
   apiUrl: string
   wsUrl: string
   sshHost: string
+  sshMiraCommand: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   // Stream assistant replies token-by-token. Default on for responsiveness.
@@ -106,6 +109,7 @@ interface SettingsState {
   setWsUrl: (u: string) => void
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
   setSshHost: (host: string) => void
+  setSshMiraCommand: (command: string) => void
   setEngineToken: (apiUrl: string, token: string) => void
   setEngineAuthRejected: (rejected: boolean) => void
   setShowProgressMessages: (v: boolean) => void
@@ -214,6 +218,7 @@ function createEngineProfile(input: {
   apiUrl: string
   wsUrl: string
   sshHost?: string | null
+  sshMiraCommand?: string | null
   workspacePath?: string
   runtimeConfig?: RuntimeConfigPayload | null
   engineVersion?: string | null
@@ -228,6 +233,7 @@ function createEngineProfile(input: {
     apiUrl: input.apiUrl,
     wsUrl: input.wsUrl,
     sshHost,
+    sshMiraCommand: input.deploymentMode === 'remoteSsh' ? (input.sshMiraCommand ?? '').trim() : '',
     workspacePath: input.workspacePath ?? (runtimeConfig ? workspaceFromRuntime(runtimeConfig) : DEFAULT_WORKSPACE_PATH),
     runtimeConfig,
     engineVersion: input.engineVersion ?? null,
@@ -249,6 +255,7 @@ function sanitizeEngineProfile(value: unknown): EngineProfile | null {
     apiUrl,
     wsUrl,
     sshHost: typeof value.sshHost === 'string' ? value.sshHost : null,
+    sshMiraCommand: typeof value.sshMiraCommand === 'string' ? value.sshMiraCommand : '',
     workspacePath: typeof value.workspacePath === 'string' ? value.workspacePath : undefined,
     runtimeConfig,
     engineVersion: typeof value.engineVersion === 'string' ? value.engineVersion : null,
@@ -269,6 +276,7 @@ function currentProfileFromState(state: SettingsState): EngineProfile {
     apiUrl: state.apiUrl,
     wsUrl: state.wsUrl,
     sshHost: state.sshHost,
+    sshMiraCommand: state.sshMiraCommand,
     workspacePath: state.workspacePath,
     runtimeConfig: state.runtimeConfig,
     engineVersion: state.engineVersion,
@@ -484,6 +492,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   apiUrl: seededInitialProfile.apiUrl,
   wsUrl: seededInitialProfile.wsUrl,
   sshHost: seededInitialProfile.sshHost ?? initialSshHost,
+  sshMiraCommand: seededInitialProfile.sshMiraCommand,
   showProgressMessages: saved.showProgressMessages ?? true,
   showToolCallHistory: saved.showToolCallHistory ?? DEFAULT_SHOW_TOOL_CALL_HISTORY,
   streamResponses: saved.streamResponses ?? true,
@@ -509,6 +518,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         apiUrl: state.apiUrl,
         wsUrl: state.wsUrl,
         sshHost: state.sshHost,
+        sshMiraCommand: state.sshMiraCommand,
         workspacePath: p,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -548,6 +558,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         return {
           deploymentMode: mode,
           sshHost: host,
+          sshMiraCommand: profile.sshMiraCommand,
           activeEngineKey: profile.key,
           engineProfiles: { ...profiles, [profile.key]: profile },
           apiUrl: profile.apiUrl,
@@ -587,6 +598,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         apiUrl: u,
         wsUrl: state.wsUrl,
         sshHost: state.sshHost,
+        sshMiraCommand: state.sshMiraCommand,
         workspacePath: state.workspacePath,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -606,6 +618,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         apiUrl: state.apiUrl,
         wsUrl: u,
         sshHost: state.sshHost,
+        sshMiraCommand: state.sshMiraCommand,
         workspacePath: state.workspacePath,
         runtimeConfig: state.runtimeConfig,
         engineVersion: state.engineVersion,
@@ -651,6 +664,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const profile = selectProfile(profiles, 'remoteSsh', '', '', DEFAULT_WORKSPACE_PATH, nextHost)
       return {
         sshHost: nextHost,
+        sshMiraCommand: profile.sshMiraCommand,
         activeEngineKey: profile.key,
         engineProfiles: { ...profiles, [profile.key]: profile },
         apiUrl: profile.apiUrl,
@@ -659,6 +673,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         runtimeConfig: profile.runtimeConfig,
         runtimeConfigLoaded: Boolean(profile.runtimeConfig),
       }
+    })
+    persist(get())
+  },
+  setSshMiraCommand: (command) => {
+    set((state) => {
+      const next = command.trim()
+      if (state.sshMiraCommand === next) return state
+      const nextState = { ...state, sshMiraCommand: next }
+      return { sshMiraCommand: next, engineProfiles: profilesWithCurrent(nextState) }
     })
     persist(get())
   },
@@ -751,6 +774,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         apiUrl: state.apiUrl,
         wsUrl: state.wsUrl,
         sshHost: state.sshHost,
+        sshMiraCommand: state.sshMiraCommand,
         workspacePath,
         runtimeConfig: payload,
         engineVersion: state.engineVersion,

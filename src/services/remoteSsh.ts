@@ -6,6 +6,7 @@ export type RemoteSshPhase = 'idle' | 'connecting' | 'connected' | 'reconnecting
 
 export type RemoteSshErrorCode =
   | 'invalid_host'
+  | 'invalid_command'
   | 'auth_required'
   | 'host_key'
   | 'ssh_failed'
@@ -74,9 +75,14 @@ const unavailable: RemoteSshStatus = {
   error: { code: 'unavailable', message: 'Remote-SSH requires the MIRA desktop app.' },
 }
 
-export async function connectRemoteSsh(host: string): Promise<RemoteSshStatus> {
+// Default remote CLI; a host can override it (e.g. /opt/mira/bin/mira) when
+// `mira` is not on the login-shell PATH there.
+export const DEFAULT_MIRA_COMMAND = 'mira'
+
+export async function connectRemoteSsh(host: string, miraCommand?: string): Promise<RemoteSshStatus> {
   if (!hasRemoteSshBridge()) return unavailable
-  return sanitizeRemoteSshStatus(await window.electronAPI!.remoteSshConnect!(host))
+  const command = miraCommand?.trim() || undefined
+  return sanitizeRemoteSshStatus(await window.electronAPI!.remoteSshConnect!(host, command))
 }
 
 export async function disconnectRemoteSsh(): Promise<RemoteSshStatus> {

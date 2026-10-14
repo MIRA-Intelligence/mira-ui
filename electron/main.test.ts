@@ -212,10 +212,13 @@ describe('Electron single-instance lifecycle', () => {
     const subframe = { sender: window.webContents, senderFrame: {} }
 
     expect(await handlers.get('remote-ssh:connect')?.(trusted, 'lab')).toEqual({ phase: 'connected', host: 'lab' })
-    expect(remoteSshMock.connect).toHaveBeenCalledWith('lab')
+    expect(remoteSshMock.connect).toHaveBeenCalledWith('lab', { miraCommand: undefined })
+    await handlers.get('remote-ssh:connect')?.(trusted, 'lab', '/opt/mira/bin/mira')
+    expect(remoteSshMock.connect).toHaveBeenLastCalledWith('lab', { miraCommand: '/opt/mira/bin/mira' })
+    await expect(handlers.get('remote-ssh:connect')?.(trusted, 'lab', 7)).rejects.toThrow('Invalid remote mira command')
     await expect(handlers.get('remote-ssh:connect')?.(subframe, 'lab')).rejects.toThrow('Invalid remote SSH sender')
     await expect(handlers.get('remote-ssh:connect')?.(trusted, 42)).rejects.toThrow('Invalid remote SSH host')
-    expect(remoteSshMock.connect).toHaveBeenCalledOnce()
+    expect(remoteSshMock.connect).toHaveBeenCalledTimes(2)
 
     expect(await handlers.get('remote-ssh:token')?.(trusted)).toBe('remote-token-0123456789')
     expect(await handlers.get('remote-ssh:token')?.(subframe)).toBeNull()

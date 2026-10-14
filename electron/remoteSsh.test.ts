@@ -8,15 +8,16 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
-  ATTACH_COMMAND,
   MAX_RECONNECT_ATTEMPTS,
   RemoteSshManager,
   buildAttachArgs,
   buildTunnelArgs,
+  attachCommand,
   defaultRemoteSshDeps,
   getFreePort,
   parseAttachOutput,
   parseSshConfigHosts,
+  parseMiraCommand,
   parseSshTarget,
   sshExecutable,
   waitForPort,
@@ -48,9 +49,21 @@ describe('parseSshTarget', () => {
 describe('ssh command construction', () => {
   it('runs attach in batch mode behind an option terminator', () => {
     expect(buildAttachArgs({ destination: 'ana@lab', port: 2222 })).toEqual([
-      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-p', '2222', 'ana@lab', '--', ATTACH_COMMAND,
+      '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-p', '2222', 'ana@lab', '--', "sh -lc 'mira remote attach --json'",
     ])
-    expect(ATTACH_COMMAND).toBe("sh -lc 'mira remote attach --json'")
+    expect(buildAttachArgs({ destination: 'lab', port: null }, '/opt/mira/bin/mira').at(-1))
+      .toBe("sh -lc '/opt/mira/bin/mira remote attach --json'")
+    expect(attachCommand('~/.local/bin/mira')).toBe("sh -lc '~/.local/bin/mira remote attach --json'")
+  })
+
+  it('accepts only plain paths as the remote mira command', () => {
+    expect(parseMiraCommand(undefined)).toBe('mira')
+    expect(parseMiraCommand('  ')).toBe('mira')
+    expect(parseMiraCommand('/opt/mira/bin/mira')).toBe('/opt/mira/bin/mira')
+    expect(parseMiraCommand('~/venvs/mira-1.2/bin/mira')).toBe('~/venvs/mira-1.2/bin/mira')
+    for (const value of ["mira'; rm -rf ~; '", 'mira remote', '$(id)', '-x', 'a`b`', 'C:\\mira.exe']) {
+      expect(parseMiraCommand(value)).toBeNull()
+    }
   })
 
   it('forwards a loopback port to the engine loopback port', () => {
@@ -90,11 +103,20 @@ describe('parseAttachOutput', () => {
     expect(parseAttachOutput({ code: 0, stdout: 'garbage\n{not json}\n{"other":1}', stderr: '' })).toMatchObject({ code: 'invalid_output' })
   })
 
+  it('only trusts the last non-empty stdout line', () => {
+    // A JSON-looking banner line followed by something else is not a result.
+    expect(parseAttachOutput({ code: 0, stdout: `${attachJson()}\nbye from .profile\n`, stderr: '' }))
+      .toEqual({ ok: false, code: 'invalid_output', message: 'Unexpected output from server: bye from .profile' })
+    expect(parseAttachOutput({ code: 0, stdout: `\n${attachJson()}\n\n  \n`, stderr: '' })).toMatchObject({ ok: true, port: 40123 })
+    expect(parseAttachOutput({ code: 1, stdout: '', stderr: '' })).toEqual({ ok: false, code: 'invalid_output', message: 'Unexpected output from server.' })
+  })
+
   it('classifies ssh and shell failures', () => {
     expect(parseAttachOutput({ code: 255, stdout: '', stderr: 'ana@lab: Permission denied (publickey).' })).toMatchObject({ code: 'auth_required' })
     expect(parseAttachOutput({ code: 255, stdout: '', stderr: 'Host key verification failed.' })).toMatchObject({ code: 'host_key' })
     expect(parseAttachOutput({ code: 255, stdout: '', stderr: 'ssh: Could not resolve hostname lab' })).toMatchObject({ code: 'ssh_failed', message: 'ssh: Could not resolve hostname lab' })
     expect(parseAttachOutput({ code: 127, stdout: '', stderr: 'sh: 1: mira: not found' })).toMatchObject({ code: 'not_installed' })
+    expect(parseAttachOutput({ code: 127, stdout: '', stderr: 'sh: 1: /opt/mira/bin/mira: No such file or directory' })).toMatchObject({ code: 'not_installed' })
     expect(parseAttachOutput({ code: 2, stdout: '', stderr: "Error: No such command 'remote'." })).toMatchObject({ code: 'incompatible' })
     expect(parseAttachOutput({ code: null, stdout: '', stderr: '' })).toMatchObject({ code: 'ssh_failed' })
   })
@@ -205,6 +227,24 @@ describe('RemoteSshManager', () => {
     expect(children).toHaveLength(0)
   })
 
+  it('runs the configured remote command and reconnects when it changes', async () => {
+    const { manager, children } = harness({ attach: [{ code: 0, stdout: attachJson() }, { code: 0, stdout: attachJson() }] })
+    await manager.connect('lab', { miraCommand: '/opt/mira/bin/mira' })
+    const attaches = () => children.filter((child) => !child.args.includes('-N'))
+    expect(attaches()[0].args.at(-1)).toBe("sh -lc '/opt/mira/bin/mira remote attach --json'")
+
+    await manager.connect('lab', { miraCommand: '/opt/mira/bin/mira' })
+    expect(attaches()).toHaveLength(1)
+
+    await manager.connect('lab')
+    expect(attaches()).toHaveLength(2)
+    expect(attaches()[1].args.at(-1)).toBe("sh -lc 'mira remote attach --json'")
+
+    const invalid = await manager.connect('lab', { miraCommand: "mira'; id; '" })
+    expect(invalid.error?.code).toBe('invalid_command')
+    expect(attaches()).toHaveLength(2)
+  })
+
   it('fails when the forwarded port never opens', async () => {
     const { manager, children } = harness({ attach: [{ code: 0, stdout: attachJson() }], portOpen: false })
     const status = await manager.connect('lab')
@@ -232,6 +272,21 @@ describe('RemoteSshManager', () => {
     expect(deps.getFreePort).toHaveBeenLastCalledWith(51000)
     expect(tunnels(children).at(-1)!.args).toContain('127.0.0.1:51000:127.0.0.1:40999')
     expect(manager.getToken()).toBe(TOKEN)
+  })
+
+  it('takes port and token from the fresh attach after a server-side restart', async () => {
+    const ROTATED = 'tok_rotated_0123456789abcdef'
+    const { manager, children, timers } = harness({
+      attach: [{ code: 0, stdout: attachJson() }, { code: 0, stdout: attachJson({ port: 41555, token: ROTATED, started: true }) }],
+    })
+    await manager.connect('lab')
+    tunnels(children)[0].emit('exit', 255)
+    expect(manager.getToken()).toBeNull()
+    timers.at(-1)!.callback()
+    await vi.waitFor(() => expect(manager.status().phase).toBe('connected'))
+    expect(manager.getToken()).toBe(ROTATED)
+    expect(tunnels(children).at(-1)!.args).toContain('127.0.0.1:51000:127.0.0.1:41555')
+    expect(children.filter((child) => !child.args.includes('-N'))).toHaveLength(2)
   })
 
   it('gives up after the maximum number of reconnect attempts', async () => {

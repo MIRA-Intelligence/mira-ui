@@ -38,6 +38,7 @@ type SettingsDraft = {
   wsUrl: string
   engineToken: string
   sshHost: string
+  sshMiraCommand: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
@@ -73,6 +74,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     wsUrl: store.wsUrl,
     engineToken: storedEngineToken(store, store.apiUrl),
     sshHost: store.sshHost ?? '',
+    sshMiraCommand: store.sshMiraCommand ?? '',
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
@@ -245,6 +247,7 @@ export function SettingsModal() {
         ...current,
         deploymentMode: mode,
         sshHost: current.sshHost || store.sshHost || storedSsh?.sshHost || '',
+        sshMiraCommand: current.sshMiraCommand || store.sshMiraCommand || storedSsh?.sshMiraCommand || '',
         workspacePath: storedSsh?.workspacePath ?? current.workspacePath,
       }))
       setWorkspaceEdited(false)
@@ -384,6 +387,8 @@ export function SettingsModal() {
     const host = draft.sshHost.trim()
     if (!host) throw new Error(t('sshHostRequired', curLang))
     if (sameSshEngine(host)) {
+      // A new remote command reconnects (useWebSocket re-runs attach).
+      store.setSshMiraCommand(draft.sshMiraCommand)
       const connected = remoteSshStatus.phase === 'connected' && remoteSshStatus.host === host
       if (connected && workspaceEdited && customProjectDirsAllowed
         && workspacePathChanged(store.workspacePath, nextWorkspacePath)) {
@@ -397,6 +402,7 @@ export function SettingsModal() {
     resetWorkspaceScopedState()
     store.setDeploymentMode('remoteSsh')
     store.setSshHost(host)
+    store.setSshMiraCommand(draft.sshMiraCommand)
   }
 
   const handleSshConnect = async () => {
@@ -412,9 +418,11 @@ export function SettingsModal() {
       resetWorkspaceScopedState()
       store.setDeploymentMode('remoteSsh')
       store.setSshHost(host)
+      store.setSshMiraCommand(draft.sshMiraCommand)
       return
     }
-    useRemoteSshStore.getState().setStatus(await connectRemoteSsh(host))
+    store.setSshMiraCommand(draft.sshMiraCommand)
+    useRemoteSshStore.getState().setStatus(await connectRemoteSsh(host, draft.sshMiraCommand))
   }
 
   const handleRepairEngine = async () => {
@@ -712,6 +720,18 @@ export function SettingsModal() {
                   <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
                     {t('sshHostHint', curLang)}
                   </p>
+                  <Label text={t('sshMiraCommandLabel', curLang)} className="mt-3" />
+                  <input
+                    value={draft.sshMiraCommand}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="mira"
+                    onChange={(e) => setDraft((current) => ({ ...current, sshMiraCommand: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                    {t('sshMiraCommandHint', curLang)}
+                  </p>
                   <RemoteSshStatusLine
                     lang={curLang}
                     host={draft.sshHost.trim()}
@@ -925,6 +945,7 @@ function DeploymentModeSelector(
 
 function RemoteSshStatusLine({ lang, host, active }: { lang: Language; host: string; active: boolean }) {
   const status = useRemoteSshStore((s) => s.status)
+  const miraCommand = useSettingsStore((s) => s.sshMiraCommand)
   // Status belongs to the host the store is connected to; an edited, not yet
   // connected host has no status to show.
   if (!active || status.phase === 'idle') return null
@@ -933,7 +954,7 @@ function RemoteSshStatusLine({ lang, host, active }: { lang: Language; host: str
     : status.phase === 'connected' ? 'text-[var(--color-text-secondary)]' : 'text-amber-300'
   return (
     <p role="status" className={cn('mt-2 text-[11px] leading-relaxed break-words', tone)}>
-      {remoteSshMessage(status, lang, host)}
+      {remoteSshMessage(status, lang, host, miraCommand)}
     </p>
   )
 }

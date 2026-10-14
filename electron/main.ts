@@ -169,10 +169,11 @@ function initializeApp() {
   const requireMainFrame = (event: IpcMainInvokeEvent) => {
     if (!isMainFrameSender(event, mainWindow?.webContents)) throw new Error('Invalid remote SSH sender')
   }
-  ipcMain.handle('remote-ssh:connect', async (event, host: unknown) => {
+  ipcMain.handle('remote-ssh:connect', async (event, host: unknown, miraCommand: unknown) => {
     requireMainFrame(event)
     if (typeof host !== 'string') throw new Error('Invalid remote SSH host')
-    return remoteSsh.connect(host)
+    if (miraCommand !== undefined && miraCommand !== null && typeof miraCommand !== 'string') throw new Error('Invalid remote mira command')
+    return remoteSsh.connect(host, { miraCommand })
   })
   ipcMain.handle('remote-ssh:disconnect', async (event) => {
     requireMainFrame(event)

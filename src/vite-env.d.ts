@@ -28,7 +28,7 @@ interface Window {
     }>
     setEngineModeHint?: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => Promise<boolean>
     getEngineToken?: () => Promise<string | null>
-    remoteSshConnect?: (host: string) => Promise<import('./services/remoteSsh').RemoteSshStatus>
+    remoteSshConnect?: (host: string, miraCommand?: string) => Promise<import('./services/remoteSsh').RemoteSshStatus>
     remoteSshDisconnect?: () => Promise<import('./services/remoteSsh').RemoteSshStatus>
     remoteSshStatus?: () => Promise<import('./services/remoteSsh').RemoteSshStatus>
     getRemoteSshToken?: () => Promise<string | null>

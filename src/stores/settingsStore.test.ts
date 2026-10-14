@@ -242,6 +242,13 @@ describe('settingsStore', () => {
     state.setSshHost('lab')
     expect(useSettingsStore.getState().workspacePath).toBe('/home/ana/mira')
 
+    // The remote mira command is remembered per host.
+    useSettingsStore.getState().setSshMiraCommand(' /opt/mira/bin/mira ')
+    useSettingsStore.getState().setSshHost('ana@gpu02')
+    expect(useSettingsStore.getState().sshMiraCommand).toBe('')
+    useSettingsStore.getState().setSshHost('lab')
+    expect(useSettingsStore.getState().sshMiraCommand).toBe('/opt/mira/bin/mira')
+
     const persisted = JSON.parse(vi.mocked(localStorage.setItem).mock.calls.at(-1)![1])
     expect(persisted.deploymentMode).toBe('remoteSsh')
     expect(persisted.sshHost).toBe('lab')

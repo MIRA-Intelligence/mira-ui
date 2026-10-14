@@ -12,10 +12,25 @@ import { TOKEN_PATTERN } from './engineToken'
 // credentials, and the gateway token stays in this process's memory.
 
 export const REMOTE_PROTOCOL = 1
-export const ATTACH_COMMAND = "sh -lc 'mira remote attach --json'"
+export const DEFAULT_MIRA_COMMAND = 'mira'
+// Guidance for exit 127 lives in MIRA-Intelligence/mira docs/remote-ssh.md.
+export const REMOTE_SSH_DOC = 'docs/remote-ssh.md'
+
+// The remote command runs inside `sh -lc '...'`, so only plain path
+// characters are allowed (a leading ~ still expands in the inner shell).
+export function parseMiraCommand(value: string | null | undefined): string | null {
+  const command = (value ?? '').trim() || DEFAULT_MIRA_COMMAND
+  if (command.length > 255 || command.startsWith('-')) return null
+  return /^[A-Za-z0-9_./~+-]+$/.test(command) ? command : null
+}
+
+export function attachCommand(miraCommand = DEFAULT_MIRA_COMMAND): string {
+  return `sh -lc '${miraCommand} remote attach --json'`
+}
 
 export type RemoteSshErrorCode =
   | 'invalid_host'
+  | 'invalid_command'
   | 'auth_required'
   | 'host_key'
   | 'ssh_failed'
@@ -86,8 +101,8 @@ function baseOptions(target: SshTarget): string[] {
   ]
 }
 
-export function buildAttachArgs(target: SshTarget): string[] {
-  return [...baseOptions(target), target.destination, '--', ATTACH_COMMAND]
+export function buildAttachArgs(target: SshTarget, miraCommand = DEFAULT_MIRA_COMMAND): string[] {
+  return [...baseOptions(target), target.destination, '--', attachCommand(miraCommand)]
 }
 
 export function buildTunnelArgs(target: SshTarget, localPort: number, remotePort: number): string[] {
@@ -111,21 +126,21 @@ function lastLine(text: string): string {
   return (lines.at(-1) ?? '').slice(0, 500)
 }
 
-// Login shells may print banners before our JSON line, so take the last line
-// that parses as an object carrying the protocol field.
-function findAttachJson(stdout: string): Record<string, unknown> | null {
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith('{'))
-  for (const line of lines.reverse()) {
-    try {
-      const parsed: unknown = JSON.parse(line)
-      if (isRecord(parsed) && 'protocol' in parsed) return parsed
-    } catch { /* not ours */ }
+// The engine prints exactly one JSON line and it is the last one; login-shell
+// banners (~/.profile) may come before it. Earlier lines are never parsed.
+function lastJsonLine(stdout: string): Record<string, unknown> | null {
+  const line = lastLine(stdout)
+  if (!line.startsWith('{')) return null
+  try {
+    const parsed: unknown = JSON.parse(line)
+    return isRecord(parsed) && 'protocol' in parsed ? parsed : null
+  } catch {
+    return null
   }
-  return null
 }
 
 export function parseAttachOutput(result: { code: number | null; stdout: string; stderr: string }): AttachOutcome {
-  const payload = findAttachJson(result.stdout)
+  const payload = lastJsonLine(result.stdout)
   if (payload) {
     if (payload.protocol !== REMOTE_PROTOCOL) {
       return { ok: false, code: 'incompatible', message: `Unsupported remote protocol ${String(payload.protocol)}` }
@@ -170,14 +185,15 @@ export function parseAttachOutput(result: { code: number | null; stdout: string;
   if (result.code === null) {
     return { ok: false, code: 'ssh_failed', message: 'Timed out waiting for the server.' }
   }
-  if (result.code === 127 || /\bmira\b[^\n]*not found|command not found/i.test(stderr)) {
+  if (result.code === 127 || /not found|No such file or directory/i.test(stderr)) {
     return { ok: false, code: 'not_installed', message: lastLine(stderr) }
   }
   // An engine that predates Remote-SSH has no `remote` command.
   if (/No such command|invalid choice|unrecognized arguments/i.test(stderr)) {
     return { ok: false, code: 'incompatible', message: lastLine(stderr) }
   }
-  return { ok: false, code: 'invalid_output', message: lastLine(stderr) || 'The server did not return an attach response.' }
+  const unexpected = lastLine(result.stdout) || lastLine(stderr)
+  return { ok: false, code: 'invalid_output', message: unexpected ? `Unexpected output from server: ${unexpected}` : 'Unexpected output from server.' }
 }
 
 // Host aliases from ~/.ssh/config, in file order. Patterns (*, ?, !) are not
@@ -276,6 +292,7 @@ export function defaultRemoteSshDeps(log: RemoteSshDeps['log']): RemoteSshDeps {
 export class RemoteSshManager {
   private state: RemoteSshStatus = { phase: 'idle', host: null, localPort: null, version: null, error: null, attempt: 0 }
   private target: SshTarget | null = null
+  private miraCommand = DEFAULT_MIRA_COMMAND
   private token: string | null = null
   private tunnel: SshChild | null = null
   private generation = 0
@@ -299,18 +316,25 @@ export class RemoteSshManager {
     return () => this.listeners.delete(listener)
   }
 
-  connect(host: string): Promise<RemoteSshStatus> {
+  // `miraCommand` is the remote path of the mira CLI for this host (default
+  // `mira`, e.g. /opt/mira/bin/mira when it is not on the login-shell PATH).
+  connect(host: string, options: { miraCommand?: string | null } = {}): Promise<RemoteSshStatus> {
     const target = parseSshTarget(host)
-    if (!target) {
+    const miraCommand = parseMiraCommand(options.miraCommand)
+    if (!target || !miraCommand) {
       this.stop()
       this.update({ phase: 'error', host: host.trim() || null, localPort: null, version: null, attempt: 0,
-        error: { code: 'invalid_host', message: 'Enter an SSH host alias or user@host[:port].' } })
+        error: target
+          ? { code: 'invalid_command', message: 'The remote mira command must be a plain path such as /opt/mira/bin/mira.' }
+          : { code: 'invalid_host', message: 'Enter an SSH host alias or user@host[:port].' } })
       return Promise.resolve(this.status())
     }
-    const active = this.state.host === host.trim() && ['connecting', 'connected', 'reconnecting'].includes(this.state.phase)
+    const active = this.state.host === host.trim() && this.miraCommand === miraCommand
+      && ['connecting', 'connected', 'reconnecting'].includes(this.state.phase)
     if (active) return this.pending ?? Promise.resolve(this.status())
     this.stop()
     this.target = target
+    this.miraCommand = miraCommand
     this.update({ phase: 'connecting', host: host.trim(), localPort: null, version: null, error: null, attempt: 0 })
     return this.establish(this.generation)
   }
@@ -367,7 +391,9 @@ export class RemoteSshManager {
   private async attachAndForward(generation: number): Promise<RemoteSshStatus> {
     const target = this.target
     if (!target) return this.status()
-    const output = await this.run(buildAttachArgs(target), this.deps.attachTimeoutMs)
+    // Every (re)connect re-runs attach and takes port and token from its
+    // answer: a server-side restart can move the engine to another port.
+    const output = await this.run(buildAttachArgs(target, this.miraCommand), this.deps.attachTimeoutMs)
     if (generation !== this.generation) return this.status()
     const attach = parseAttachOutput(output)
     if (!attach.ok) return this.fail(generation, attach.code, attach.message)

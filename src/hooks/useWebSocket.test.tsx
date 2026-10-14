@@ -147,7 +147,7 @@ describe('useWebSocket', () => {
       render(<HookHarness />)
 
       await waitFor(() => expect(probeEngineCompatibility).toHaveBeenCalledWith('http://127.0.0.1:51000/api'))
-      expect(remoteSshMock.connect).toHaveBeenCalledWith('lab')
+      expect(remoteSshMock.connect).toHaveBeenCalledWith('lab', '')
       expect(useSettingsStore.getState()).toMatchObject({
         apiUrl: 'http://127.0.0.1:51000/api',
         wsUrl: 'ws://127.0.0.1:51000/ws',
@@ -169,6 +169,17 @@ describe('useWebSocket', () => {
       expect(useSettingsStore.getState().connectionMessage).toContain('SSH login to lab failed')
       expect(probeEngineCompatibility).not.toHaveBeenCalled()
       expect(useRemoteSshStore.getState().status.error?.code).toBe('auth_required')
+    })
+
+    it('re-attaches with the configured remote command when it changes', async () => {
+      remoteSshMock.connect.mockResolvedValue(connected(51000))
+      render(<HookHarness />)
+      await waitFor(() => expect(probeEngineCompatibility).toHaveBeenCalledWith('http://127.0.0.1:51000/api'))
+
+      act(() => useSettingsStore.getState().setSshMiraCommand('/opt/mira/bin/mira'))
+      await waitFor(() => expect(remoteSshMock.connect).toHaveBeenLastCalledWith('lab', '/opt/mira/bin/mira'))
+      expect(remoteSshMock.disconnect).not.toHaveBeenCalled()
+      expect(useSettingsStore.getState().engineProfiles['ssh:lab'].sshMiraCommand).toBe('/opt/mira/bin/mira')
     })
 
     it('requires a host before connecting', async () => {

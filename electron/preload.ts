@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setEngineModeHint: (mode: 'localBundle' | 'remoteManual' | 'remoteSsh') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
   getEngineToken: () => ipcRenderer.invoke('engine:gateway-token'),
-  remoteSshConnect: (host: string) => ipcRenderer.invoke('remote-ssh:connect', host),
+  remoteSshConnect: (host: string, miraCommand?: string) => ipcRenderer.invoke('remote-ssh:connect', host, miraCommand),
   remoteSshDisconnect: () => ipcRenderer.invoke('remote-ssh:disconnect'),
   remoteSshStatus: () => ipcRenderer.invoke('remote-ssh:status'),
   getRemoteSshToken: () => ipcRenderer.invoke('remote-ssh:token'),

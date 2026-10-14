@@ -77,6 +77,7 @@ export function useWebSocket() {
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
   const sshHost = useSettingsStore((s) => s.sshHost)
+  const sshMiraCommand = useSettingsStore((s) => s.sshMiraCommand)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
   // Bumped when a Remote-SSH connection comes back on the same tunnel port, so
   // the engine is probed again even though apiUrl did not change.
@@ -110,7 +111,7 @@ export function useWebSocket() {
       forgetRemoteSshToken()
       const settings = useSettingsStore.getState()
       if (settings.deploymentMode !== 'remoteSsh' || status.host !== settings.sshHost.trim()) return
-      const message = remoteSshMessage(status, settings.language)
+      const message = remoteSshMessage(status, settings.language, '', settings.sshMiraCommand)
       if (status.phase === 'connected' && status.localPort) {
         const endpoints = tunnelEndpoints(status.localPort)
         if (endpoints.apiUrl !== settings.apiUrl || endpoints.wsUrl !== settings.wsUrl) {
@@ -171,11 +172,13 @@ export function useWebSocket() {
           if (!hasRemoteSshBridge()) return unreachable(t('sshErrorUnavailable', lang))
           if (!sshHost.trim()) return unreachable(t('sshHostRequired', lang))
           setConnectionMessage(t('sshStatusConnecting', lang, { host: sshHost.trim() }))
-          const status = await connectRemoteSsh(sshHost)
+          // Idempotent: attach again re-reads port and token, so a changed
+          // remote command or a restarted engine is picked up here.
+          const status = await connectRemoteSsh(sshHost, sshMiraCommand)
           if (disposed) return
           useRemoteSshStore.getState().setStatus(status)
           if (status.phase !== 'connected' || !status.localPort) {
-            return unreachable(remoteSshMessage(status, lang, sshHost.trim()))
+            return unreachable(remoteSshMessage(status, lang, sshHost.trim(), sshMiraCommand))
           }
           const endpoints = tunnelEndpoints(status.localPort)
           const settings = useSettingsStore.getState()
@@ -268,7 +271,7 @@ export function useWebSocket() {
       disposed = true
       clearBootstrapPoll()
     }
-  }, [apiUrl, deploymentMode, sshHost, sshEpoch, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
+  }, [apiUrl, deploymentMode, sshHost, sshMiraCommand, sshEpoch, setConnected, setConnectionMessage, setEngineBootstrap, setLocalEngineBootstrap])
 
   useEffect(() => {
     const localBundle = deploymentMode === 'localBundle'

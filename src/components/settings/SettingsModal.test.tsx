@@ -265,11 +265,14 @@ describe('SettingsModal remote runtime config', () => {
       useSettingsStore.getState().openSettings()
       render(<SettingsModal />)
 
-      expect(await screen.findByRole('status')).toHaveTextContent('Mira is not installed on lab')
+      expect(await screen.findByRole('status')).toHaveTextContent('Could not run `mira` on lab')
       expect(fetchRuntimeConfig).not.toHaveBeenCalled()
 
+      // Point the host at a mira outside the login-shell PATH and retry.
+      fireEvent.change(screen.getByPlaceholderText('mira'), { target: { value: '/opt/mira/bin/mira' } })
       fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
-      await waitFor(() => expect(window.electronAPI?.remoteSshConnect).toHaveBeenCalledWith('lab'))
+      await waitFor(() => expect(window.electronAPI?.remoteSshConnect).toHaveBeenCalledWith('lab', '/opt/mira/bin/mira'))
+      expect(useSettingsStore.getState().engineProfiles['ssh:lab'].sshMiraCommand).toBe('/opt/mira/bin/mira')
       expect(await screen.findByRole('status')).toHaveTextContent('Connecting to lab over SSH')
 
       fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }))
