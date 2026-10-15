@@ -95,17 +95,19 @@ describe('uiStore.layout + modals', () => {
     expect(useUiStore.getState().agentPanelWidth).toBe(AGENT_PANEL_WIDTH.min)
   })
 
-  it('opens and closes the new-project modal with prefill', () => {
-    useUiStore.getState().openNewProject({ fromChatId: 'chat-1' })
-    expect(useUiStore.getState()).toMatchObject({
-      newProjectOpen: true,
-      newProjectFromChatId: 'chat-1',
-    })
-    useUiStore.getState().closeNewProject()
-    expect(useUiStore.getState()).toMatchObject({
-      newProjectOpen: false,
-      newProjectFromChatId: null,
-    })
+  it('opens and closes a Quick Chat promotion for a workflow', () => {
+    useUiStore.getState().openPromotion('chat-1', 'experiment')
+    expect(useUiStore.getState().promotion).toEqual({ chatId: 'chat-1', moduleType: 'experiment' })
+    useUiStore.getState().closePromotion()
+    expect(useUiStore.getState().promotion).toBeNull()
+  })
+
+  it('requests and consumes a module start', () => {
+    const request = { projectId: 'PRJ-1', moduleType: 'delivery' as const, intent: 'Write it up', contextPath: 'context/a.md' }
+    useUiStore.getState().requestModuleStart(request)
+    expect(useUiStore.getState().pendingModuleStart).toEqual(request)
+    useUiStore.getState().consumeModuleStart()
+    expect(useUiStore.getState().pendingModuleStart).toBeNull()
   })
 
   it('opens and closes the skills/plugins modal', () => {

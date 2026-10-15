@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { JournalTargetSelect } from './JournalTargetSelect'
 import { journalSelection, type JournalProfile } from '@/services/journals'
 
@@ -317,6 +317,8 @@ export function WorkflowWorkspace() {
   const [inputPaths, setInputPaths] = useState<string[]>([''])
   const [inputPathsValid, setInputPathsValid] = useState(true)
   const [startError, setStartError] = useState<string | null>(null)
+  const [contextAttachmentPath, setContextAttachmentPath] = useState<string | null>(null)
+  const pendingModuleStart = useUiStore((state) => state.pendingModuleStart)
   const selectedRun = useMemo(
     () => snapshot?.runs.find((run) => run.run_id === selectedRunId) ?? null,
     [selectedRunId, snapshot?.runs],
@@ -336,6 +338,18 @@ export function WorkflowWorkspace() {
     : null
   const mustSelectRunCandidate = selectedRunCandidates.length > 1 && !selectedRunCandidate
   const nextSelectedModule = selectedRun ? NEXT_MODULE[selectedRun.module_type] : undefined
+
+  useEffect(() => {
+    if (!projectId || pendingModuleStart?.projectId !== projectId) return
+    // Promoted Quick Chats land directly in the chosen module's start dialog.
+    beginModule(pendingModuleStart.moduleType)
+    setRunIntent(pendingModuleStart.intent)
+    setContextAttachmentPath(pendingModuleStart.contextPath ?? null)
+    useUiStore.getState().consumeModuleStart()
+    // beginModule only resets local dialog state; re-run solely for a new request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingModuleStart, projectId])
+
   if (!projectId) return null
 
   const beginModule = (
@@ -373,6 +387,7 @@ export function WorkflowWorkspace() {
     setMaxTokens('')
     setDeliveryFormat(null)
     setStartError(null)
+    setContextAttachmentPath(null)
   }
 
   const startExistingRun = async (run: WorkflowRun) => {
@@ -438,6 +453,7 @@ export function WorkflowWorkspace() {
     const moduleData: Record<string, unknown> = {
       confirmation_policy: { mode: 'required' },
     }
+    if (contextAttachmentPath) moduleData.context_attachment_paths = [contextAttachmentPath]
     if (continuationSource) {
       moduleData.upstream_selection = {
         module_type: continuationSource.moduleType,

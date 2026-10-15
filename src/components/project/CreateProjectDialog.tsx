@@ -1,13 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useProjectStore } from '@/stores/projectStore'
-import { useSettingsStore } from '@/stores/settingsStore'
-import { useUiStore } from '@/stores/uiStore'
+import { useSettingsStore, type Language } from '@/stores/settingsStore'
+import { useUiStore, type PromotionRequest } from '@/stores/uiStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { useChatStore } from '@/stores/chatStore'
 import { joinProjectPath, slugifyProjectId } from '@/lib/projectPaths'
 import { t } from '@/i18n'
-import { ProjectDirectoryExistsError } from '@/services/api'
+import { attachChatContext, ProjectDirectoryExistsError } from '@/services/api'
+import { PIPELINE_STAGES } from '@/components/workflow/PipelineOverview'
 
-export function CreateProjectDialog({ onClose }: { onClose: () => void }) {
+function promotedIntent(path: string, lang: Language): string {
+  return lang === 'zh'
+    ? `基于快速对话继续：对话上下文已保存在 \`${path}\`，请先阅读并据此确定本次运行目标。`
+    : `Continue from the Quick Chat: the conversation is saved at \`${path}\`. Read it first and derive this run's goal from it.`
+}
+
+export function CreateProjectDialog({ onClose, promotion }: {
+  onClose: () => void
+  // Quick Chat promotion: attach the conversation, then open this workflow's start dialog.
+  promotion?: PromotionRequest
+}) {
   const { language: lang, workspacePath, runtimeConfig, deploymentMode } = useSettingsStore()
   const createProjectShell = useProjectStore((s) => s.createProjectShell)
   const location = runtimeConfig?.project_location
@@ -19,6 +32,7 @@ export function CreateProjectDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('')
   const [existingDir, setExistingDir] = useState<string | null>(null)
   const submitting = useRef(false)
+  const promotionStage = promotion && PIPELINE_STAGES.find((stage) => stage.moduleType === promotion.moduleType)
   const formRef = useRef<HTMLFormElement>(null)
   const parentDir = customDirAllowed ? (parent ?? defaultParent) : defaultParent
   const projectId = slugifyProjectId(name)
@@ -57,6 +71,26 @@ export function CreateProjectDialog({ onClose }: { onClose: () => void }) {
         projectParentDir: customDirAllowed ? parentDir.trim() : undefined,
         ...(existingDir ? { allowExistingDir: true } : {}),
       })
+      if (promotion) {
+        try {
+          const attached = await attachChatContext(id, promotion.chatId, useAgentStore.getState().getProjectLogs(promotion.chatId))
+          useUiStore.getState().requestModuleStart({
+            projectId: id,
+            moduleType: promotion.moduleType,
+            intent: promotedIntent(attached.path, lang),
+            contextPath: attached.path,
+          })
+        } catch (err) {
+          try {
+            // Reused workspaces may contain user data from before this request.
+            await useProjectStore.getState().deleteTask(id, !existingDir)
+          } catch {
+            // Keep the attachment error; cleanup can be retried from the queue.
+          }
+          throw err
+        }
+        useChatStore.getState().removeChat(promotion.chatId)
+      }
       const task = useProjectStore.getState().tasks.find((item) => item.id === id)
       useUiStore.getState().pushSystemMessage(
         t('projectCreatedAt', lang, { name: task?.label || name.trim(), path: task?.projectDir || projectDir }),
@@ -101,7 +135,10 @@ export function CreateProjectDialog({ onClose }: { onClose: () => void }) {
         }}
         className="w-full max-w-[480px] space-y-5 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-6 shadow-2xl"
       >
-        <h2 id="create-project-title" className="text-base font-semibold text-[var(--color-text-primary)]">{t('newProjectAria', lang)}</h2>
+        <h2 id="create-project-title" className="text-base font-semibold text-[var(--color-text-primary)]">{promotionStage
+          ? t('promoteToWorkflowTitle', lang, { module: lang === 'zh' ? promotionStage.zh : promotionStage.en })
+          : t('newProjectAria', lang)}</h2>
+        {promotion && <p className="text-xs text-[var(--color-text-muted)]">{t('promoteContextAttachmentNotice', lang)}</p>}
         <label className="block space-y-2 text-xs text-[var(--color-text-secondary)]">
           <span>{t('projectName', lang)}</span>
           <input required value={name} disabled={creating} onChange={(event) => setName(event.target.value)} placeholder={t('projectNamePlaceholder', lang)} className={inputClass} />

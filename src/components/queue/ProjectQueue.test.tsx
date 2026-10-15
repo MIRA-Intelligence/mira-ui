@@ -307,7 +307,7 @@ describe('ProjectQueue mode switch', () => {
       label: 'New project',
       coreQuestion: '',
     })
-    expect(useUiStore.getState().newProjectOpen).toBe(false)
+    expect(useUiStore.getState().promotion).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

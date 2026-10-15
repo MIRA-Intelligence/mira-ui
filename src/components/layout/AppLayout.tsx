@@ -11,7 +11,7 @@ import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { ProvidersPage } from '@/components/providers/ProvidersPage'
 import { TeamUsagePage } from '@/components/team/TeamUsagePage'
-import { NewProjectModal } from '@/components/project/NewProjectModal'
+import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
 import { SshPromptDialog } from '@/components/settings/SshPromptDialog'
@@ -136,6 +136,8 @@ export function AppLayout() {
     setAgentPanelWidth,
     setSidebarCollapsed,
     setAgentPanelCollapsed,
+    promotion,
+    closePromotion,
   } = useUiStore()
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
@@ -247,7 +249,7 @@ export function AppLayout() {
       <SkillsPluginsModal />
       <ProvidersPage />
       <TeamUsagePage />
-      <NewProjectModal />
+      {promotion && <CreateProjectDialog key={promotion.chatId} promotion={promotion} onClose={closePromotion} />}
       <FeedbackDialog />
     </div>
   )

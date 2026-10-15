@@ -362,7 +362,7 @@ describe('AgentPanel keyboard behavior', () => {
     expect(messageCall).not.toHaveProperty('agent_profile')
   })
 
-  it('opens project promotion without prefilling the research description', () => {
+  it('promotes a chat into a chosen workflow from the dropdown', () => {
     useChatStore.setState({
       chats: [{ id: 'chat-promote', title: 'MRI study', createdAt: 0, updatedAt: 0 }],
       activeChatId: 'chat-promote',
@@ -372,13 +372,25 @@ describe('AgentPanel keyboard behavior', () => {
     useAgentStore.setState({ logsByProject: { 'chat-promote': [] } })
 
     render(<AgentPanel />)
-    fireEvent.click(screen.getByRole('button', { name: 'Turn into project' }))
+    const trigger = screen.getByRole('button', { name: 'Turn into project' })
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    fireEvent.click(trigger)
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      expect.stringContaining('Research'),
+      expect.stringContaining('Experiment'),
+      expect.stringContaining('Delivery'),
+    ])
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(useUiStore.getState().promotion).toBeNull()
 
-    expect(useUiStore.getState()).toMatchObject({
-      newProjectOpen: true,
-      newProjectFromChatId: 'chat-promote',
-    })
-    expect(useUiStore.getState()).not.toHaveProperty('newProjectDescriptionPrefill')
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: /Experiment/ }))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(useUiStore.getState().promotion).toEqual({ chatId: 'chat-promote', moduleType: 'experiment' })
   })
 
   it('does not show a global AUTO badge without an experiment Run', () => {

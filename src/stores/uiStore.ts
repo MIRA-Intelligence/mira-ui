@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { StartableModuleType, WorkflowModuleType } from '@/types'
 
 export type SystemMessageSeverity = 'info' | 'success' | 'warning' | 'error'
 
@@ -47,9 +48,18 @@ function saveWidth(key: string, value: number) {
   }
 }
 
-export interface OpenNewProjectOptions {
-  // When set, the source conversation is attached before the chat thread is removed.
-  fromChatId?: string
+export interface PromotionRequest {
+  // The Quick Chat thread whose conversation is attached to the new project.
+  chatId: string
+  moduleType: StartableModuleType
+}
+
+// Opens a module's start dialog in WorkflowWorkspace from outside that component.
+export interface ModuleStartRequest {
+  projectId: string
+  moduleType: WorkflowModuleType
+  intent: string
+  contextPath?: string
 }
 
 interface UiState {
@@ -57,8 +67,8 @@ interface UiState {
   agentPanelCollapsed: boolean
   sidebarWidth: number
   agentPanelWidth: number
-  newProjectOpen: boolean
-  newProjectFromChatId: string | null
+  promotion: PromotionRequest | null
+  pendingModuleStart: ModuleStartRequest | null
   skillsPluginsOpen: boolean
   providersOpen: boolean
   // Team server administrators: everyone's usage and the token quotas.
@@ -77,8 +87,10 @@ interface UiState {
   toggleAgentPanel: () => void
   setAgentPanelCollapsed: (v: boolean) => void
   setAgentPanelWidth: (px: number) => void
-  openNewProject: (options?: OpenNewProjectOptions) => void
-  closeNewProject: () => void
+  openPromotion: (chatId: string, moduleType: StartableModuleType) => void
+  closePromotion: () => void
+  requestModuleStart: (request: ModuleStartRequest) => void
+  consumeModuleStart: () => void
   openSkillsPlugins: () => void
   closeSkillsPlugins: () => void
   openProviders: () => void
@@ -104,8 +116,8 @@ export const useUiStore = create<UiState>((set) => ({
   agentPanelCollapsed: false,
   sidebarWidth: loadWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH),
   agentPanelWidth: loadWidth(AGENT_PANEL_WIDTH_KEY, AGENT_PANEL_WIDTH),
-  newProjectOpen: false,
-  newProjectFromChatId: null,
+  promotion: null,
+  pendingModuleStart: null,
   skillsPluginsOpen: false,
   providersOpen: false,
   teamUsageOpen: false,
@@ -126,13 +138,10 @@ export const useUiStore = create<UiState>((set) => ({
     saveWidth(AGENT_PANEL_WIDTH_KEY, w)
     set({ agentPanelWidth: w })
   },
-  openNewProject: (options) =>
-    set({
-      newProjectOpen: true,
-      newProjectFromChatId: options?.fromChatId ?? null,
-    }),
-  closeNewProject: () =>
-    set({ newProjectOpen: false, newProjectFromChatId: null }),
+  openPromotion: (chatId, moduleType) => set({ promotion: { chatId, moduleType } }),
+  closePromotion: () => set({ promotion: null }),
+  requestModuleStart: (request) => set({ pendingModuleStart: request }),
+  consumeModuleStart: () => set({ pendingModuleStart: null }),
   openSkillsPlugins: () => set({ skillsPluginsOpen: true }),
   closeSkillsPlugins: () => set({ skillsPluginsOpen: false }),
   openProviders: () => set({ providersOpen: true }),

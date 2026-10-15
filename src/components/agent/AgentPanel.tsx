@@ -12,6 +12,7 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
+import { PIPELINE_STAGES } from '@/components/workflow/PipelineOverview'
 
 function createClientId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -290,7 +291,8 @@ export function AgentPanel() {
   const activeStage = useProjectStore((s) => s.activeStage)
   const activeChatId = useChatStore((s) => s.activeChatId)
   const touchChat = useChatStore((s) => s.touchChat)
-  const openNewProject = useUiStore((s) => s.openNewProject)
+  const openPromotion = useUiStore((s) => s.openPromotion)
+  const [promoteMenuOpen, setPromoteMenuOpen] = useState(false)
   const isChat = appMode === 'normal'
   // The active surface is either a research project or a Quick Chat thread.
   const sessionId = isChat ? activeChatId : selectedTaskId
@@ -577,17 +579,61 @@ export function AgentPanel() {
           </span>
         )}
         {sessionId && isChat && (
-          <button
-            onClick={() => openNewProject({ fromChatId: sessionId })}
-            title={t('promoteToProjectHint', lang)}
-            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
+          <div
+            className="relative ml-auto"
+            onKeyDown={(event) => { if (event.key === 'Escape') setPromoteMenuOpen(false) }}
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
-            {t('promoteToProject', lang)}
-          </button>
+            <button
+              onClick={() => setPromoteMenuOpen((open) => !open)}
+              title={t('promoteToProjectHint', lang)}
+              aria-haspopup="menu"
+              aria-expanded={promoteMenuOpen}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+              {t('promoteToProject', lang)}
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {promoteMenuOpen && (
+              <>
+                <button
+                  type="button"
+                  aria-label={t('cancel', lang)}
+                  tabIndex={-1}
+                  className="fixed inset-0 z-10 cursor-default"
+                  onClick={() => setPromoteMenuOpen(false)}
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-20 mt-1 min-w-[180px] rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] py-1 shadow-xl"
+                >
+                  {PIPELINE_STAGES.map((stage) => (
+                    <button
+                      key={stage.moduleType}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setPromoteMenuOpen(false)
+                        openPromotion(sessionId, stage.moduleType)
+                      }}
+                      className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-[var(--color-bg-hover)]"
+                    >
+                      <span aria-hidden="true">{stage.icon}</span>
+                      <span className="min-w-0">
+                        <span className="block text-xs text-[var(--color-text-primary)]">{lang === 'zh' ? stage.zh : stage.en}</span>
+                        <span className="block text-[10px] text-[var(--color-text-muted)]">{lang === 'zh' ? stage.zhHint : stage.enHint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
         {sessionId && appMode === 'project' && (
           <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">

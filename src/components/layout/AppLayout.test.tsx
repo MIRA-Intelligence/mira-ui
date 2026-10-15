@@ -11,7 +11,6 @@ vi.mock('@/components/agent/AgentPanel', () => ({ AgentPanel: () => <div>agent-p
 vi.mock('@/components/settings/SettingsModal', () => ({ SettingsModal: () => null }))
 vi.mock('@/components/settings/SkillsPluginsModal', () => ({ SkillsPluginsModal: () => null }))
 vi.mock('@/components/providers/ProvidersPage', () => ({ ProvidersPage: () => null }))
-vi.mock('@/components/project/NewProjectModal', () => ({ NewProjectModal: () => null }))
 vi.mock('@/components/update/UpdateBanner', () => ({ UpdateBanner: () => null }))
 vi.mock('@/components/engine/LocalEngineUpdateModal', () => ({ LocalEngineUpdateModal: () => null }))
 vi.mock('@/components/feedback/FeedbackDialog', () => ({ FeedbackDialog: () => null }))
