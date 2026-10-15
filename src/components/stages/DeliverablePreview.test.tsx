@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const renderWord = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -86,5 +86,64 @@ describe('DeliverablePreview', () => {
     await waitFor(() => expect(screen.getByText('1 / 2')).toBeInTheDocument())
     expect(pptxLoad).toHaveBeenCalled()
     expect(pptxRender).toHaveBeenCalled()
+  })
+
+  it('runs bento slides in a script-only sandbox without same-origin access', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    render(
+      <DeliverablePreview
+        projectId="PRJ-1"
+        run={makeRun('result/exports/slides.bento.html')}
+        lang="en"
+      />,
+    )
+
+    const frame = await screen.findByTestId('slides-preview')
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
+  })
+
+  it('keeps ordinary html fully sandboxed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    render(
+      <DeliverablePreview
+        projectId="PRJ-1"
+        run={makeRun('result/exports/page.html')}
+        lang="en"
+      />,
+    )
+
+    const frame = await screen.findByTitle('page.html')
+    expect(frame).toHaveAttribute('sandbox', '')
+  })
+
+  it('renders notebook markdown, code and outputs inline', async () => {
+    const notebook = {
+      cells: [
+        { cell_type: 'markdown', source: ['# Reproduction'] },
+        {
+          cell_type: 'code',
+          source: ['print("auc")'],
+          outputs: [
+            { output_type: 'stream', name: 'stdout', text: ['auc=0.91\n'] },
+            { output_type: 'display_data', data: { 'image/png': 'aGVsbG8=' } },
+          ],
+        },
+      ],
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => notebook }))
+    render(
+      <DeliverablePreview
+        projectId="PRJ-1"
+        run={makeRun('result/exports/reproduction.ipynb')}
+        lang="en"
+      />,
+    )
+
+    const view = await screen.findByTestId('notebook-preview')
+    expect(within(view).getByRole('heading', { name: 'Reproduction' })).toBeInTheDocument()
+    expect(within(view).getByText('print("auc")')).toBeInTheDocument()
+    expect(within(view).getByText(/auc=0\.91/)).toBeInTheDocument()
+    expect(within(view).getByAltText('notebook output')).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
   })
 })

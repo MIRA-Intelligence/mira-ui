@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildExportMessage } from './exportRequests'
+import { buildExportMessage, getExportConfig } from './exportRequests'
 import type { ProjectTask } from '@/types'
 
 const task: ProjectTask = {
@@ -25,7 +25,7 @@ describe('buildExportMessage', () => {
     expect(message).toContain('Do not fabricate citations')
     expect(buildExportMessage(task, 'presentation', { targetJournal: 'radiology' })).not.toContain('Target journal profile')
   })
-  it.each(['experiment_report', 'paper_article', 'presentation', 'metadata'] as const)(
+  it.each(['experiment_report', 'paper_article', 'presentation', 'slides', 'notebook', 'metadata'] as const)(
     'scopes native %s delivery to the selected experiment without legacy plan writes', (format) => {
       const message = buildExportMessage(task, format, { workflow: true })
       expect(message).toContain('configuration.selected_experiment')
@@ -36,6 +36,20 @@ describe('buildExportMessage', () => {
       expect(buildExportMessage(task, format)).toContain('task_plan.json.result')
     },
   )
+  it('routes slides through bento-slides as a self-contained html deck, not a pdf', () => {
+    const message = buildExportMessage(task, 'slides', { workflow: true })
+    expect(message).toContain('result/exports/slides.bento.html')
+    expect(message).toContain('bento-slides')
+    expect(message).toContain('Do NOT produce a PDF or PPTX')
+    expect(getExportConfig('slides').outputType).toBe('slides')
+  })
+  it('requests an executed reproduction notebook', () => {
+    const message = buildExportMessage(task, 'notebook', { workflow: true })
+    expect(message).toContain('result/exports/reproduction.ipynb')
+    expect(message).toContain('jupyter-notebook-export')
+    expect(message).toContain('nbconvert --execute')
+    expect(getExportConfig('notebook').outputType).toBe('notebook')
+  })
   it('requests a real journal article docx with required sections and figures/tables', () => {
     const message = buildExportMessage(task, 'paper_article')
 

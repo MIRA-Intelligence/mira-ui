@@ -44,11 +44,19 @@ const DOWNSTREAM_MODULES: Record<WorkflowModuleType, WorkflowModuleType[]> = {
 const DELIVERY_FORMATS: Array<{
   format: ExportFormat
   icon: string
-  labelKey: 'exportFormatReport' | 'exportFormatPaper' | 'exportFormatPresentation' | 'exportFormatMetadata'
+  labelKey:
+    | 'exportFormatReport'
+    | 'exportFormatPaper'
+    | 'exportFormatPresentation'
+    | 'exportFormatSlides'
+    | 'exportFormatNotebook'
+    | 'exportFormatMetadata'
 }> = [
   { format: 'experiment_report', icon: '📋', labelKey: 'exportFormatReport' },
   { format: 'paper_article', icon: '📄', labelKey: 'exportFormatPaper' },
   { format: 'presentation', icon: '📊', labelKey: 'exportFormatPresentation' },
+  { format: 'slides', icon: '🎞️', labelKey: 'exportFormatSlides' },
+  { format: 'notebook', icon: '📓', labelKey: 'exportFormatNotebook' },
   { format: 'metadata', icon: '📦', labelKey: 'exportFormatMetadata' },
 ]
 

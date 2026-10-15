@@ -39,7 +39,7 @@ function formatBytes(size?: number): string {
 }
 
 function previewKind(artifact: PreviewArtifact):
-  'pdf' | 'docx' | 'pptx' | 'image' | 'text' | 'html' | 'unsupported' {
+  'pdf' | 'docx' | 'pptx' | 'image' | 'text' | 'html' | 'slides' | 'notebook' | 'unsupported' {
   const extension = extensionOf(artifact.name)
   const mediaType = artifact.mediaType.toLowerCase()
   if (extension === '.pdf' || mediaType === 'application/pdf') return 'pdf'
@@ -48,6 +48,8 @@ function previewKind(artifact: PreviewArtifact):
   if (mediaType.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension)) {
     return 'image'
   }
+  if (artifact.name.toLowerCase().endsWith('.bento.html')) return 'slides'
+  if (extension === '.ipynb') return 'notebook'
   if (extension === '.html' || extension === '.htm' || mediaType === 'text/html') return 'html'
   if (
     mediaType.startsWith('text/')
@@ -222,6 +224,82 @@ function TextPreview({ artifact }: { artifact: PreviewArtifact }) {
   )
 }
 
+type NotebookCell = {
+  cell_type?: string
+  source?: string | string[]
+  outputs?: Array<Record<string, unknown>>
+  execution_count?: number | null
+}
+
+function joinLines(value: unknown): string {
+  if (Array.isArray(value)) return value.join('')
+  return typeof value === 'string' ? value : ''
+}
+
+function NotebookOutput({ output }: { output: Record<string, unknown> }) {
+  const type = output.output_type
+  if (type === 'stream') {
+    return <pre className="overflow-auto whitespace-pre-wrap bg-black/5 px-3 py-2 text-xs">{joinLines(output.text)}</pre>
+  }
+  if (type === 'error') {
+    const trace = joinLines(output.traceback).replace(/\u001b\[[0-9;]*m/g, '')
+    return <pre className="overflow-auto whitespace-pre-wrap bg-red-500/10 px-3 py-2 text-xs text-[var(--color-danger)]">{trace || `${output.ename}: ${output.evalue}`}</pre>
+  }
+  const data = (output.data ?? {}) as Record<string, unknown>
+  const png = joinLines(data['image/png']).replace(/\s+/g, '')
+  if (png) {
+    return <img src={`data:image/png;base64,${png}`} alt="notebook output" className="max-w-full bg-white px-3 py-2" />
+  }
+  const text = joinLines(data['text/plain'])
+  return text ? <pre className="overflow-auto whitespace-pre-wrap bg-black/5 px-3 py-2 text-xs">{text}</pre> : null
+}
+
+function NotebookPreview({ artifact }: { artifact: PreviewArtifact }) {
+  const [cells, setCells] = useState<NotebookCell[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    setCells(null)
+    setError(null)
+    void fetch(artifact.url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.json() as Promise<{ cells?: NotebookCell[] }>
+      })
+      .then((notebook) => {
+        if (!cancelled) setCells(Array.isArray(notebook.cells) ? notebook.cells : [])
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
+      })
+    return () => { cancelled = true }
+  }, [artifact.url])
+  if (error) return <div className="p-5 text-xs text-[var(--color-danger)]">{error}</div>
+  if (!cells) return <div className="p-5 text-xs text-[var(--color-text-muted)]">…</div>
+  return (
+    <div data-testid="notebook-preview" className="max-h-[70vh] min-h-64 space-y-3 overflow-auto p-5">
+      {cells.map((cell, index) => {
+        const source = joinLines(cell.source)
+        if (cell.cell_type === 'markdown') {
+          return (
+            <div key={index} className="prose prose-sm max-w-none text-[var(--color-text-primary)]">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{source}</ReactMarkdown>
+            </div>
+          )
+        }
+        return (
+          <div key={index} className="overflow-hidden rounded-lg border border-[var(--color-border)]">
+            <pre className="overflow-auto bg-[var(--color-bg-secondary)] px-3 py-2 text-xs"><code>{source}</code></pre>
+            {(cell.outputs ?? []).map((output, outputIndex) => (
+              <NotebookOutput key={outputIndex} output={output} />
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ArtifactBody({
   artifact,
   lang,
@@ -241,6 +319,23 @@ function ArtifactBody({
   if (kind === 'html') {
     return <iframe title={artifact.name} src={artifact.url} sandbox="" className="h-[70vh] min-h-[520px] w-full bg-white" />
   }
+  if (kind === 'slides') {
+    // bento decks need JS. `allow-scripts` WITHOUT `allow-same-origin` keeps the
+    // generated HTML in an opaque origin so it cannot read the engine token that
+    // rides in this URL's query string or call the engine API. Do not relax this.
+    return (
+      <iframe
+        title={artifact.name}
+        src={artifact.url}
+        sandbox="allow-scripts"
+        allow="fullscreen"
+        allowFullScreen
+        data-testid="slides-preview"
+        className="h-[70vh] min-h-[520px] w-full bg-white"
+      />
+    )
+  }
+  if (kind === 'notebook') return <NotebookPreview artifact={artifact} />
   if (kind === 'text') return <TextPreview artifact={artifact} />
   return (
     <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-8 text-center">

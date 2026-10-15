@@ -1,6 +1,6 @@
 import type { ProjectTask } from '@/types'
 
-export type ExportFormat = 'experiment_report' | 'paper_article' | 'presentation' | 'metadata'
+export type ExportFormat = 'experiment_report' | 'paper_article' | 'presentation' | 'slides' | 'notebook' | 'metadata'
 
 export type ExportConfig = {
   title: string
@@ -68,6 +68,45 @@ const EXPORT_CONFIG: Record<ExportFormat, ExportConfig> = {
     ],
     verification: [
       'Write a non-empty PDF file at result/exports/presentation.pdf.',
+    ],
+  },
+  slides: {
+    title: 'Slides (HTML)',
+    outputPath: 'result/exports/slides.bento.html',
+    outputType: 'slides',
+    recommendedSkills: [
+      'mira_engine/skills/builtin_skills/documents/bento-slides/SKILL.md',
+      'mira_engine/skills/builtin_skills/visualization/scientific-visualization/SKILL.md',
+    ],
+    requirements: [
+      'You MUST generate the deck with the bento-slides skill. Read its SKILL.md first and follow it.',
+      'The deliverable is a single self-contained HTML file (*.bento.html) that is viewed in an embedded preview. Do NOT produce a PDF or PPTX for this format.',
+      'Build a concise scientific slide deck from the project evidence: motivation, data, methods, key results with figures/tables, limitations, and next steps.',
+      'Use task_plan.json and existing experiment artifacts as the source of truth. Do not invent results.',
+      'Embed figures inline (data URIs) so the file has no external dependencies and works offline.',
+    ],
+    verification: [
+      'Write a non-empty HTML file at result/exports/slides.bento.html.',
+      'Verify the file is self-contained (no external script/CSS/image URLs) and contains at least a title slide and a results slide.',
+    ],
+  },
+  notebook: {
+    title: 'Jupyter Notebook (.ipynb)',
+    outputPath: 'result/exports/reproduction.ipynb',
+    outputType: 'notebook',
+    recommendedSkills: [
+      'mira_engine/skills/builtin_skills/documents/jupyter-notebook-export/SKILL.md',
+    ],
+    requirements: [
+      'You MUST build the notebook with the jupyter-notebook-export skill. Read its SKILL.md first and follow it.',
+      'Deliver a single .ipynb that lets the user reproduce the experiments: a title/summary cell, an environment and dependencies cell, parameterised data paths, the experiment code in logical cells, and the results (metrics tables and figures).',
+      'Take the code and results from task_plan.json experiments and the existing project artifacts. Do not invent results.',
+      'Execute the notebook in the project virtualenv (nbconvert --execute) so the saved outputs come from a real run.',
+      'If execution fails, report the failing cell and the error honestly. Do not deliver a notebook that was not run successfully without saying so.',
+    ],
+    verification: [
+      'Write a non-empty, valid .ipynb file at result/exports/reproduction.ipynb.',
+      'Verify every code cell has been executed (non-null execution_count) and none has an error output.',
     ],
   },
   metadata: {

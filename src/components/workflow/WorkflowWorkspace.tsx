@@ -80,6 +80,8 @@ const DELIVERY_FORMAT_OPTIONS: Array<{
   { format: 'experiment_report', icon: '📋', en: 'Experiment Report', zh: '实验报告' },
   { format: 'paper_article', icon: '📄', en: 'Journal Article (.docx)', zh: '期刊论文（.docx）' },
   { format: 'presentation', icon: '📊', en: 'Presentation (PDF)', zh: '演示文稿（PDF）' },
+  { format: 'slides', icon: '🎞️', en: 'Slides (HTML)', zh: '幻灯片（HTML）' },
+  { format: 'notebook', icon: '📓', en: 'Jupyter Notebook (.ipynb)', zh: 'Jupyter Notebook（.ipynb）' },
   { format: 'metadata', icon: '📦', en: 'Project Metadata (ZIP)', zh: '项目元数据（ZIP）' },
 ]
 
