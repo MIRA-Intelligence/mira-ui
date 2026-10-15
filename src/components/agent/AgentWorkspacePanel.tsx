@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { AgentPanel } from './AgentPanel'
-import { buildPromotePrefill } from './promote'
 import { ResourceExplorer } from '@/components/project/ResourceExplorer'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -45,7 +44,6 @@ export function AgentWorkspacePanel() {
   const setWorkbenchTab = useUiStore((s) => s.setWorkbenchTab)
   const openNewProject = useUiStore((s) => s.openNewProject)
   const connected = useAgentStore((s) => s.connected)
-  const logsByProject = useAgentStore((s) => s.logsByProject)
   const appMode = useProjectStore((s) => s.appMode)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const mode = useProjectStore((s) => s.mode)
@@ -54,7 +52,6 @@ export function AgentWorkspacePanel() {
   const isChat = appMode === 'normal'
   const sessionId = isChat ? activeChatId : selectedTaskId
   const isAuto = appMode === 'project' && mode === 'auto'
-  const logs = sessionId ? (logsByProject[sessionId] ?? []) : []
 
   return (
     <div className="flex flex-col h-full min-w-0 bg-[var(--color-bg-secondary)]">
@@ -97,9 +94,7 @@ export function AgentWorkspacePanel() {
             {sessionId && isChat && (
               <button
                 type="button"
-                onClick={() =>
-                  openNewProject({ prefill: buildPromotePrefill(logs), fromChatId: sessionId })
-                }
+                onClick={() => openNewProject({ fromChatId: sessionId })}
                 title={t('promoteToProjectHint', lang)}
                 className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-[var(--color-accent)] border border-[var(--color-accent)]/30 hover:bg-[var(--color-accent)]/10 transition-colors whitespace-nowrap"
               >
@@ -119,7 +114,7 @@ export function AgentWorkspacePanel() {
         {workbenchTab === 'files' ? (
           <ResourceExplorer embedded />
         ) : (
-          <AgentPanel embeddedInWorkbench />
+          <AgentPanel />
         )}
       </div>
     </div>
