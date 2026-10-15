@@ -131,6 +131,31 @@ describe('WorkflowWorkspace module entry', () => {
     expect(screen.getByText('模块运行')).not.toBeVisible()
   })
 
+  it('shows a goal example tailored to each workflow stage', () => {
+    useSettingsStore.setState({ language: 'zh' })
+    render(<WorkflowWorkspace />)
+
+    fireEvent.click(screen.getByRole('button', { name: /调研.*启动模块/ }))
+    expect(screen.getByLabelText('本次运行目标')).toHaveAttribute(
+      'placeholder',
+      '例如：调研该方向近三年的关键论文，并提出三个可验证的研究方向。',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /实验.*启动模块/ }))
+    expect(screen.getByLabelText('本次运行目标')).toHaveAttribute(
+      'placeholder',
+      '例如：基于已有数据复现基线方案，对比两种方法，并用预设指标评估结果。',
+    )
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    fireEvent.click(screen.getByRole('button', { name: /结果交付.*启动模块/ }))
+    expect(screen.getByLabelText('本次运行目标')).toHaveAttribute(
+      'placeholder',
+      '例如：汇总已完成实验的关键结果与图表，生成一份结构清晰、可追溯的研究报告。',
+    )
+  })
+
   it('keeps the experiment handoff discoverable until a completed research candidate is selected', () => {
     const researchRun = {
       ...snapshot.runs[0], status: 'completed' as const, outputs: ['research-artifact'],
