@@ -39,10 +39,11 @@ export function installRuntimeDiagnostics(getEngineApi: () => string): () => voi
       url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, window.location.href)
       const engine = new URL(getEngineApi(), window.location.href)
       const apiPath = engine.pathname.replace(/\/$/, '')
-      // The compatibility probe calls /health and /version on the gateway root
-      // (the API URL without /api), so those must negotiate tracing too.
+      // Both API-prefixed probes (including Vite's proxy) and legacy gateway
+      // probes negotiate tracing without requiring a preflight themselves.
       const gatewayPath = apiPath.replace(/\/api$/, '')
-      isProbe = url.pathname === `${gatewayPath}/version` || url.pathname === `${gatewayPath}/health`
+      isProbe = [apiPath, gatewayPath].some((base) =>
+        url.pathname === `${base}/version` || url.pathname === `${base}/health`)
       if (url.origin !== engine.origin || (!isProbe && !url.pathname.startsWith(apiPath + '/'))) {
         return originalFetch.call(window, input, init)
       }

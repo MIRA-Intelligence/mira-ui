@@ -76,12 +76,21 @@ function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const resizeDragRef = useRef<{ pointerId: number; startY: number; startHeight: number } | null>(null)
   const sendShortcut = useSettingsStore((s) => s.sendShortcut ?? 'enter')
+  const draftPrompt = useUiStore((s) => s.agentDraftPrompt)
+  const appMode = useProjectStore((s) => s.appMode)
 
   useEffect(() => {
     setInput('')
     setSelectedSkills([])
     setSkillPickerOpen(false)
   }, [sessionId])
+
+  useEffect(() => {
+    if (appMode !== 'normal' || !sessionId || draftPrompt === null) return
+    setInput(draftPrompt)
+    useUiStore.getState().setAgentDraftPrompt(null)
+    textareaRef.current?.focus()
+  }, [appMode, sessionId, draftPrompt])
 
   const resizeTextarea = () => {
     const textarea = textareaRef.current

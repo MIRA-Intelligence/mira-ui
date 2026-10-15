@@ -539,21 +539,6 @@ export async function fetchProjectFiles(sessionId: string): Promise<ProjectFileI
   return result.ok ? result.files : []
 }
 
-export async function deleteProjectFile(sessionId: string, path: string): Promise<boolean> {
-  try {
-    const qs = `?path=${encodeURIComponent(path)}`
-    const resp = await fetch(
-      `${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/files${qs}`,
-      { method: 'DELETE' },
-    )
-    if (!resp.ok) return false
-    const data = await resp.json()
-    return !!data?.deleted
-  } catch {
-    return false
-  }
-}
-
 export interface UploadedProjectFile {
   name: string
   path: string
@@ -650,6 +635,12 @@ export function getProjectArtifactUrl(sessionId: string, artifactPath: string): 
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
   return withEngineAuth(`${getApiUrl()}/projects/${sid}/artifacts?path=${path}`)
+}
+
+export function getArtifactDownloadUrl(url: string): string {
+  const downloadUrl = new URL(url, window.location.href)
+  downloadUrl.searchParams.set('download', '1')
+  return downloadUrl.toString()
 }
 
 export async function fetchSkillPlugins(sessionId: string): Promise<SkillPlugin[]> {

@@ -3,19 +3,13 @@ import type { DeploymentMode } from '@/stores/settingsStore'
 const LOCAL_API_BASE = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
 
-function isBrowserDev(): boolean {
-  return import.meta.env.DEV
-    && typeof window !== 'undefined'
-    && !window.electronAPI
-}
-
-/** API base for HTTP calls. Vite dev uses same-origin proxy to avoid CORS / bad host. */
+/** Preserve the configured gateway in browser dev as well as packaged builds.
+ * To use Vite's proxy, configure the endpoints to the dev server's /api and /ws.
+ * This also keeps token lookup aligned with the origin selected in settings.
+ */
 export function resolveApiUrl(
   state: { apiUrl: string; deploymentMode: DeploymentMode },
 ): string {
-  if (isBrowserDev()) {
-    return `${window.location.origin}/api`
-  }
   if (state.deploymentMode === 'localBundle') return LOCAL_API_BASE
   const raw = (state.apiUrl || LOCAL_API_BASE).trim()
   try {
@@ -34,10 +28,6 @@ export function resolveApiUrl(
 export function resolveWsUrl(
   state: { wsUrl: string; deploymentMode: DeploymentMode },
 ): string {
-  if (isBrowserDev()) {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    return `${proto}//${window.location.host}/ws`
-  }
   if (state.deploymentMode === 'localBundle') return LOCAL_WS_URL
   const raw = (state.wsUrl || LOCAL_WS_URL).trim()
   try {

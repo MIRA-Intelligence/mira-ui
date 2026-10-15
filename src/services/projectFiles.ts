@@ -36,7 +36,7 @@ export async function fetchAllProjectFiles(
         projectId: project.id,
         relativePath: file.path,
         projectLabel: project.label,
-        path: `${project.label || project.id}/${file.path}`,
+        path: `${project.id}/${file.path}`,
       }))
     } catch {
       return []

@@ -8,7 +8,7 @@ describe('projectFiles', () => {
     vi.restoreAllMocks()
   })
 
-  it('prefixes paths with project label when available', async () => {
+  it('uses project IDs for paths and keeps labels for display', async () => {
     vi.spyOn(api, 'fetchProjectFiles').mockImplementation(async (id: string) => {
       if (id === 'PRJ-A') return [{ name: 'a.csv', path: 'data/a.csv', size: 1, mtime: 0, is_dir: false }]
       if (id === 'PRJ-B') return [{ name: 'b.csv', path: 'data/b.csv', size: 2, mtime: 0, is_dir: false }]
@@ -21,7 +21,7 @@ describe('projectFiles', () => {
     expect(files[0]).toMatchObject({
       projectId: 'PRJ-A',
       relativePath: 'data/a.csv',
-      path: 'test/data/a.csv',
+      path: 'PRJ-A/data/a.csv',
       projectLabel: 'test',
     })
     expect(files[1]).toMatchObject({

@@ -88,6 +88,17 @@ describe('AgentPanel keyboard behavior', () => {
     expect(screen.getByRole('button', { name: 'Drag upward to expand the input' })).toHaveClass('cursor-ns-resize')
   })
 
+  it('fills the Quick Chat composer from a home prompt without sending it', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useProjectStore.setState({ appMode: 'normal' })
+    useChatStore.setState({ activeChatId: 'chat-test' })
+    useUiStore.setState({ agentDraftPrompt: 'Help outline a research question' })
+    render(<AgentPanel />)
+    expect(screen.getByRole('textbox')).toHaveValue('Help outline a research question')
+    expect(useUiStore.getState().agentDraftPrompt).toBeNull()
+    expect(sendSpy.mock.calls.filter(([payload]) => payload.type === 'message')).toHaveLength(0)
+  })
+
   it('supports the legacy Shift+Enter send shortcut', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     useSettingsStore.setState({ sendShortcut: 'shift_enter' })

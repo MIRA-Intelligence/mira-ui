@@ -89,8 +89,7 @@ describe('useWebSocket', () => {
     render(<HookHarness />)
 
     await waitFor(() => {
-      // browser dev routes through the same-origin Vite proxy
-      expect(probeEngineCompatibility).toHaveBeenCalledWith(`${window.location.origin}/api`)
+      expect(probeEngineCompatibility).toHaveBeenCalledWith('http://127.0.0.1:18790/api')
     })
 
     expect(useSettingsStore.getState().engineStatus).toBe('setup_required')

@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import { ArtifactPreview } from '@/components/artifacts'
 import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
-import { getProjectArtifactUrl } from '@/services/api'
+import { getArtifactDownloadUrl, getProjectArtifactUrl } from '@/services/api'
 import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -48,6 +48,7 @@ export function ChatMainPlaceholder() {
   )
 
   const usePrompt = (key: (typeof PROMPT_KEYS)[number]) => {
+    if (!useChatStore.getState().activeChatId) createChat()
     setAgentDraftPrompt(t(key, lang))
     focusQuickChatWorkbench()
   }
@@ -69,7 +70,7 @@ export function ChatMainPlaceholder() {
             onClick={() => {
               const url = getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)
               const link = document.createElement('a')
-              link.href = url
+              link.href = getArtifactDownloadUrl(url)
               link.download = previewFile.name
               document.body.appendChild(link)
               link.click()

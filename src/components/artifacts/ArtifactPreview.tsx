@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
+import { getArtifactDownloadUrl } from '@/services/api'
 
 import { CsvTable } from './CsvTable'
 import { DocxBody } from './DocxBody'
@@ -72,7 +73,7 @@ export function ArtifactPreview({
     if (!enabled) return
     const filename = path.split('/').filter(Boolean).pop() || 'artifact'
     const link = document.createElement('a')
-    link.href = url
+    link.href = getArtifactDownloadUrl(url)
     link.download = filename
     link.rel = 'noopener noreferrer'
     document.body.appendChild(link)

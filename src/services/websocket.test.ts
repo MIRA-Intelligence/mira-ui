@@ -52,9 +52,7 @@ describe('wsClient', () => {
     wsClient.connect()
 
     const socket = MockWebSocket.instances.at(-1)
-    // browser dev routes through the same-origin Vite proxy
-    const expectedProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    expect(socket?.url).toBe(`${expectedProto}//${window.location.host}/ws`)
+    expect(socket?.url).toBe('ws://127.0.0.1:18790/ws')
     socket?.emitOpen()
 
     const statuses: boolean[] = []

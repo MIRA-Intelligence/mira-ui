@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deleteProjectFile,
   fetchProjectFilesResult,
   getProjectArtifactUrl,
+  getArtifactDownloadUrl,
   uploadProjectFiles,
 } from '@/services/api'
 import { fetchAllProjectFiles, toProjectScopedEntries } from '@/services/projectFiles'
@@ -115,7 +115,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
       isDir: true,
       size: 0,
       mtime: 0,
-      children: {},
+      children: Object.create(null),
     }
 
     fileList.forEach((file) => {
@@ -125,12 +125,12 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         const isLast = index === parts.length - 1
         if (!current.children[part]) {
           current.children[part] = {
-            name: part,
+            name: scope === 'all' && index === 0 ? (file.projectLabel || part) : part,
             path: parts.slice(0, index + 1).join('/'),
             isDir: isLast ? file.is_dir : true,
             size: isLast ? file.size : 0,
             mtime: isLast ? file.mtime : 0,
-            children: {},
+            children: Object.create(null),
           }
         }
         current = current.children[part]
@@ -138,25 +138,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
     })
 
     return root
-  }
-
-  const handleDelete = async (file: ProjectFileEntry) => {
-    if (!confirm(t('deleteFileConfirm', lang))) return
-    try {
-      const ok = await deleteProjectFile(file.projectId, file.relativePath)
-      if (ok) {
-        pushSystemMessage(t('deleteFileSuccess', lang), { severity: 'success' })
-        if (selectedFile?.path === file.path) setSelectedFile(null)
-        if (previewFile?.path === file.path) setPreviewFile(null)
-        if (chatCenterPreviewFile?.path === file.path) setChatCenterPreviewFile(null)
-        void loadFiles()
-      } else {
-        pushSystemMessage(t('deleteFileFailed', lang), { severity: 'error' })
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : t('deleteFileFailed', lang)
-      pushSystemMessage(message, { severity: 'error' })
-    }
   }
 
   const showUploadBlocked = () => {
@@ -272,19 +253,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
           <span className="truncate flex-1" title={node.name}>
             {node.name}
           </span>
-          {!node.isDir && entry && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                void handleDelete(entry)
-              }}
-              className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-[var(--color-text-muted)] hover:text-red-500"
-              title={t('delete', lang)}
-            >
-              🗑
-            </button>
-          )}
         </div>
         {node.isDir && isExpanded && hasChildren && (
           <div className="mt-0.5">
@@ -324,7 +292,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
 
   const downloadFile = (file: ProjectFileEntry) => {
     const link = document.createElement('a')
-    link.href = getProjectArtifactUrl(file.projectId, file.relativePath)
+    link.href = getArtifactDownloadUrl(getProjectArtifactUrl(file.projectId, file.relativePath))
     link.download = file.name
     link.rel = 'noopener noreferrer'
     document.body.appendChild(link)

@@ -112,6 +112,12 @@ describe('ArtifactPreview', () => {
     expect(screen.getByText('colB')).toBeInTheDocument()
   })
 
+  it('shows failed Excel downloads instead of loading forever', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })))
+    render(<ArtifactPreview path="missing.xlsx" url="/missing.xlsx" bodyOnly />)
+    expect(await screen.findByText(/HTTP 404/)).toBeInTheDocument()
+  })
+
   it('renders all pptx slides in list mode', async () => {
     mockFileFetch()
     render(

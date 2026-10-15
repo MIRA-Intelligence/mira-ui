@@ -92,6 +92,23 @@ describe('engine gateway auth', () => {
     expect(onUnauthorized).toHaveBeenCalledWith('https://mira.lab.example:18790', false)
   })
 
+  it('authenticates an explicitly configured dev proxy for HTTP and resources', async () => {
+    const apiUrl = `${window.location.origin}/api`
+    useSettingsStore.setState({
+      apiUrl,
+      wsUrl: `ws://${window.location.host}/ws`,
+      engineTokens: { [window.location.origin]: REMOTE_TOKEN },
+    })
+    const nativeFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json({ ok: true }))
+    vi.stubGlobal('fetch', nativeFetch)
+    disposers.push(installEngineAuth(vi.fn()))
+    await fetch(`${apiUrl}/projects`)
+    expect(authHeader(nativeFetch.mock.calls[0])).toBe(`Bearer ${REMOTE_TOKEN}`)
+    const artifact = new URL(getProjectArtifactUrl('PRJ-1', 'out/a.png'))
+    expect(artifact.origin).toBe(window.location.origin)
+    expect(artifact.searchParams.get('access_token')).toBe(REMOTE_TOKEN)
+  })
+
   it('reads the desktop token over IPC and retries once after a rotated token', async () => {
     useSettingsStore.setState({
       deploymentMode: 'localBundle',

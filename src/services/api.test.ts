@@ -1,9 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteProject, fetchProjectFilesResult, fetchSkillHistory, uploadProjectFiles } from './api'
+import { deleteProject, fetchProjectFilesResult, fetchSkillHistory, getArtifactDownloadUrl, uploadProjectFiles } from './api'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialSettingsState = useSettingsStore.getState()
+
+describe('artifact downloads', () => {
+  it('requests an attachment from a cross-origin engine while preserving path and authentication', () => {
+    const url = getArtifactDownloadUrl('http://127.0.0.1:18791/api/projects/a/artifacts?path=data%2F%E6%B5%8B%E8%AF%95.txt&token=a%2Bb')
+    const parsed = new URL(url)
+    expect(parsed.origin).toBe('http://127.0.0.1:18791')
+    expect(parsed.searchParams.get('path')).toBe('data/测试.txt')
+    expect(parsed.searchParams.get('token')).toBe('a+b')
+    expect(parsed.searchParams.get('download')).toBe('1')
+    expect(getArtifactDownloadUrl(url)).toBe(url)
+  })
+})
 
 describe('fetchSkillHistory', () => {
   it('encodes the session and forwards the pagination cursor', async () => {
@@ -11,7 +23,7 @@ describe('fetchSkillHistory', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [], next_cursor: null })))
     vi.stubGlobal('fetch', fetchMock)
     expect(await fetchSkillHistory('chat:a/b', 12)).toEqual({ events: [], next_cursor: null })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/sessions/chat%3Aa%2Fb/skills?cursor=12')
+    expect(fetchMock).toHaveBeenCalledWith('http://agent.local/api/sessions/chat%3Aa%2Fb/skills?cursor=12')
   })
 
   describe('fetchProjectFilesResult', () => {
@@ -101,7 +113,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: true, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3000/api/projects?session_id=PRJ-0001',
+      'http://agent.local/api/projects?session_id=PRJ-0001',
       { method: 'DELETE' },
     )
   })
@@ -117,7 +129,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: false, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:3000/api/projects/PRJ-0001/remove',
+      'http://agent.local/api/projects/PRJ-0001/remove',
       { method: 'POST' },
     )
   })

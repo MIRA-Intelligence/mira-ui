@@ -22,7 +22,7 @@ export function SpreadsheetBody({ url }: { url: string; prominent?: boolean }) {
   }, [url])
 
   const parsed: ParsedWorkbook = useMemo(() => {
-    if (state.status !== 'ok') return { status: 'loading' }
+    if (state.status !== 'ok') return state
     try {
       return { status: 'ok', workbook: XLSX.read(state.buffer, { type: 'array' }) }
     } catch (err: unknown) {
