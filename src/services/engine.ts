@@ -36,8 +36,8 @@ function currentLanguage() {
   return useSettingsStore.getState().language
 }
 
-function normalizeGatewayBase(apiUrl: string): string {
-  return apiUrl.replace(/\/api\/?$/, '')
+function normalizeApiBase(apiUrl: string): string {
+  return apiUrl.replace(/\/$/, '')
 }
 
 function parseSemver(input: string): [number, number, number] | null {
@@ -96,10 +96,10 @@ function explainRuntimeSetup(payload: Partial<RuntimeConfigPayload>): string | n
 }
 
 export async function probeEngineCompatibility(apiUrl: string): Promise<EngineProbeResult> {
-  const base = normalizeGatewayBase(apiUrl)
+  const apiBase = normalizeApiBase(apiUrl)
   const lang = currentLanguage()
   try {
-    const healthResp = await fetch(`${base}/health`)
+    const healthResp = await fetch(`${apiBase}/health`)
     if (!healthResp.ok) {
       return {
         status: 'unreachable',
@@ -109,7 +109,7 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       }
     }
 
-    const versionResp = await fetch(`${base}/version`)
+    const versionResp = await fetch(`${apiBase}/version`)
     if (!versionResp.ok) {
       return {
         status: 'unreachable',
@@ -157,12 +157,12 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       }
     }
 
-    const configResp = await fetch(`${base}/api/config`)
+    const configResp = await fetch(`${apiBase}/config`)
     if (configResp.status === 401) {
       // Reachable and compatible, but our gateway token is missing or stale.
       return {
         status: 'unreachable',
-        message: t(usesDesktopEngineToken(base) ? 'engineTokenRejectedDesktop' : 'engineTokenRejectedRemote', lang),
+        message: t(usesDesktopEngineToken(apiBase) ? 'engineTokenRejectedDesktop' : 'engineTokenRejectedRemote', lang),
         version,
         uptimeSeconds,
       }

@@ -9,6 +9,11 @@ export type ArtifactKind =
   | 'html'
   | 'audio'
   | 'video'
+  | 'docx'
+  | 'doc'
+  | 'xlsx'
+  | 'pptx'
+  | 'ppt'
   | 'binary'
 
 const EXT_MAP: Record<string, ArtifactKind> = {
@@ -42,6 +47,12 @@ const EXT_MAP: Record<string, ArtifactKind> = {
   sh: 'text',
   sql: 'text',
   pdf: 'pdf',
+  docx: 'docx',
+  doc: 'doc',
+  xlsx: 'xlsx',
+  xls: 'xlsx',
+  pptx: 'pptx',
+  ppt: 'ppt',
   html: 'html',
   htm: 'html',
   mp3: 'audio',
@@ -69,6 +80,11 @@ const KIND_ICON: Record<ArtifactKind, string> = {
   markdown: '¶',
   text: '⌨',
   pdf: '📄',
+  docx: '📝',
+  doc: '📝',
+  xlsx: '📊',
+  pptx: '📽',
+  ppt: '📽',
   html: '◧',
   audio: '♪',
   video: '▶',
@@ -86,6 +102,12 @@ export function isPreviewableInline(kind: ArtifactKind): boolean {
     kind === 'csv' ||
     kind === 'tsv' ||
     kind === 'markdown' ||
-    kind === 'text'
+    kind === 'text' ||
+    kind === 'pdf' ||
+    kind === 'docx' ||
+    kind === 'xlsx' ||
+    kind === 'pptx' ||
+    kind === 'audio' ||
+    kind === 'video'
   )
 }

@@ -603,3 +603,21 @@ export interface SkillPlugin {
   groups: SkillPluginGroup[]
   skills: SkillPluginSkill[]
 }
+
+export interface ProjectFileInfo {
+  name: string
+  path: string
+  size: number
+  mtime: number
+  is_dir: boolean
+}
+
+/** File row in the explorer; includes project routing for workspace-wide views. */
+export interface ProjectFileEntry extends ProjectFileInfo {
+  projectId: string
+  projectLabel?: string
+  /** Path relative to the project root (used for API calls). */
+  relativePath: string
+}
+
+export type FileExplorerScope = 'all' | 'project'

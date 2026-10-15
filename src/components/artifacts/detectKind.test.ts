@@ -17,6 +17,12 @@ describe('detectArtifactKind', () => {
     ['script.py', 'text'],
     ['config.yaml', 'text'],
     ['paper.pdf', 'pdf'],
+    ['paper.docx', 'docx'],
+    ['legacy.doc', 'doc'],
+    ['budget.xlsx', 'xlsx'],
+    ['legacy.xls', 'xlsx'],
+    ['slides.pptx', 'pptx'],
+    ['legacy.ppt', 'ppt'],
     ['index.html', 'html'],
     ['take.mp3', 'audio'],
     ['movie.mp4', 'video'],
@@ -46,7 +52,15 @@ describe('detectArtifactKind', () => {
     expect(isPreviewableInline('tsv')).toBe(true)
     expect(isPreviewableInline('markdown')).toBe(true)
     expect(isPreviewableInline('text')).toBe(true)
-    expect(isPreviewableInline('pdf')).toBe(false)
+    expect(isPreviewableInline('pdf')).toBe(true)
+    expect(isPreviewableInline('docx')).toBe(true)
+    expect(isPreviewableInline('xlsx')).toBe(true)
+    expect(isPreviewableInline('pptx')).toBe(true)
+    expect(isPreviewableInline('audio')).toBe(true)
+    expect(isPreviewableInline('video')).toBe(true)
+    expect(isPreviewableInline('html')).toBe(false)
+    expect(isPreviewableInline('doc')).toBe(false)
+    expect(isPreviewableInline('ppt')).toBe(false)
     expect(isPreviewableInline('binary')).toBe(false)
   })
 })

@@ -7,6 +7,7 @@ import {
   updateOrganizationChat,
   type RemoteChat,
 } from '@/services/api'
+import { useUiStore } from '@/stores/uiStore'
 
 /**
  * A lightweight Quick Chat conversation (basic loop). Unlike a research
@@ -121,12 +122,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updated_at: new Date(now).toISOString(),
     }]).catch(() => {})
     useProjectStore.getState().setAppMode('normal')
+    useUiStore.getState().focusQuickChatWorkbench()
     return id
   },
 
   selectChat: (id) => {
     set({ activeChatId: id })
     useProjectStore.getState().setAppMode('normal')
+    useUiStore.getState().focusQuickChatWorkbench()
   },
 
   renameChat: (id, title) => {

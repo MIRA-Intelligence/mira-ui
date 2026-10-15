@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ProjectFileEntry } from '@/types'
 
 export type SystemMessageSeverity = 'info' | 'success' | 'warning' | 'error'
 
@@ -19,10 +20,33 @@ const MAX_SYSTEM_MESSAGES = 16
 
 // Resizable panel bounds (px). Widths persist per browser via localStorage.
 export const SIDEBAR_WIDTH = { min: 160, max: 400, default: 220 } as const
-export const AGENT_PANEL_WIDTH = { min: 360, max: 960, default: 560 } as const
+export const AGENT_PANEL_WIDTH = { min: 480, max: 1200, default: 720 } as const
+export const RESOURCE_PANEL_WIDTH = { min: 200, max: 520, default: 280 } as const
 
 const SIDEBAR_WIDTH_KEY = 'mira:ui:sidebarWidth'
 const AGENT_PANEL_WIDTH_KEY = 'mira:ui:agentPanelWidth'
+const RESOURCE_PANEL_WIDTH_KEY = 'mira:ui:resourcePanelWidth'
+const WORKBENCH_TAB_KEY = 'mira:ui:workbenchTab'
+
+export type WorkbenchTab = 'files' | 'agent'
+
+function loadWorkbenchTab(): WorkbenchTab {
+  try {
+    const raw = localStorage.getItem(WORKBENCH_TAB_KEY)
+    if (raw === 'files' || raw === 'agent') return raw
+  } catch {
+    // ignore
+  }
+  return 'agent'
+}
+
+function saveWorkbenchTab(tab: WorkbenchTab) {
+  try {
+    localStorage.setItem(WORKBENCH_TAB_KEY, tab)
+  } catch {
+    // ignore
+  }
+}
 
 function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min
@@ -54,9 +78,17 @@ export interface OpenNewProjectOptions {
 
 interface UiState {
   sidebarCollapsed: boolean
+  /** Quick-chat center pane (home / file preview) collapsed to foreground the agent workbench. */
+  chatCenterCollapsed: boolean
   agentPanelCollapsed: boolean
   sidebarWidth: number
   agentPanelWidth: number
+  resourcePanelWidth: number
+  workbenchTab: WorkbenchTab
+  /** Chat-mode center pane: file preview (normal mode only). */
+  chatCenterPreviewFile: ProjectFileEntry | null
+  /** One-shot prompt seed for the agent composer (chat mode home chips). */
+  agentDraftPrompt: string | null
   newProjectOpen: boolean
   newProjectFromChatId: string | null
   skillsPluginsOpen: boolean
@@ -72,9 +104,17 @@ interface UiState {
   toggleSidebar: () => void
   setSidebarCollapsed: (v: boolean) => void
   setSidebarWidth: (px: number) => void
+  toggleChatCenter: () => void
+  setChatCenterCollapsed: (v: boolean) => void
+  /** Collapse quick-chat home and expand the agent workbench (chat mode). */
+  focusQuickChatWorkbench: () => void
   toggleAgentPanel: () => void
   setAgentPanelCollapsed: (v: boolean) => void
   setAgentPanelWidth: (px: number) => void
+  setResourcePanelWidth: (px: number) => void
+  setWorkbenchTab: (tab: WorkbenchTab) => void
+  setChatCenterPreviewFile: (file: ProjectFileEntry | null) => void
+  setAgentDraftPrompt: (text: string | null) => void
   openNewProject: (options?: OpenNewProjectOptions) => void
   closeNewProject: () => void
   openSkillsPlugins: () => void
@@ -97,9 +137,14 @@ function nextSystemMessageId(): string {
 
 export const useUiStore = create<UiState>((set) => ({
   sidebarCollapsed: false,
+  chatCenterCollapsed: false,
   agentPanelCollapsed: false,
   sidebarWidth: loadWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH),
   agentPanelWidth: loadWidth(AGENT_PANEL_WIDTH_KEY, AGENT_PANEL_WIDTH),
+  resourcePanelWidth: loadWidth(RESOURCE_PANEL_WIDTH_KEY, RESOURCE_PANEL_WIDTH),
+  workbenchTab: loadWorkbenchTab(),
+  chatCenterPreviewFile: null,
+  agentDraftPrompt: null,
   newProjectOpen: false,
   newProjectFromChatId: null,
   skillsPluginsOpen: false,
@@ -109,6 +154,17 @@ export const useUiStore = create<UiState>((set) => ({
   systemMessages: [],
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+  toggleChatCenter: () => set((s) => ({ chatCenterCollapsed: !s.chatCenterCollapsed })),
+  setChatCenterCollapsed: (v) => set({ chatCenterCollapsed: v }),
+  focusQuickChatWorkbench: () => {
+    saveWorkbenchTab('agent')
+    set({
+      chatCenterCollapsed: true,
+      agentPanelCollapsed: false,
+      workbenchTab: 'agent',
+      chatCenterPreviewFile: null,
+    })
+  },
   setSidebarWidth: (px) => {
     const w = clamp(px, SIDEBAR_WIDTH.min, SIDEBAR_WIDTH.max)
     saveWidth(SIDEBAR_WIDTH_KEY, w)
@@ -121,6 +177,21 @@ export const useUiStore = create<UiState>((set) => ({
     saveWidth(AGENT_PANEL_WIDTH_KEY, w)
     set({ agentPanelWidth: w })
   },
+  setResourcePanelWidth: (px) => {
+    const w = clamp(px, RESOURCE_PANEL_WIDTH.min, RESOURCE_PANEL_WIDTH.max)
+    saveWidth(RESOURCE_PANEL_WIDTH_KEY, w)
+    set({ resourcePanelWidth: w })
+  },
+  setWorkbenchTab: (tab) => {
+    saveWorkbenchTab(tab)
+    set({ workbenchTab: tab })
+  },
+  setChatCenterPreviewFile: (file) =>
+    set({
+      chatCenterPreviewFile: file,
+      ...(file ? { chatCenterCollapsed: false } : {}),
+    }),
+  setAgentDraftPrompt: (text) => set({ agentDraftPrompt: text }),
   openNewProject: (options) =>
     set({
       newProjectOpen: true,

@@ -375,4 +375,36 @@ describe('probeEngineCompatibility', () => {
     expect(result.message).toContain('mira gateway-token')
     expect(result.version).toBe(compatibleEngineVersion)
   })
+
+  it('probes health and version under /api for Vite dev same-origin proxy', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === 'http://127.0.0.1:5173/api/health') {
+        return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url === 'http://127.0.0.1:5173/api/version') {
+        return new Response(
+          JSON.stringify({ agent_version: compatibleEngineVersion, api_contract: 'v1' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url === 'http://127.0.0.1:5173/api/config') {
+        return new Response(
+          JSON.stringify({
+            runtime: { provider: 'auto', model: 'claude-sonnet-4-5', setup_required: false, setup_message: null },
+            providers: {},
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await probeEngineCompatibility('http://127.0.0.1:5173/api')
+
+    expect(result.status).toBe('compatible')
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:5173/api/health')
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:5173/api/version')
+  })
 })

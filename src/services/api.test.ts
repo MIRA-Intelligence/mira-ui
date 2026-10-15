@@ -1,17 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteProject, fetchSkillHistory, uploadProjectFiles } from './api'
+import { deleteProject, fetchProjectFilesResult, fetchSkillHistory, uploadProjectFiles } from './api'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialSettingsState = useSettingsStore.getState()
 
 describe('fetchSkillHistory', () => {
   it('encodes the session and forwards the pagination cursor', async () => {
-    useSettingsStore.setState({ apiUrl: 'http://agent.local/api' })
+    useSettingsStore.setState({ deploymentMode: 'remoteManual', apiUrl: 'http://agent.local/api' })
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [], next_cursor: null })))
     vi.stubGlobal('fetch', fetchMock)
     expect(await fetchSkillHistory('chat:a/b', 12)).toEqual({ events: [], next_cursor: null })
-    expect(fetchMock).toHaveBeenCalledWith('http://agent.local/api/sessions/chat%3Aa%2Fb/skills?cursor=12')
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:3000/api/sessions/chat%3Aa%2Fb/skills?cursor=12')
+  })
+
+  describe('fetchProjectFilesResult', () => {
+    it('returns normalized file rows on success', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          files: [
+            { name: 'a.csv', path: 'data/a.csv', size: 12, mtime: 1_700_000_000, is_dir: false },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )))
+
+      const result = await fetchProjectFilesResult('PRJ-0001')
+      expect(result).toEqual({
+        ok: true,
+        files: [{
+          name: 'a.csv',
+          path: 'data/a.csv',
+          size: 12,
+          mtime: 1_700_000_000,
+          is_dir: false,
+        }],
+      })
+    })
+
+    it('surfaces HTTP errors instead of pretending the folder is empty', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+        '405: Method Not Allowed',
+        { status: 405 },
+      )))
+
+      const result = await fetchProjectFilesResult('PRJ-0001')
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.status).toBe(405)
+    })
   })
 })
 
@@ -19,7 +55,7 @@ describe('uploadProjectFiles', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     useSettingsStore.setState(initialSettingsState, true)
-    useSettingsStore.setState({ apiUrl: 'http://agent.local/api' })
+    useSettingsStore.setState({ deploymentMode: 'remoteManual', apiUrl: 'http://agent.local/api' })
   })
 
   it('preserves folder-relative paths from directory uploads', async () => {
@@ -51,7 +87,7 @@ describe('deleteProject', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     useSettingsStore.setState(initialSettingsState, true)
-    useSettingsStore.setState({ apiUrl: 'http://agent.local/api' })
+    useSettingsStore.setState({ deploymentMode: 'remoteManual', apiUrl: 'http://agent.local/api' })
   })
 
   it('deletes local project files through the existing delete endpoint', async () => {
@@ -65,7 +101,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: true, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://agent.local/api/projects?session_id=PRJ-0001',
+      'http://localhost:3000/api/projects?session_id=PRJ-0001',
       { method: 'DELETE' },
     )
   })
@@ -81,7 +117,7 @@ describe('deleteProject', () => {
 
     expect(result).toEqual({ deleted: false, removed: true, reason: undefined })
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://agent.local/api/projects/PRJ-0001/remove',
+      'http://localhost:3000/api/projects/PRJ-0001/remove',
       { method: 'POST' },
     )
   })
