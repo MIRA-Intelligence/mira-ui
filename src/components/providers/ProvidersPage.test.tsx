@@ -86,6 +86,16 @@ describe('ProvidersPage', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
+  it('keeps the header out of the Electron drag region so Save/Close stay clickable', async () => {
+    window.electronAPI = { platform: 'darwin' } as typeof window.electronAPI
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    const header = (await screen.findByRole('button', { name: 'Cancel' })).closest('[data-drag-region]')
+    expect(header).toHaveAttribute('data-drag-region', 'no-drag')
+    expect(header).toHaveClass('pl-24')
+    window.electronAPI = undefined as unknown as typeof window.electronAPI
+  })
+
   it('loads providers and groups them by enabled state', async () => {
     useUiStore.getState().openProviders()
     render(<ProvidersPage />)

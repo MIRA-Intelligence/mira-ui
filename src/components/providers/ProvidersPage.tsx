@@ -167,6 +167,7 @@ function buildActive(payload: RuntimeConfigPayload): ActiveDraft {
 export function ProvidersPage() {
   const providersOpen = useUiStore((s) => s.providersOpen)
   const closeProviders = useUiStore((s) => s.closeProviders)
+  const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
   const lang = useSettingsStore((s) => s.language)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const setRuntimeConfig = useSettingsStore((s) => s.setRuntimeConfig)
@@ -484,7 +485,17 @@ export function ProvidersPage() {
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
+      {/* This overlay covers the TopBar, which is an Electron drag region on
+          macOS. Drag regions swallow clicks regardless of z-index, so the
+          header must opt out or Save / Close are unclickable. On macOS the
+          hiddenInset traffic lights also sit over the top-left corner. */}
+      <div
+        data-drag-region="no-drag"
+        className={cn(
+          'flex items-center justify-between py-4 pr-6 border-b border-[var(--color-border)] shrink-0',
+          isMacDesktop ? 'pl-24' : 'pl-6',
+        )}
+      >
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('providersTitle', lang)}</h2>
         <div className="flex items-center gap-3">
           <button
