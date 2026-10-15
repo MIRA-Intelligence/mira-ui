@@ -7,6 +7,7 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: 'hidden',
       outDir: 'dist-electron',
       rollupOptions: {
         input: resolve(__dirname, 'electron/main.ts'),
@@ -32,6 +33,7 @@ export default defineConfig({
     },
     root: '.',
     build: {
+      sourcemap: 'hidden',
       outDir: 'dist',
       rollupOptions: {
         input: resolve(__dirname, 'index.html'),

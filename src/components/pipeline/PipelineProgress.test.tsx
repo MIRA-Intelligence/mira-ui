@@ -88,9 +88,9 @@ describe('PipelineProgress agent profile switch', () => {
     expect(useProjectStore.getState().agentProfile).toBe('team')
   })
 
-  it('disables switching profile while the agent is streaming', () => {
+  it('disables switching profile while a run is active', () => {
     useProjectStore.setState({
-      tasks: [makeTask(false)],
+      tasks: [makeTask(true)],
       selectedTaskId: 'PRJ-0001',
       mode: 'manual',
       agentProfile: 'research',
@@ -106,25 +106,7 @@ describe('PipelineProgress agent profile switch', () => {
     expect(useProjectStore.getState().agentProfile).toBe('research')
   })
 
-  it('allows switching profile when an experiment is marked running but the agent is idle', () => {
-    useProjectStore.setState({
-      tasks: [makeTask(true)],
-      selectedTaskId: 'PRJ-0001',
-      mode: 'auto',
-      agentProfile: 'research',
-      activeStage: 'research',
-    })
-    useAgentStore.setState({ streamingBySession: {} })
-
-    render(<PipelineProgress />)
-
-    const engineer = screen.getByRole('button', { name: 'Engineer' })
-    expect(engineer).not.toBeDisabled()
-    fireEvent.click(engineer)
-    expect(useProjectStore.getState().agentProfile).toBe('engineer')
-  })
-
-  it('allows switching contract mode when idle', () => {
+  it('does not expose experiment acceptance mode globally', () => {
     useProjectStore.setState({
       tasks: [makeTask(false)],
       selectedTaskId: 'PRJ-0001',
@@ -136,11 +118,22 @@ describe('PipelineProgress agent profile switch', () => {
 
     render(<PipelineProgress />)
 
-    const strict = screen.getByRole('button', { name: 'Strict' })
-    expect(strict).not.toBeDisabled()
-    fireEvent.click(strict)
-    const updatedTask = useProjectStore.getState().tasks.find((task) => task.id === 'PRJ-0001')
-    expect(updatedTask?.contractVersion).toBe(2)
+    expect(screen.queryByRole('button', { name: 'Strict' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Compat' })).not.toBeInTheDocument()
+  })
+
+  it('does not expose interactive planning as a standalone pipeline stage', () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      tasks: [makeTask(false)],
+      selectedTaskId: 'PRJ-0001',
+      activeStage: 'modules',
+    })
+
+    render(<PipelineProgress />)
+
+    expect(screen.getByRole('button', { name: /Overview/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Plan/ })).not.toBeInTheDocument()
   })
 
   it('renders a minimal toolbar in chat mode without the project profile switch', () => {

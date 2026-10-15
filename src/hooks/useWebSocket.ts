@@ -1,4 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect } from 'react'
+import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
+import { useTokenUsageStore } from '@/stores/tokenUsageStore'
 import { wsClient } from '@/services/websocket'
 import { bootstrapLocalEngine, getBootstrapState, hasDesktopEngineManager, setEngineModeHint } from '@/services/desktop'
 import type { LocalEngineBootstrapState } from '@/services/desktop'
@@ -64,6 +66,11 @@ export function useWebSocket() {
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const wsUrl = useSettingsStore((s) => s.wsUrl)
   const engineStatus = useSettingsStore((s) => s.engineStatus)
+
+  useLayoutEffect(() => {
+    useSkillHistoryStore.getState().reset()
+    useTokenUsageStore.getState().reset()
+  }, [apiUrl])
 
   // Mirror the active deployment mode to the main process so the next app
   // launch can pre-warm (or skip) the local engine based on what the user

@@ -8,7 +8,9 @@ import type { OrganizationFolder } from '@/services/api'
 interface ChatItemProps {
   chat: ChatThread
   isSelected: boolean
-  onSelect: (id: string) => void
+  onSelect: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void
+  disabled?: boolean
+  bulkSelected?: boolean
   onRename: (id: string, title: string) => void
   onDelete: (id: string) => void
   folders?: OrganizationFolder[]
@@ -18,7 +20,7 @@ interface ChatItemProps {
 
 interface MenuPos { x: number; y: number }
 
-export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete, folders = [], currentFolderId, onMove }: ChatItemProps) {
+export function ChatItem({ chat, isSelected, bulkSelected = false, disabled = false, onSelect, onRename, onDelete, folders = [], currentFolderId, onMove }: ChatItemProps) {
   const lang = useSettingsStore((s) => s.language)
   const [menu, setMenu] = useState<MenuPos | null>(null)
   const [editing, setEditing] = useState(false)
@@ -63,15 +65,19 @@ export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete, folde
   return (
     <>
       <button
-        onClick={() => onSelect(chat.id)}
-        onContextMenu={handleContext}
+        disabled={disabled}
+        aria-pressed={bulkSelected}
+        onClick={(event) => onSelect(chat.id, event)}
+        onContextMenu={(event) => { if (!disabled) handleContext(event) }}
         className={cn(
           'w-full px-3 py-2 text-left rounded-md text-sm transition-colors select-none flex items-center gap-2',
-          isSelected
+          bulkSelected ? 'bg-[var(--color-accent)]/15 text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent)]'
+            : isSelected
             ? 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-primary)] ring-1 ring-[var(--color-accent)]/40'
             : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
         )}
       >
+        {bulkSelected && <span aria-hidden="true" className="text-[var(--color-accent)]">✓</span>}
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-[var(--color-accent)]">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
@@ -103,6 +109,7 @@ export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete, folde
             <button
               key={a.label}
               onClick={a.action}
+              disabled={disabled}
               className={cn(
                 'w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--color-bg-hover)] transition-colors',
                 a.danger ? 'text-red-400' : 'text-[var(--color-text-secondary)]',
@@ -121,7 +128,7 @@ export function ChatItem({ chat, isSelected, onSelect, onRename, onDelete, folde
                 <button
                   key={folder.id ?? '__uncategorized__'}
                   type="button"
-                  disabled={(currentFolderId ?? null) === folder.id}
+                  disabled={disabled || (currentFolderId ?? null) === folder.id}
                   onClick={() => { setMenu(null); onMove(chat.id, folder.id) }}
                   className="w-full truncate px-3 py-1.5 text-left text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-40"
                 >

@@ -56,6 +56,26 @@ describe('TopBar', () => {
     expect(header?.getAttribute('data-drag-region')).toBe('none')
   })
 
+  it.each([
+    { title: '', label: 'New project', expected: 'New project' },
+    { title: '   ', label: 'Renamed project', expected: 'Renamed project' },
+    { title: 'Research question', label: 'Project name', expected: 'Research question' },
+    { title: '', label: '   ', expected: 'Mira' },
+  ])('resolves project heading for title="$title" and label="$label"', ({ title, label, expected }) => {
+    useProjectStore.setState((state) => ({
+      appMode: 'project',
+      tasks: state.tasks.map((task) => ({ ...task, title, label })),
+    }))
+    render(<TopBar />)
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(expected)
+  })
+
+  it('falls back to Mira when no project is selected', () => {
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: null })
+    render(<TopBar />)
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Mira')
+  })
+
   it('shows a placeholder when no engine is running', () => {
     useSettingsStore.setState({ engineStartedAt: null })
     const { container } = render(<TopBar />)

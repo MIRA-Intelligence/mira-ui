@@ -5,6 +5,7 @@ import {
   isChatSessionId,
   isProjectSessionId,
   newChatSessionId,
+  newProjectSessionId,
 } from './sessions'
 
 describe('newChatSessionId', () => {
@@ -35,5 +36,15 @@ describe('isProjectSessionId', () => {
     expect(isProjectSessionId('PRJ-0001')).toBe(true)
     expect(isProjectSessionId('chat-abc')).toBe(false)
     expect(isProjectSessionId(null)).toBe(false)
+  })
+})
+
+describe('newProjectSessionId', () => {
+  it('produces a prefixed, unique project id', () => {
+    const a = newProjectSessionId()
+    const b = newProjectSessionId()
+    expect(a).toMatch(/^PRJ-/)
+    expect(a).not.toBe(b)
+    expect(isProjectSessionId(a)).toBe(true)
   })
 })

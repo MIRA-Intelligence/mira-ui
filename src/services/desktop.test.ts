@@ -8,6 +8,7 @@ import {
   hasDesktopEngineManager,
   installLocalEngineService,
   repairLocalEngineService,
+  restartLocalEngine,
   setEngineModeHint,
   startLocalEngine,
   stopLocalEngine,
@@ -51,6 +52,7 @@ describe('desktop engine bridge', () => {
     await expect(repairLocalEngineService()).resolves.toBeNull()
     await expect(startLocalEngine()).resolves.toBeNull()
     await expect(stopLocalEngine()).resolves.toBeNull()
+    await expect(restartLocalEngine()).resolves.toBeNull()
     await expect(doctorLocalEngine()).resolves.toBeNull()
     await expect(upgradeLocalEngine()).resolves.toBeNull()
     // setEngineModeHint resolves without throwing
@@ -67,6 +69,7 @@ describe('desktop engine bridge', () => {
       repairLocalEngineService: vi.fn().mockResolvedValue({ phase: 'repairing' }),
       startLocalEngine: vi.fn().mockResolvedValue({ ok: true }),
       stopLocalEngine: vi.fn().mockResolvedValue({ ok: true }),
+      restartLocalEngine: vi.fn().mockResolvedValue({ ok: true }),
       doctorLocalEngine: vi.fn().mockResolvedValue({ ok: true }),
       upgradeLocalEngine: vi.fn().mockResolvedValue({ ok: true }),
     } as unknown as Partial<ElectronApi>
@@ -84,6 +87,7 @@ describe('desktop engine bridge', () => {
     await expect(repairLocalEngineService()).resolves.toEqual({ phase: 'repairing' })
     await expect(startLocalEngine()).resolves.toEqual({ ok: true })
     await expect(stopLocalEngine()).resolves.toEqual({ ok: true })
+    await expect(restartLocalEngine()).resolves.toEqual({ ok: true })
     await expect(doctorLocalEngine()).resolves.toEqual({ ok: true })
     await expect(upgradeLocalEngine('custom-pkg')).resolves.toEqual({ ok: true })
     expect((api.upgradeLocalEngine as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith('custom-pkg')

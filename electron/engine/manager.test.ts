@@ -200,6 +200,7 @@ describe('LocalEngineManager', () => {
       await manager.installService(18790)
       await manager.start()
       await manager.stop()
+      await manager.restart()
 
       expect(elevatedSpy).toHaveBeenNthCalledWith(1, [
         'install-service',
@@ -214,10 +215,32 @@ describe('LocalEngineManager', () => {
       ], { timeoutMs: 180_000 })
       expect(elevatedSpy).toHaveBeenNthCalledWith(2, ['start', '--home', tempDir], { timeoutMs: 180_000 })
       expect(elevatedSpy).toHaveBeenNthCalledWith(3, ['stop', '--home', tempDir], { timeoutMs: 180_000 })
+      expect(elevatedSpy).toHaveBeenNthCalledWith(4, ['restart', '--home', tempDir], { timeoutMs: 180_000 })
       expect(runCommandSpy).not.toHaveBeenCalled()
     } finally {
       restorePlatform()
     }
+  })
+
+  it('uses one restart command on macOS', async () => {
+    const restorePlatform = mockProcessPlatform('darwin')
+    try {
+      const command = vi.spyOn(LocalEngineManager.prototype, 'runCommand').mockResolvedValue({
+        ok: true, code: 0, stdout: '', stderr: '', command: ['restart'], executablePath: null,
+      })
+      await new LocalEngineManager().restart()
+      expect(command).toHaveBeenCalledExactlyOnceWith(['restart'])
+    } finally { restorePlatform() }
+  })
+
+  it('preserves structured status errors from the engine', async () => {
+    vi.spyOn(LocalEngineManager.prototype, 'runCommand').mockResolvedValue({
+      ok: false, code: 1, stdout: JSON.stringify({ state: 'conflict', error: 'another installation' }),
+      stderr: '', command: ['status'], executablePath: null,
+    })
+    const result = await new LocalEngineManager().status()
+    expect(result.result.ok).toBe(false)
+    expect(result.payload).toEqual({ state: 'conflict', error: 'another installation' })
   })
 
   it('takes the fast path when the live engine boot SHA matches the bundled manifest', async () => {

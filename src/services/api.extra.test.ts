@@ -1,9 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  ProjectDirectoryExistsError,
+  attachChatContext,
   createRemoteProject,
+  createWorkflowRun,
   deleteProject,
   deleteProjectFiles,
+  fetchChatContextPreview,
   fetchFeedbackConfig,
   fetchPlan,
   fetchPlanContract,
@@ -11,7 +15,9 @@ import {
   fetchSessionHistory,
   fetchSkillPlugins,
   fetchStatus,
+  fetchWorkflowArtifact,
   getProjectArtifactUrl,
+  getWorkflowArtifactContentUrl,
   installSkillPluginFromDirectory,
   installSkillPluginFromZip,
   setSkillPluginState,
@@ -121,6 +127,27 @@ describe('api service', () => {
   })
 
   describe('createRemoteProject', () => {
+    it('recognizes directory conflicts and sends consent only on the confirmed retry', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ code: 'project_directory_exists', project_dir: '/data/study' }, 409))
+      await expect(createRemoteProject({ projectId: 'study' })).rejects.toMatchObject({
+        name: 'ProjectDirectoryExistsError', projectDir: '/data/study',
+      })
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).not.toHaveProperty('allow_existing_dir')
+      fetchMock.mockResolvedValueOnce(ok({ id: 'study' }))
+      await createRemoteProject({ projectId: 'study', allowExistingDir: true })
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toHaveProperty('allow_existing_dir', true)
+    })
+    it('does not treat an unrelated conflict as consent to reuse a directory', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ error: 'project already exists: study' }, 409))
+      try {
+        await createRemoteProject({ projectId: 'study' })
+        expect.fail('Expected a conflict')
+      } catch (error) {
+        expect(error).not.toBeInstanceOf(ProjectDirectoryExistsError)
+        expect(error).toBeInstanceOf(Error)
+      }
+    })
+
     it('maps camelCase payload to snake_case body', async () => {
       fetchMock.mockResolvedValueOnce(ok({ id: 'PRJ-1', has_plan: false }))
       await createRemoteProject({ projectId: 'PRJ-1', displayName: 'X', runMode: 'auto' })
@@ -130,6 +157,34 @@ describe('api service', () => {
     it('throws response text on failure', async () => {
       fetchMock.mockResolvedValueOnce(fail('cannot create'))
       await expect(createRemoteProject({})).rejects.toThrow('cannot create')
+    })
+  })
+
+  describe('createWorkflowRun', () => {
+    it('creates a command id when randomUUID is unavailable in an insecure browser context', async () => {
+      vi.stubGlobal('crypto', {
+        getRandomValues: (bytes: Uint8Array) => {
+          bytes.fill(7)
+          return bytes
+        },
+      })
+      fetchMock.mockResolvedValueOnce(ok({ run_id: 'run-1', project_sequence: 1 }))
+
+      await createWorkflowRun('PRJ-1', {
+        moduleType: 'initiation',
+        moduleData: { intent: 'Find a direction' },
+        enqueue: true,
+      })
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+      expect(body.command_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      )
+      expect(body).toMatchObject({
+        module_type: 'initiation',
+        module_data: { intent: 'Find a direction' },
+        enqueue: true,
+      })
     })
   })
 
@@ -178,6 +233,80 @@ describe('api service', () => {
       expect(await fetchSessionHistory('PRJ-1')).toHaveLength(1)
       fetchMock.mockResolvedValueOnce(fail('x'))
       expect(await fetchSessionHistory('PRJ-1')).toEqual([])
+    })
+  })
+
+  describe('attachChatContext', () => {
+    it('attaches a source chat to the project and maps the response', async () => {
+      fetchMock.mockResolvedValueOnce(ok({
+        session_id: 'PRJ-1',
+        source_session_id: 'chat-1',
+        path: 'context/quick-chat-chat-1.md',
+        message_count: 4,
+      }))
+
+      await expect(attachChatContext('PRJ-1', 'chat-1')).resolves.toEqual({
+        sessionId: 'PRJ-1',
+        sourceSessionId: 'chat-1',
+        path: 'context/quick-chat-chat-1.md',
+        messageCount: 4,
+      })
+      expect(lastUrl()).toContain('/projects/PRJ-1/context/from-chat')
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({ source_session_id: 'chat-1' }),
+      })
+    })
+
+    it('rejects failed or malformed attachment responses', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ error: 'source chat missing' }, 404))
+      await expect(attachChatContext('PRJ-1', 'missing')).rejects.toThrow('source chat missing')
+      fetchMock.mockResolvedValueOnce(ok({ message_count: 0 }))
+      await expect(attachChatContext('PRJ-1', 'chat-1')).rejects.toThrow('did not include a path')
+    })
+  })
+
+  describe('fetchChatContextPreview', () => {
+    it('loads the rendered attachment content before project creation', async () => {
+      fetchMock.mockResolvedValueOnce(ok({
+        source_session_id: 'chat-1',
+        content: '# Conversation Context\n\n## User\n\nQuestion',
+        message_count: 1,
+      }))
+
+      await expect(fetchChatContextPreview('chat-1')).resolves.toEqual({
+        sourceSessionId: 'chat-1',
+        content: '# Conversation Context\n\n## User\n\nQuestion',
+        messageCount: 1,
+      })
+      expect(lastUrl()).toContain('/sessions/chat-1/context-preview')
+    })
+
+    it('posts live entries when the chat has not been persisted yet', async () => {
+      fetchMock.mockResolvedValueOnce(ok({
+        source_session_id: 'chat-live',
+        content: '# Conversation Context\n\n## User\n\nLive question',
+        message_count: 1,
+      }))
+      const entries = [{
+        id: 'live-1',
+        timestamp: '2026-09-16T12:00:00',
+        content: 'Live question',
+        type: 'response' as const,
+        metadata: { _user: true },
+      }]
+
+      await fetchChatContextPreview('chat-live', entries)
+
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({
+        method: 'POST',
+        body: JSON.stringify({ entries }),
+      })
+    })
+
+    it('rejects missing preview content', async () => {
+      fetchMock.mockResolvedValueOnce(ok({ message_count: 0 }))
+      await expect(fetchChatContextPreview('chat-1')).rejects.toThrow('did not include content')
     })
   })
 
@@ -242,6 +371,18 @@ describe('api service', () => {
   it('getProjectArtifactUrl builds an encoded url', () => {
     const url = getProjectArtifactUrl('PRJ 1', 'a/b.png')
     expect(url).toContain('/projects/PRJ%201/artifacts?path=a%2Fb.png')
+  })
+
+  it('fetches workflow artifact metadata and builds its content URL', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ artifact_id: 'ART 1', label: 'report.pdf' }))
+    await expect(fetchWorkflowArtifact('PRJ 1', 'ART 1')).resolves.toEqual({
+      artifact_id: 'ART 1',
+      label: 'report.pdf',
+    })
+    expect(lastUrl()).toContain('/workflow/v1/projects/PRJ%201/artifacts/ART%201')
+    expect(getWorkflowArtifactContentUrl('PRJ 1', 'ART 1')).toContain(
+      '/workflow/v1/projects/PRJ%201/artifacts/ART%201/content',
+    )
   })
 
   describe('skill plugins', () => {

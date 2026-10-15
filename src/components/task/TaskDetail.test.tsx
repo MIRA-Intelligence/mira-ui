@@ -57,6 +57,15 @@ describe('TaskDetail', () => {
     expect(screen.getByText('Why?')).toBeInTheDocument()
   })
 
+  it('renders the module start page in project mode', () => {
+    setProject({ appMode: 'project', activeStage: 'modules' })
+    render(<TaskDetail />)
+    expect(screen.getByRole('heading', { name: 'Project overview' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '1. Research' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '2. Experiment' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '3. Delivery' })).toBeInTheDocument()
+  })
+
   it('renders the result stage', () => {
     setProject({ activeStage: 'result' })
     render(<TaskDetail />)

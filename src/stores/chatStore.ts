@@ -74,6 +74,7 @@ interface ChatState {
   renameChat: (id: string, title: string) => void
   touchChat: (id: string, fallbackTitle?: string) => void
   deleteChat: (id: string) => void
+  deleteChats: (ids: string[]) => Promise<{ deleted: string[]; failed: string[] }>
   removeChat: (id: string) => void
 }
 
@@ -176,6 +177,38 @@ export const useChatStore = create<ChatState>((set, get) => ({
       writeChats(s.workspaceKey, chats)
       return { chats, activeChatId: s.activeChatId === id ? null : s.activeChatId }
     })
+  },
+
+  deleteChats: async (ids) => {
+    const workspace = get().workspaceKey
+    const targets = [...new Set(ids)].filter((id) => get().chats.some((chat) => chat.id === id))
+    const deleted: string[] = []
+    const failed: string[] = []
+    for (const id of targets) {
+      if (get().workspaceKey !== workspace) {
+        failed.push(id)
+        continue
+      }
+      try {
+        await deleteOrganizationChat(id)
+        deleted.push(id)
+      } catch {
+        failed.push(id)
+      }
+    }
+    if (get().workspaceKey === workspace) {
+      const activeDeleted = deleted.includes(get().activeChatId ?? '')
+      set((state) => {
+        const chats = state.chats.filter((chat) => !deleted.includes(chat.id))
+        writeChats(workspace, chats)
+        return { chats, activeChatId: activeDeleted ? chats[0]?.id ?? null : state.activeChatId }
+      })
+      for (const id of deleted) await clearChatLogs(id)
+      if (get().workspaceKey === workspace && activeDeleted && get().chats.length === 0 && useProjectStore.getState().appMode === 'normal') {
+        useProjectStore.getState().setAppMode('project')
+      }
+    }
+    return { deleted, failed }
   },
 
   deleteChat: (id) => {

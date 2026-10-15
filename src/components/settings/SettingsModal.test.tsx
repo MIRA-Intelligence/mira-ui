@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/desktop', () => ({
   bootstrapLocalEngine: vi.fn(),
+  hasDesktopEngineManager: vi.fn().mockReturnValue(false),
+  getLocalEngineStatus: vi.fn().mockResolvedValue(null),
+  restartLocalEngine: vi.fn(),
   doctorLocalEngine: vi.fn(),
   repairLocalEngineService: vi.fn(),
   startLocalEngine: vi.fn(),
@@ -25,6 +28,7 @@ vi.mock('@/services/runtimeConfig', async (importOriginal) => {
 })
 
 import { SettingsModal } from './SettingsModal'
+import { bootstrapLocalEngine } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
 import {
   fetchRuntimeConfig,
@@ -88,6 +92,17 @@ describe('SettingsModal remote runtime config', () => {
       version: '0.3.0',
       uptimeSeconds: null,
     })
+  })
+
+  it('does not restart a stopped local engine when opening or saving settings', async () => {
+    vi.mocked(fetchRuntimeConfig).mockRejectedValue(new Error('engine offline'))
+    useSettingsStore.setState({ deploymentMode: 'localBundle', localEnginePhase: 'idle', settingsOpen: true })
+    render(<SettingsModal />)
+    await screen.findByText('engine offline')
+    expect(bootstrapLocalEngine).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fetchRuntimeConfig).toHaveBeenCalledTimes(2))
+    expect(bootstrapLocalEngine).not.toHaveBeenCalled()
   })
 
   it('reads workspace from a changed remote endpoint without posting the old workspace', async () => {

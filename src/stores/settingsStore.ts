@@ -52,6 +52,11 @@ function defaultDeploymentMode(): DeploymentMode {
 interface SettingsState {
   activeEngineKey: string
   engineProfiles: Record<string, EngineProfile>
+  // Gateway tokens for remote engines, keyed by engine origin (scheme://host:port).
+  // The local desktop engine's token is read from disk and never stored here.
+  engineTokens: Record<string, string>
+  // Set when an engine rejected our token; cleared once a probe succeeds or the token changes.
+  engineAuthRejected: boolean
   workspacePath: string
   theme: Theme
   language: Language
@@ -90,6 +95,8 @@ interface SettingsState {
   setApiUrl: (u: string) => void
   setWsUrl: (u: string) => void
   setConnectionEndpoints: (apiUrl: string, wsUrl: string) => void
+  setEngineToken: (apiUrl: string, token: string) => void
+  setEngineAuthRejected: (rejected: boolean) => void
   setShowProgressMessages: (v: boolean) => void
   setShowToolCallHistory: (v: boolean) => void
   setStreamResponses: (v: boolean) => void
@@ -156,6 +163,29 @@ function normalizeEndpoint(url: string): string {
   } catch {
     return url.trim()
   }
+}
+
+export function engineTokenOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'ws:') parsed.protocol = 'http:'
+    else if (parsed.protocol === 'wss:') parsed.protocol = 'https:'
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+    return parsed.origin
+  } catch {
+    return null
+  }
+}
+
+function sanitizeEngineTokens(value: unknown): Record<string, string> {
+  if (!isRecord(value)) return {}
+  const tokens: Record<string, string> = {}
+  for (const [origin, token] of Object.entries(value)) {
+    if (typeof token === 'string' && token.trim() && engineTokenOrigin(origin) === origin) {
+      tokens[origin] = token.trim()
+    }
+  }
+  return tokens
 }
 
 function engineProfileKey(mode: DeploymentMode, apiUrl: string): string {
@@ -317,6 +347,7 @@ function loadPersisted(): Partial<SettingsState> {
       }
       sanitized.engineProfiles = profiles
     }
+    sanitized.engineTokens = sanitizeEngineTokens(parsed.engineTokens)
     if (parsed.theme === 'dark' || parsed.theme === 'light') {
       sanitized.theme = parsed.theme
     }
@@ -365,6 +396,7 @@ function persist(state: SettingsState) {
   const {
     workspacePath,
     activeEngineKey,
+    engineTokens,
     theme,
     language,
     deploymentMode,
@@ -380,6 +412,7 @@ function persist(state: SettingsState) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     activeEngineKey,
     engineProfiles: profiles,
+    engineTokens,
     workspacePath,
     theme,
     language,
@@ -418,6 +451,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     ...initialEngineProfiles,
     [seededInitialProfile.key]: seededInitialProfile,
   },
+  engineTokens: saved.engineTokens ?? {},
+  engineAuthRejected: false,
   workspacePath: seededInitialProfile.workspacePath,
   theme: (saved.theme as Theme) ?? DEFAULT_THEME,
   language: (saved.language as Language) ?? 'en',
@@ -558,6 +593,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     })
     persist(get())
   },
+  setEngineToken: (apiUrl, token) => {
+    const origin = engineTokenOrigin(apiUrl)
+    if (!origin) return
+    set((state) => {
+      const engineTokens = { ...state.engineTokens }
+      const trimmed = token.trim()
+      if (trimmed) engineTokens[origin] = trimmed
+      else delete engineTokens[origin]
+      if (state.engineTokens[origin] === engineTokens[origin]) return state
+      return { engineTokens, engineAuthRejected: false }
+    })
+    persist(get())
+  },
+  setEngineAuthRejected: (rejected) => set((state) => (
+    state.engineAuthRejected === rejected ? state : { engineAuthRejected: rejected }
+  )),
   setShowProgressMessages: (v) => { set({ showProgressMessages: v }); persist(get()) },
   setShowToolCallHistory: (v) => { set({ showToolCallHistory: v }); persist(get()) },
   setStreamResponses: (v) => { set({ streamResponses: v }); persist(get()) },
@@ -571,7 +622,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         state.engineStatus === status &&
         state.engineMessage === message &&
         state.engineVersion === nextVersion &&
-        state.engineStartedAt === nextStartedAt
+        state.engineStartedAt === nextStartedAt &&
+        !(status === 'compatible' && state.engineAuthRejected)
       ) {
         return state
       }
@@ -588,6 +640,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         engineVersion: nextVersion,
         engineStartedAt: nextStartedAt,
         engineProfiles: profilesWithCurrent(nextState),
+        ...(status === 'compatible' ? { engineAuthRejected: false } : {}),
       }
     })
   },

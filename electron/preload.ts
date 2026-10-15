@@ -3,13 +3,17 @@ import type { IpcRendererEvent } from 'electron'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  recordDiagnostic: (record: unknown) => ipcRenderer.send('diagnostics:record',record),
+  exportDiagnostics: (options?: { includeLocalEngine?: boolean }) => ipcRenderer.invoke('diagnostics:export',options),
   bootstrapLocalEngine: (options?: { force?: boolean }) => ipcRenderer.invoke('engine:bootstrap', options),
   setEngineModeHint: (mode: 'localBundle' | 'remoteManual') => ipcRenderer.invoke('engine:set-mode-hint', mode),
   getBootstrapState: () => ipcRenderer.invoke('engine:bootstrap-state'),
+  getEngineToken: () => ipcRenderer.invoke('engine:gateway-token'),
   getLocalEngineStatus: () => ipcRenderer.invoke('engine:status'),
   installLocalEngineService: () => ipcRenderer.invoke('engine:install-service'),
   startLocalEngine: () => ipcRenderer.invoke('engine:start'),
   stopLocalEngine: () => ipcRenderer.invoke('engine:stop'),
+  restartLocalEngine: () => ipcRenderer.invoke('engine:restart'),
   doctorLocalEngine: () => ipcRenderer.invoke('engine:doctor'),
   upgradeLocalEngine: (packageName = 'mira-engine') => ipcRenderer.invoke('engine:upgrade', packageName),
   repairLocalEngineService: () => ipcRenderer.invoke('engine:repair-service'),

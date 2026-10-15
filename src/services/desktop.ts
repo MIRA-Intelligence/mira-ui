@@ -15,6 +15,15 @@ export interface LocalEngineStatusResult {
   payload: {
     installed?: boolean
     running?: boolean
+    healthy?: boolean
+    loaded?: boolean
+    pid?: number | null
+    state?: string
+    config_path?: string
+    last_launchctl_error?: string
+    windows_service_status?: string
+    error?: string
+    endpoint_gateway?: { endpoint: string; config_path: string | null } | null
     port?: number
     engine_executable?: string | null
     engine_manifest?: { sha256?: string } | null
@@ -77,6 +86,10 @@ export async function startLocalEngine(): Promise<LocalEngineCommandResult | nul
 
 export async function stopLocalEngine(): Promise<LocalEngineCommandResult | null> {
   return getElectronApi()?.stopLocalEngine?.() ?? null
+}
+
+export async function restartLocalEngine(): Promise<LocalEngineCommandResult | null> {
+  return getElectronApi()?.restartLocalEngine?.() ?? null
 }
 
 export async function doctorLocalEngine(): Promise<LocalEngineCommandResult | null> {

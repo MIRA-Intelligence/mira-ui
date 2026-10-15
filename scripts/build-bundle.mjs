@@ -330,7 +330,7 @@ async function ensureBundledEngine() {
       await downloadReleaseAsset()
       return
     } catch (error) {
-      if (!existsSync(enginePath)) {
+      if (process.env.MIRA_ENGINE_RELEASE_TAG?.trim() || !existsSync(enginePath)) {
         throw error
       }
       console.warn(String(error))

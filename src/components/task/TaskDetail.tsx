@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ExperimentDetail } from '../experiment/ExperimentDetail'
@@ -7,6 +9,17 @@ import { ResearchView } from '../stages/ResearchView'
 import { ResultView } from '../stages/ResultView'
 import { PlanView } from '../stages/PlanView'
 import { t } from '@/i18n'
+import { WorkflowWorkspace } from '@/components/workflow/WorkflowWorkspace'
+import { ModuleStageControls } from '@/components/workflow/ModuleStageControls'
+
+function ModulePage({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <ModuleStageControls />
+      <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+    </div>
+  )
+}
 
 export function TaskDetail() {
   const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
@@ -21,25 +34,49 @@ export function TaskDetail() {
     )
   }
 
+  if (activeStage === 'modules') {
+    return <WorkflowWorkspace />
+  }
+
   if (activeStage === 'research') {
-    return <ResearchView data={task.research} coreQuestion={task.coreQuestion} />
+    return (
+      <ModulePage>
+        <ResearchView data={task.research} coreQuestion={task.coreQuestion} />
+      </ModulePage>
+    )
   }
 
   if (activeStage === 'plan') {
-    return <PlanView task={task} />
+    return (
+      <ModulePage>
+        <PlanView task={task} />
+      </ModulePage>
+    )
   }
 
   if (activeStage === 'result') {
-    return <ResultView data={task.result} task={task} />
+    return (
+      <ModulePage>
+        <ResultView data={task.result} task={task} />
+      </ModulePage>
+    )
   }
 
   // activeStage === 'experiment'
   if (selectedExpId === '__knowledge__') {
-    return <KnowledgePanel knowledge={task.knowledge} coreQuestion={task.coreQuestion} />
+    return (
+      <ModulePage>
+        <KnowledgePanel knowledge={task.knowledge} coreQuestion={task.coreQuestion} />
+      </ModulePage>
+    )
   }
 
   if (selectedExpId === '__revisions__') {
-    return <RevisionsPanel revisions={task.revisions ?? []} />
+    return (
+      <ModulePage>
+        <RevisionsPanel revisions={task.revisions ?? []} />
+      </ModulePage>
+    )
   }
 
   const experiment = task.experiments.find((e) => e.id === selectedExpId)
@@ -47,26 +84,34 @@ export function TaskDetail() {
   if (!experiment) {
     if (task.experiments.length === 0) {
       return (
-        <div className="h-full flex flex-col items-center justify-center text-center px-8">
-          <div className="text-2xl mb-3">🔬</div>
-          <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
-            {t('readyToStart', lang)}
-          </h3>
-          <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
-            {t('sendMessageToStartExperiment', lang)}
-            {' '}
-            {t('scientificMethodHint', lang)}
-          </p>
-        </div>
+        <ModulePage>
+          <div className="h-full flex flex-col items-center justify-center text-center px-8">
+            <div className="text-2xl mb-3">🔬</div>
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
+              {t('readyToStart', lang)}
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] max-w-xs leading-relaxed">
+              {t('sendMessageToStartExperiment', lang)}
+              {' '}
+              {t('scientificMethodHint', lang)}
+            </p>
+          </div>
+        </ModulePage>
       )
     }
 
     return (
-      <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
-        {t('selectExperimentFromTimeline', lang)}
-      </div>
+      <ModulePage>
+        <div className="h-full flex items-center justify-center text-[var(--color-text-muted)] text-xs">
+          {t('selectExperimentFromTimeline', lang)}
+        </div>
+      </ModulePage>
     )
   }
 
-  return <ExperimentDetail key={`${task.id}:${experiment.id}`} experiment={experiment} />
+  return (
+    <ModulePage>
+      <ExperimentDetail key={`${task.id}:${experiment.id}`} experiment={experiment} />
+    </ModulePage>
+  )
 }

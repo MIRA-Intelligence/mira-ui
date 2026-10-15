@@ -1,12 +1,6 @@
-const STORAGE_KEY = 'medpilot-client-id'
+import { createUuid } from './uuid'
 
-function generateUuid(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  // Fallback for older runtimes (and tests without crypto.randomUUID)
-  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
-}
+const STORAGE_KEY = 'medpilot-client-id'
 
 function safeLocalStorage(): Storage | null {
   try {
@@ -29,7 +23,7 @@ export function getClientId(): string {
       return existing
     }
   }
-  const fresh = `anon_${generateUuid()}`
+  const fresh = `anon_${createUuid()}`
   cached = fresh
   if (ls) {
     try { ls.setItem(STORAGE_KEY, fresh) } catch { /* ignore */ }

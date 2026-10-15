@@ -248,7 +248,10 @@ export function ExperimentDetail({ experiment }: { experiment: Experiment }) {
         {/* Header */}
         <div className="mb-5">
           <div className="flex items-center gap-2 mb-1">
-            <span className="font-mono text-xs text-[var(--color-text-muted)]">{viewedExperiment.id}</span>
+            <span className="font-mono text-xs text-[var(--color-text-muted)]">
+              {viewedExperiment.experiment_id ?? viewedExperiment.id}
+              {viewedExperiment.workflow_run_id && ` · ${viewedExperiment.workflow_run_label ?? 'Run'} · ${viewedExperiment.workflow_run_id.slice(0, 8)}`}
+            </span>
             <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${badgeClass}`}>{badgeLabel}</span>
             {showSnapshotToggle && (
               <button

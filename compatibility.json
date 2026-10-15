@@ -1,7 +1,7 @@
 {
-  "release_train": "2026.08",
-  "ui": "0.4.4",
-  "agent": "0.3.4",
+  "release_train": "2026.10",
+  "ui": "0.4.5rc1",
+  "agent": "0.3.5rc1",
   "api_contract": "v1",
-  "min_agent_for_ui": "0.3.4"
+  "min_agent_for_ui": "0.3.5rc1"
 }

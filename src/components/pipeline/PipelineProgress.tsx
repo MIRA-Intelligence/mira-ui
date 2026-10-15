@@ -5,13 +5,9 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { cn } from '@/lib/utils'
-import type { AgentProfile, ContractVersion, PipelineStage } from '@/types'
+import type { AgentProfile, PipelineStage } from '@/types'
 import { t } from '@/i18n'
 import type { I18nKey } from '@/i18n'
-import {
-  isRuntimePreferenceSwitchBlocked,
-  runtimePreferenceSwitchBlockTitle,
-} from '@/lib/runtimePreferencesGuard'
 
 // Minimum useful width (px) for the truncated coreQuestion line. If the row
 // has less remaining space than this after laying out everything else, the
@@ -24,8 +20,8 @@ const MAX_QUESTION_PX = 300
 const QUESTION_GAP_PX = 12
 
 const STAGES: { key: PipelineStage; icon: string; labelKey: I18nKey }[] = [
+  { key: 'modules', icon: '◫', labelKey: 'modules' },
   { key: 'research', icon: '📚', labelKey: 'research' },
-  { key: 'plan', icon: '🗺️', labelKey: 'plan' },
   { key: 'experiment', icon: '🔬', labelKey: 'experiment' },
   { key: 'result', icon: '📝', labelKey: 'result' },
 ]
@@ -36,12 +32,9 @@ const PROFILE_OPTIONS: Array<{ key: AgentProfile; labelKey: 'engineerMode' | 're
   { key: 'team', labelKey: 'teamMode' },
 ]
 
-const CONTRACT_MODES: { key: ContractVersion; labelKey: 'contractCompat' | 'contractStrict' }[] = [
-  { key: 1, labelKey: 'contractCompat' },
-  { key: 2, labelKey: 'contractStrict' },
-]
 
 function stageBadge(task: ReturnType<typeof useProjectStore.getState>['tasks'][0], stage: PipelineStage): string | null {
+  if (stage === 'modules') return null
   if (stage === 'research') {
     const count = task.research.references.length
     return count > 0 ? `${count}` : null
@@ -71,10 +64,8 @@ export function PipelineProgress() {
     selectedTaskId,
     activeStage,
     agentProfile,
-    contractVersion,
     setActiveStage,
     setAgentProfile,
-    setContractVersion,
   } = useProjectStore()
   const isStreaming = useAgentStore((s) => (selectedTaskId ? (s.streamingBySession[selectedTaskId] ?? false) : false))
   const lang = useSettingsStore((s) => s.language)
@@ -82,11 +73,8 @@ export function PipelineProgress() {
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const openProviders = useUiStore((s) => s.openProviders)
   const task = tasks.find((t) => t.id === selectedTaskId)
-  const canSwitchAgentProfile = !isRuntimePreferenceSwitchBlocked(isStreaming)
-  const canSwitchContractVersion = !isRuntimePreferenceSwitchBlocked(isStreaming)
-  const profileSwitchTitle = runtimePreferenceSwitchBlockTitle(lang, isStreaming, 'profile')
-  const contractSwitchTitle = runtimePreferenceSwitchBlockTitle(lang, isStreaming, 'contract')
-  const effectiveContractVersion = task?.contractVersion ?? contractVersion
+  const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
+  const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
   const profileIndex = Math.max(0, PROFILE_OPTIONS.findIndex((p) => p.key === agentProfile))
   const agentProfileSlider = (
     <div className="shrink-0">
@@ -95,7 +83,7 @@ export function PipelineProgress() {
           'relative grid w-48 grid-cols-3 rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 transition-opacity',
           !canSwitchAgentProfile && 'opacity-60',
         )}
-        title={profileSwitchTitle}
+        title={!canSwitchAgentProfile ? t('profileSwitchManualOnly', lang) : undefined}
       >
         <span
           aria-hidden
@@ -253,35 +241,6 @@ export function PipelineProgress() {
         {toolButtons}
         <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
         {agentProfileSlider}
-        <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
-        <div
-          className={cn(
-            'flex items-center rounded-full border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-0.5 shrink-0',
-            !canSwitchContractVersion && 'opacity-60',
-          )}
-          title={contractSwitchTitle}
-        >
-          {CONTRACT_MODES.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              disabled={!canSwitchContractVersion}
-              onClick={() => {
-                if (!canSwitchContractVersion) return
-                setContractVersion(item.key)
-              }}
-              className={cn(
-                'px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors',
-                effectiveContractVersion === item.key
-                  ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]',
-                !canSwitchContractVersion && 'cursor-not-allowed',
-              )}
-            >
-              {t(item.labelKey, lang)}
-            </button>
-          ))}
-        </div>
 
         <div className="h-4 w-px bg-[var(--color-border)] shrink-0" />
 

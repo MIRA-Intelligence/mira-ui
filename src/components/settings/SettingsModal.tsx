@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSettingsStore, type DeploymentMode, type Theme, type Language, type SendShortcut } from '@/stores/settingsStore'
+import { engineTokenOrigin, useSettingsStore, type DeploymentMode, type Theme, type Language, type SendShortcut } from '@/stores/settingsStore'
 import {
   bootstrapLocalEngine,
   doctorLocalEngine,
+  hasDesktopEngineManager,
   repairLocalEngineService,
-  startLocalEngine,
-  stopLocalEngine,
   upgradeLocalEngine,
 } from '@/services/desktop'
 import { probeEngineCompatibility } from '@/services/engine'
@@ -20,6 +19,8 @@ import { cn } from '@/lib/utils'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
+import { EngineLifecycleControls } from './EngineLifecycleControls'
+import { exportDiagnostics, recordDiagnostic } from '@/services/diagnostics'
 
 const LOCAL_API_URL = 'http://127.0.0.1:18790/api'
 const LOCAL_WS_URL = 'ws://127.0.0.1:18790/ws'
@@ -31,6 +32,7 @@ type SettingsDraft = {
   deploymentMode: DeploymentMode
   apiUrl: string
   wsUrl: string
+  engineToken: string
   showProgressMessages: boolean
   showToolCallHistory: boolean
   streamResponses: boolean
@@ -51,6 +53,11 @@ function remoteWsFallback(): string {
   return `${proto}://${host}:18790/ws`
 }
 
+function storedEngineToken(store: ReturnType<typeof useSettingsStore.getState>, apiUrl: string): string {
+  const origin = engineTokenOrigin(apiUrl)
+  return origin ? store.engineTokens[origin] ?? '' : ''
+}
+
 function createDraft(store: ReturnType<typeof useSettingsStore.getState>): SettingsDraft {
   return {
     workspacePath: store.workspacePath,
@@ -59,6 +66,7 @@ function createDraft(store: ReturnType<typeof useSettingsStore.getState>): Setti
     deploymentMode: store.deploymentMode,
     apiUrl: store.apiUrl,
     wsUrl: store.wsUrl,
+    engineToken: storedEngineToken(store, store.apiUrl),
     showProgressMessages: store.showProgressMessages,
     showToolCallHistory: store.showToolCallHistory ?? false,
     streamResponses: store.streamResponses ?? true,
@@ -107,11 +115,6 @@ function mergePreservingEdits(
     }
   }
   return next
-}
-
-function localEngineAlreadyUp(): boolean {
-  return useAgentStore.getState().connected
-    && useSettingsStore.getState().localEnginePhase === 'ready'
 }
 
 function workspacePathChanged(previous: string, next: string): boolean {
@@ -168,25 +171,8 @@ export function SettingsModal() {
     try {
       const targetApiUrl = mode === 'localBundle' ? LOCAL_API_URL : (apiUrlOverride?.trim() || draft.apiUrl.trim())
 
-      // Re-bootstrapping re-resolves and re-hashes the bundled engine on every
-      // open, which is the main source of the "Settings is slow" lag. When the
-      // engine is already running and connected we can skip straight to the
-      // (cheap) config fetch.
-      if (mode === 'localBundle' && !localEngineAlreadyUp()) {
-        const localState = await bootstrapLocalEngine()
-        if (localState) {
-          store.setLocalEngineBootstrap({
-            phase: localState.phase,
-            message: localState.message,
-            executablePath: localState.executablePath,
-            version: localState.version,
-            operation: localState.operation,
-          })
-          if (localState.phase !== 'ready') {
-            throw new Error(localState.message)
-          }
-        }
-      }
+      // Opening Settings and refreshing config are read-only. In particular,
+      // never restart an engine the user deliberately stopped in this dialog.
 
       const payload = await fetchRuntimeConfig(targetApiUrl)
       if (loadTokenRef.current !== token) return
@@ -241,6 +227,7 @@ export function SettingsModal() {
   if (!settingsOpen) return null
 
   const handleSwitchMode = (mode: DeploymentMode) => {
+    if (busy) return
     const storedRemote = mode === 'remoteManual'
       ? latestStoredProfile(store.engineProfiles, 'remoteManual')
       : null
@@ -261,6 +248,9 @@ export function SettingsModal() {
           ? LOCAL_WS_URL
           : storedRemote?.wsUrl ?? (current.wsUrl === LOCAL_WS_URL ? remoteWsFallback() : current.wsUrl),
         workspacePath: storedRemote?.workspacePath ?? base.workspacePath,
+        engineToken: mode === 'localBundle'
+          ? current.engineToken
+          : storedEngineToken(store, storedRemote?.apiUrl ?? current.apiUrl),
       }
     })
     if (mode === 'localBundle') {
@@ -296,25 +286,11 @@ export function SettingsModal() {
 
       const targetApiUrl = local ? LOCAL_API_URL : nextApiUrl
       const targetWsUrl = local ? LOCAL_WS_URL : nextWsUrl
+      // The token must be in place before the engine is contacted below.
+      if (!local) store.setEngineToken(targetApiUrl, draft.engineToken)
 
-      // Local bundle: make sure the engine is running before we talk to it.
-      // Skip the (slow) re-bootstrap when it is already up and connected.
-      if (local && !localEngineAlreadyUp()) {
-        const localState = await bootstrapLocalEngine()
-        if (!localState) {
-          throw new Error(t('settingsDesktopBundleUnavailable', curLang))
-        }
-        store.setLocalEngineBootstrap({
-          phase: localState.phase,
-          message: localState.message,
-          executablePath: localState.executablePath,
-          version: localState.version,
-          operation: localState.operation,
-        })
-        if (localState.phase !== 'ready') {
-          throw new Error(localState.message)
-        }
-      }
+      // Saving preferences must not undo an explicit Stop. Engine lifecycle
+      // is handled by the dedicated controls; runtime writes require it online.
 
       const switchedEngine = store.deploymentMode !== draft.deploymentMode
         || endpointChanged(previousApiUrl, previousWsUrl, targetApiUrl, targetWsUrl)
@@ -363,40 +339,6 @@ export function SettingsModal() {
       }
 
       closeSettings()
-    } catch (error) {
-      setFeedbackError(true)
-      setFeedback(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleRestartEngine = async () => {
-    setBusy(true)
-    setFeedbackError(false)
-    setFeedback('Restarting local engine...')
-    try {
-      await stopLocalEngine()
-      await startLocalEngine()
-      const localState = await bootstrapLocalEngine()
-      if (localState) {
-        store.setLocalEngineBootstrap({
-          phase: localState.phase,
-          message: localState.message,
-          executablePath: localState.executablePath,
-          version: localState.version,
-          operation: localState.operation,
-        })
-      }
-      const probe = await probeEngineCompatibility(LOCAL_API_URL)
-      store.setEngineBootstrap({
-        status: probe.status,
-        message: probe.status === 'compatible' ? null : probe.message,
-        version: probe.version,
-        uptimeSeconds: probe.uptimeSeconds,
-      })
-      setFeedback(probe.status === 'compatible' ? 'Local engine restarted and verified.' : probe.message)
-      setFeedbackError(probe.status !== 'compatible')
     } catch (error) {
       setFeedbackError(true)
       setFeedback(error instanceof Error ? error.message : String(error))
@@ -456,6 +398,20 @@ export function SettingsModal() {
     }
   }
 
+  const handleExportDiagnostics = async () => {
+    setBusy(true)
+    setFeedbackError(false)
+    setFeedback(null)
+    try {
+      const file = await exportDiagnostics(localMode)
+      if (file) setFeedback(t('diagnosticsExported', curLang))
+    } catch (error) {
+      recordDiagnostic('diagnostics.export_failed', {}, error)
+      setFeedbackError(true)
+      setFeedback(t('diagnosticsExportFailed', curLang))
+    } finally { setBusy(false) }
+  }
+
   const handleUpgradeEngine = async () => {
     setBusy(true)
     setFeedbackError(false)
@@ -506,6 +462,7 @@ export function SettingsModal() {
           </h2>
           <button
             onClick={closeSettings}
+            disabled={busy}
             className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors text-lg leading-none"
           >
             ✕
@@ -665,6 +622,13 @@ export function SettingsModal() {
                 setReceivePrereleases={(receivePrereleases) => setDraft((current) => ({ ...current, receivePrereleases }))}
               />
 
+              <Section title={t('diagnosticsTitle', curLang)}>
+                <p className="text-xs text-[var(--color-text-muted)] mb-3">{t('diagnosticsHint', curLang)}</p>
+                <ActionButton disabled={busy} onClick={handleExportDiagnostics}>
+                  {t('diagnosticsExport', curLang)}
+                </ActionButton>
+              </Section>
+
               {!localMode && (
                 <Section title={t('connection', curLang)}>
                   <Label text={t('apiUrl', curLang)} />
@@ -679,13 +643,29 @@ export function SettingsModal() {
                     onChange={(e) => setDraft((current) => ({ ...current, wsUrl: e.target.value }))}
                     className={inputClass}
                   />
+                  <Label text={t('engineToken', curLang)} className="mt-3" />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={draft.engineToken}
+                    placeholder={t('engineTokenPlaceholder', curLang)}
+                    onChange={(e) => setDraft((current) => ({ ...current, engineToken: e.target.value }))}
+                    className={inputClass}
+                  />
+                  <p className="text-[11px] text-[var(--color-text-muted)] mt-1 leading-relaxed">
+                    {t('engineTokenHint', curLang)}
+                  </p>
                   <p className="text-[11px] text-[var(--color-text-muted)] mt-2 leading-relaxed">
                     Remote deployment is not bundled. Install `mira` on your remote server separately, then enter its API and WebSocket endpoints here.
                   </p>
                   <div className="mt-3">
                     <ActionButton
                       disabled={busy || runtimeLoading || !draft.apiUrl.trim()}
-                      onClick={() => void loadRuntimeConfig('remoteManual', draft.apiUrl, false)}
+                      onClick={() => {
+                        store.setEngineToken(draft.apiUrl, draft.engineToken)
+                        void loadRuntimeConfig('remoteManual', draft.apiUrl, false)
+                      }}
                     >
                       {runtimeLoading ? 'Refreshing...' : 'Refresh from engine'}
                     </ActionButton>
@@ -719,22 +699,20 @@ export function SettingsModal() {
                     )}
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <ActionButton disabled={busy} onClick={handleRepairEngine}>
+                    <ActionButton disabled={busy || !hasDesktopEngineManager()} onClick={handleRepairEngine}>
                       Repair service
                     </ActionButton>
-                    <ActionButton disabled={busy} onClick={handleRestartEngine}>
-                      Restart local engine
-                    </ActionButton>
-                    <ActionButton disabled={busy} onClick={handleDoctorEngine}>
+                    <ActionButton disabled={busy || !hasDesktopEngineManager()} onClick={handleDoctorEngine}>
                       Run doctor
                     </ActionButton>
-                    <ActionButton disabled={busy} onClick={handleUpgradeEngine}>
+                    <ActionButton disabled={busy || !hasDesktopEngineManager()} onClick={handleUpgradeEngine}>
                       Upgrade local engine
                     </ActionButton>
                     <ActionButton disabled={busy || runtimeLoading} onClick={() => void loadRuntimeConfig('localBundle', LOCAL_API_URL, true)}>
                       {runtimeLoading ? 'Refreshing...' : 'Refresh config'}
                     </ActionButton>
                   </div>
+                  <EngineLifecycleControls busy={busy || runtimeLoading} onBusyChange={setBusy} />
                 </Section>
               )}
             </div>
@@ -751,6 +729,7 @@ export function SettingsModal() {
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-[var(--color-border)]">
           <button
             onClick={closeSettings}
+            disabled={busy}
             className="px-4 py-2 text-sm rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           >
             {t('cancel', curLang)}

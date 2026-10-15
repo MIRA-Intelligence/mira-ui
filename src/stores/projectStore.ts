@@ -14,6 +14,8 @@ import {
   updateProjectRuntimePreferences,
 } from '@/services/api'
 import { wsClient } from '@/services/websocket'
+import { useWorkflowStore } from '@/stores/workflowStore'
+import { newProjectSessionId } from '@/lib/sessions'
 
 async function clearAgentLogs(projectId: string): Promise<void> {
   try {
@@ -65,6 +67,7 @@ interface ProjectState {
   deleteTask: (id: string, deleteFiles?: boolean) => Promise<boolean>
   duplicateTask: (id: string) => void
   createProject: (input: NewProjectInput) => Promise<string>
+  createProjectShell: (displayName: string, options?: Pick<NewProjectInput, 'projectId' | 'projectParentDir' | 'allowExistingDir'>) => Promise<string>
   loadProjects: (options?: { replaceMissing?: boolean; refreshAll?: boolean }) => Promise<void>
   resetWorkspaceState: () => void
 }
@@ -149,6 +152,9 @@ function parseExperimentSnapshot(raw: any): Experiment['snapshot'] {
 function parseExperiment(raw: any, fallbackIdx: number): Experiment {
   return {
     id: (raw.id as string) ?? `Exp${String(fallbackIdx + 1).padStart(3, '0')}`,
+    experiment_id: raw.experiment_id,
+    workflow_run_id: raw.workflow_run_id,
+    workflow_run_label: raw.workflow_run_label,
     title: (raw.title as string) ?? 'Untitled experiment',
     status: normalizeExperimentStatus(raw.status),
     question: raw.question as string | undefined,
@@ -378,7 +384,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   appMode: 'project',
   selectedTaskId: null,
   selectedExpId: null,
-  activeStage: 'research',
+  activeStage: 'modules',
   agentProfile: 'research',
   contractVersion: 1,
   mode: 'auto',
@@ -392,7 +398,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({
         appMode,
         selectedExpId: null,
-        activeStage: 'research',
+        activeStage: 'modules',
       })
       return
     }
@@ -406,14 +412,27 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       appMode: 'project',
       selectedTaskId: id,
       selectedExpId: activeExp,
-      activeStage: 'research',
+      activeStage: 'modules',
       mode: normalizeRunMode(task?.runMode, get().mode),
       agentProfile: normalizeAgentProfile(task?.agentProfile, get().agentProfile),
       contractVersion: normalizeContractVersion(task?.contractVersion, get().contractVersion),
     })
   },
 
-  selectExperiment: (id) => set({ selectedExpId: id, activeStage: 'experiment' }),
+  selectExperiment: (id) => {
+    const projectId = get().selectedTaskId
+    const experiment = get().tasks.find((task) => task.id === projectId)?.experiments.find((item) => item.id === id)
+    if (projectId && experiment?.workflow_run_id) {
+      if (experiment.experiment_id && experiment.experiment_id !== 'run-summary') {
+        useWorkflowStore.getState().selectCandidate(projectId, 'experiment', {
+          runId: experiment.workflow_run_id, itemId: experiment.experiment_id,
+        })
+      } else {
+        useWorkflowStore.getState().selectRun(projectId, experiment.workflow_run_id)
+      }
+    }
+    set({ selectedExpId: id, activeStage: 'experiment' })
+  },
   setActiveStage: (stage) => set({ activeStage: stage }),
   setAgentProfile: (agentProfile) => {
     const selectedId = get().selectedTaskId
@@ -484,6 +503,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   deleteTask: async (id, deleteFiles = false) => {
     await deleteProject(id, { deleteFiles })
     await clearAgentLogs(id)
+    useWorkflowStore.getState().removeProject(id)
     const { tasks, selectedTaskId } = get()
     const filtered = tasks.filter((t) => t.id !== id)
     const nextSelectedTaskId = selectedTaskId === id ? (filtered[0]?.id ?? null) : selectedTaskId
@@ -523,11 +543,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   resetWorkspaceState: () => {
+    useWorkflowStore.getState().clear()
     set({
       tasks: [],
       selectedTaskId: null,
       selectedExpId: null,
-      activeStage: 'research',
+      activeStage: 'modules',
       stats: { experiments: 0, completed: 0, failed: 0, running: 0 },
       projectsLoaded: false,
       contractsByTask: {},
@@ -550,6 +571,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       displayName: input.displayName ?? input.title,
       projectParentDir: input.projectParentDir,
       projectDir: input.projectDir,
+      allowExistingDir: input.allowExistingDir,
       runMode: mode,
       agentProfile,
       contractVersion,
@@ -581,16 +603,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     await clearAgentLogs(id)
     set((state) => ({
-      tasks: [task, ...state.tasks],
+      tasks: [task, ...state.tasks.filter((existing) => existing.id !== id)],
       appMode: 'project',
       selectedTaskId: id,
       selectedExpId: null,
+      activeStage: 'modules',
       mode,
       agentProfile,
       contractVersion,
     }))
     return id
   },
+
+  createProjectShell: async (displayName, options) => get().createProject({
+    projectId: options?.projectId ?? newProjectSessionId(),
+    projectParentDir: options?.projectParentDir,
+    allowExistingDir: options?.allowExistingDir,
+    displayName,
+    description: '',
+  }),
 
   loadProjects: async (options) => {
     const remotes = await fetchProjects()

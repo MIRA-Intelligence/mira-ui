@@ -20,7 +20,7 @@ export function TopBar() {
   const activeChat = chats.find((c) => c.id === activeChatId)
   const title = appMode === 'normal'
     ? (activeChat?.title || t('normalChatTitle', lang))
-    : selected?.title ?? 'Mira'
+    : (selected?.title?.trim() || selected?.label?.trim() || 'Mira')
 
   return (
     <header

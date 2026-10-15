@@ -2,6 +2,16 @@ import { Component, StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles/globals.css'
+import { installRuntimeDiagnostics, recordDiagnostic, exportDiagnostics } from './services/diagnostics'
+import { useSettingsStore } from './stores/settingsStore'
+import { engineOrigin, installEngineAuth } from './services/engineAuth'
+
+installRuntimeDiagnostics(() => useSettingsStore.getState().apiUrl)
+// Installed after diagnostics so the token is added before the request is traced.
+installEngineAuth((origin) => {
+  const settings = useSettingsStore.getState()
+  if (origin === engineOrigin(settings.apiUrl)) settings.setEngineAuthRejected(true)
+})
 
 type ErrorBoundaryState = {
   error: Error | null
@@ -18,6 +28,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   componentDidCatch(error: Error, info: { componentStack: string }): void {
     // Keep a console trace for quick diagnosis in devtools.
     console.error('MIRA runtime error:', error)
+    recordDiagnostic('renderer.react_error', {}, error, 'ERROR')
     this.setState({ error, componentStack: info.componentStack || '' })
   }
 
@@ -26,6 +37,10 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
       return (
         <div style={{ padding: 16, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
           <h2 style={{ marginBottom: 8 }}>MIRA runtime error</h2>
+          <button onClick={() => window.location.reload()}>Reload / 重新加载</button>
+          <button style={{ marginLeft: 12 }} onClick={() => void exportDiagnostics(
+            useSettingsStore.getState().deploymentMode === 'localBundle',
+          ).catch((error) => recordDiagnostic('diagnostics.export_failed', {}, error))}>Export diagnostics / 导出诊断</button>
           <pre style={{ whiteSpace: 'pre-wrap' }}>{this.state.error.stack || this.state.error.message}</pre>
           {this.state.componentStack && (
             <>

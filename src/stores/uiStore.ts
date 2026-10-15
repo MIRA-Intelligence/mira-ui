@@ -72,9 +72,7 @@ function saveWidth(key: string, value: number) {
 }
 
 export interface OpenNewProjectOptions {
-  // Seed the description field (e.g. when promoting a Quick Chat into a project).
-  prefill?: string
-  // When set, the originating chat thread is removed once the project is created.
+  // When set, the source conversation is attached before the chat thread is removed.
   fromChatId?: string
 }
 
@@ -92,7 +90,6 @@ interface UiState {
   /** One-shot prompt seed for the agent composer (chat mode home chips). */
   agentDraftPrompt: string | null
   newProjectOpen: boolean
-  newProjectPrefill: string | null
   newProjectFromChatId: string | null
   skillsPluginsOpen: boolean
   providersOpen: boolean
@@ -149,7 +146,6 @@ export const useUiStore = create<UiState>((set) => ({
   chatCenterPreviewFile: null,
   agentDraftPrompt: null,
   newProjectOpen: false,
-  newProjectPrefill: null,
   newProjectFromChatId: null,
   skillsPluginsOpen: false,
   providersOpen: false,
@@ -199,11 +195,10 @@ export const useUiStore = create<UiState>((set) => ({
   openNewProject: (options) =>
     set({
       newProjectOpen: true,
-      newProjectPrefill: options?.prefill ?? null,
       newProjectFromChatId: options?.fromChatId ?? null,
     }),
   closeNewProject: () =>
-    set({ newProjectOpen: false, newProjectPrefill: null, newProjectFromChatId: null }),
+    set({ newProjectOpen: false, newProjectFromChatId: null }),
   openSkillsPlugins: () => set({ skillsPluginsOpen: true }),
   closeSkillsPlugins: () => set({ skillsPluginsOpen: false }),
   openProviders: () => set({ providersOpen: true }),

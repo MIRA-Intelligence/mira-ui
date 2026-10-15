@@ -22,6 +22,7 @@ describe('ProjectQueue mode switch', () => {
     useUiStore.setState(initialUiState, true)
     useChatStore.setState(initialChatState, true)
     useOrganizationStore.setState(initialOrganizationState, true)
+    useChatStore.setState({ chats: [], activeChatId: null, workspaceKey: 'test' })
     useSettingsStore.setState({ language: 'en' })
   })
 
@@ -34,13 +35,113 @@ describe('ProjectQueue mode switch', () => {
     expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument()
   })
 
-  it('shows manual and auto controls in project mode', () => {
+  it('does not expose the legacy global execution toggle in project mode', () => {
     useProjectStore.setState({ appMode: 'project', mode: 'auto' })
 
     render(<ProjectQueue />)
 
-    expect(screen.getByRole('button', { name: 'Manual' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Auto' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Manual' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument()
+  })
+
+  function seedBatchChats() {
+    useProjectStore.setState({ appMode: 'normal' })
+    useChatStore.setState({ workspaceKey: 'batch', activeChatId: 'a', chats: [
+      { id: 'b', title: 'Batch B', createdAt: 1, updatedAt: 2 },
+      { id: 'c', title: 'Batch C', createdAt: 1, updatedAt: 1 },
+      { id: 'a', title: 'Batch A', createdAt: 1, updatedAt: 3 },
+    ] })
+    useOrganizationStore.setState({ loaded: true, folders: [{ id: 'dest', name: 'Destination', created_at: 'x', updated_at: 'x' }],
+      assignments: { chat: {}, project: {} } })
+  }
+
+  it('Shift selects the visible range, supports Ctrl toggling, and confirms bulk deletion', async () => {
+    seedBatchChats()
+    const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['a', 'c'], failed: [] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    expect(screen.getByText('3 selected')).toBeInTheDocument()
+    expect(useChatStore.getState().activeChatId).toBe('a')
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    expect(remove).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(['a', 'c']))
+  })
+
+  it('moves selected chats sequentially and retains only failed selections for retry', async () => {
+    seedBatchChats()
+    const move = vi.spyOn(useOrganizationStore.getState(), 'moveItem').mockImplementation(async (_kind, id) => {
+      if (id === 'b') throw new Error('offline')
+    })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { shiftKey: true })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Move selected conversations' }), { target: { value: 'dest' } })
+    await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument())
+    expect(move.mock.calls.map((call) => call[1])).toEqual(['a', 'b', 'c'])
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'true')
+    expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed')
+  })
+
+  it('clears a range when searching so hidden chats cannot be batch-deleted', () => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    fireEvent.change(screen.getByPlaceholderText('Search folders and titles...'), { target: { value: 'Batch B' } })
+    expect(screen.queryByText('3 selected')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { shiftKey: true })
+    expect(screen.getByText('1 selected')).toBeInTheDocument()
+  })
+
+  it('excludes collapsed folders from Shift ranges', () => {
+    seedBatchChats()
+    useOrganizationStore.setState({ assignments: { chat: { b: 'dest' }, project: {} } })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: /Destination/ }))
+    expect(screen.queryByRole('button', { name: 'Batch B' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+  })
+
+  it('disables duplicate batch submissions while awaiting server confirmation', async () => {
+    seedBatchChats()
+    let finish!: (result: { deleted: string[]; failed: string[] }) => void
+    const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    const button = screen.getByRole('button', { name: 'Delete selected conversations' })
+    fireEvent.click(button)
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(remove).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'Batch B' })).toBeDisabled()
+    finish({ deleted: ['a', 'b', 'c'], failed: [] })
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+  })
+
+  it('drags the whole selected range into a folder', async () => {
+    seedBatchChats()
+    const move = vi.spyOn(useOrganizationStore.getState(), 'moveItem').mockResolvedValue(undefined)
+    const data = new Map<string, string>()
+    const dataTransfer = { effectAllowed: '', dropEffect: '',
+      setData: (type: string, value: string) => data.set(type, value),
+      getData: (type: string) => data.get(type) ?? '' }
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    fireEvent.dragStart(screen.getByText('Batch B').closest('[draggable="true"]')!, { dataTransfer })
+    fireEvent.drop(screen.getByRole('button', { name: /Destination/ }).closest('div')!, { dataTransfer })
+    await waitFor(() => expect(move).toHaveBeenCalledTimes(3))
+    expect(move.mock.calls).toEqual([['chat', 'a', 'dest'], ['chat', 'b', 'dest'], ['chat', 'c', 'dest']])
   })
 
   it('groups chats in shared folders and filters by title', () => {
@@ -106,5 +207,107 @@ describe('ProjectQueue mode switch', () => {
       expect(useOrganizationStore.getState().assignments.chat['chat-1']).toBe('folder-1')
     })
     vi.unstubAllGlobals()
+  })
+
+  it('enters a conversation instead of leaving the project start page active', () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      selectedTaskId: 'PRJ-1',
+      tasks: [{
+        id: 'PRJ-1',
+        label: 'Project',
+        title: 'Project',
+        status: 'in_progress',
+        coreQuestion: 'Question',
+        experiments: [],
+        knowledge: [],
+        research: { references: [], notes: [] },
+        result: {},
+        startedAt: new Date().toISOString(),
+      }],
+    } as never)
+
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: /^Chats/ }))
+
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useChatStore.getState().activeChatId).not.toBeNull()
+  })
+
+  it('enters project mode and selects a project at the module start page', () => {
+    useProjectStore.setState({
+      appMode: 'normal',
+      selectedTaskId: null,
+      activeStage: 'research',
+      tasks: [{
+        id: 'PRJ-1',
+        label: 'Project',
+        title: 'Project',
+        status: 'in_progress',
+        coreQuestion: 'Question',
+        experiments: [],
+        knowledge: [],
+        research: { references: [], notes: [] },
+        result: {},
+        startedAt: new Date().toISOString(),
+      }],
+    } as never)
+
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: /^Projects/ }))
+
+    expect(useProjectStore.getState().appMode).toBe('project')
+    expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-1')
+    expect(useProjectStore.getState().activeStage).toBe('modules')
+  })
+
+  it('asks for a name and directory before creating a lightweight project and opening its overview', async () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      selectedTaskId: null,
+      activeStage: 'research',
+      tasks: [],
+    } as never)
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'PRJ-new',
+      display_name: 'New project',
+      project_dir: '/tmp/projects/PRJ-new',
+      has_plan: false,
+      run_mode: 'auto',
+      agent_profile: 'research',
+      contract_version: 1,
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
+
+    expect(screen.getByRole('dialog', { name: 'New project' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Create Project' })).toBeDisabled()
+    fireEvent.change(screen.getByLabelText('Project Name'), { target: { value: 'Lung CT Study' } })
+    fireEvent.change(screen.getByLabelText('Project Location'), { target: { value: '/tmp/my projects' } })
+    expect(screen.getByText('Project directory: /tmp/my projects/lung-ct-study')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }))
+
+    await waitFor(() => expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-new'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+      project_id: 'lung-ct-study',
+      display_name: 'Lung CT Study',
+      project_parent_dir: '/tmp/my projects',
+    })
+    expect(useUiStore.getState().systemMessages.at(-1)?.text).toBe('Created “New project” at /tmp/projects/PRJ-new')
+    expect(useProjectStore.getState().activeStage).toBe('modules')
+    expect(useProjectStore.getState().tasks[0]).toMatchObject({
+      id: 'PRJ-new',
+      label: 'New project',
+      coreQuestion: '',
+    })
+    expect(useUiStore.getState().newProjectOpen).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

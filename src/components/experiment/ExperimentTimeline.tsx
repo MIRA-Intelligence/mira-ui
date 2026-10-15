@@ -44,13 +44,18 @@ function ExpItem({ exp, isSelected, onSelect, lang }: {
         {STATUS_ICON[exp.status] ?? STATUS_ICON.pending}
       </span>
       <span className="min-w-0">
-        <span className="font-mono text-[10px] text-[var(--color-text-muted)] mr-1">{exp.id}</span>
+        <span className="font-mono text-[10px] text-[var(--color-text-muted)] mr-1">{exp.experiment_id ?? exp.id}</span>
         <span className={[
           exp.status === 'failed' ? 'text-[var(--color-error)]' : '',
           exp.status === 'skipped' ? 'line-through text-[var(--color-text-muted)]' : '',
         ].join(' ')}>
           {exp.title}
         </span>
+        {exp.workflow_run_id && (
+          <span className="block text-[9px] text-[var(--color-text-muted)]" title={exp.workflow_run_id}>
+            {exp.workflow_run_label} · {exp.workflow_run_id.slice(0, 8)}
+          </span>
+        )}
         {exp.guard_warnings && exp.guard_warnings.length > 0 && (
           <span
             role="img"

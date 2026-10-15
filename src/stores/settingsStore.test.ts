@@ -193,4 +193,25 @@ describe('settingsStore', () => {
     expect(state.apiUrl).toBe('https://remote.example/api')
     expect(state.workspacePath).toBe('/remote/workspace')
   })
+
+  it('stores remote engine tokens per origin and clears an auth rejection', () => {
+    const store = useSettingsStore.getState()
+    store.setEngineAuthRejected(true)
+    store.setEngineToken('https://mira.lab.example:18790/api', '  secret-token-0123456789  ')
+
+    const state = useSettingsStore.getState()
+    expect(state.engineTokens).toEqual({ 'https://mira.lab.example:18790': 'secret-token-0123456789' })
+    expect(state.engineAuthRejected).toBe(false)
+    const persisted = JSON.parse(localStorage.getItem('mira-ui-settings') ?? '{}')
+    expect(persisted.engineTokens).toEqual({ 'https://mira.lab.example:18790': 'secret-token-0123456789' })
+
+    store.setEngineToken('wss://mira.lab.example:18790/ws', '')
+    expect(useSettingsStore.getState().engineTokens).toEqual({})
+  })
+
+  it('clears an auth rejection once the engine probes as compatible again', () => {
+    useSettingsStore.setState({ engineStatus: 'compatible', engineMessage: null, engineVersion: '1.0.0', engineAuthRejected: true })
+    useSettingsStore.getState().setEngineBootstrap({ status: 'compatible', message: null, version: '1.0.0' })
+    expect(useSettingsStore.getState().engineAuthRejected).toBe(false)
+  })
 })

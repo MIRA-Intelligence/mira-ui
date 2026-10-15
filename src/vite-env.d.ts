@@ -12,6 +12,8 @@ interface ImportMeta {
 interface Window {
   electronAPI?: {
     platform: string
+    recordDiagnostic?: (record: import('./lib/diagnosticPrivacy').DiagnosticEvent) => void
+    exportDiagnostics?: (options?: { includeLocalEngine?: boolean }) => Promise<string | null>
     bootstrapLocalEngine?: (options?: { force?: boolean }) => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
@@ -25,6 +27,7 @@ interface Window {
       error: string | null
     }>
     setEngineModeHint?: (mode: 'localBundle' | 'remoteManual') => Promise<boolean>
+    getEngineToken?: () => Promise<string | null>
     getBootstrapState?: () => Promise<{
       phase: 'idle' | 'checking' | 'installing' | 'updating' | 'repairing' | 'starting' | 'ready' | 'error'
       message: string
@@ -92,6 +95,7 @@ interface Window {
       command: string[]
       executablePath: string | null
     }>
+    restartLocalEngine?: () => Promise<import('./services/desktop').LocalEngineCommandResult>
     doctorLocalEngine?: () => Promise<{
       ok: boolean
       code: number

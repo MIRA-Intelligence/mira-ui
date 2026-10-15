@@ -96,16 +96,14 @@ describe('uiStore.layout + modals', () => {
   })
 
   it('opens and closes the new-project modal with prefill', () => {
-    useUiStore.getState().openNewProject({ prefill: 'seed', fromChatId: 'chat-1' })
+    useUiStore.getState().openNewProject({ fromChatId: 'chat-1' })
     expect(useUiStore.getState()).toMatchObject({
       newProjectOpen: true,
-      newProjectPrefill: 'seed',
       newProjectFromChatId: 'chat-1',
     })
     useUiStore.getState().closeNewProject()
     expect(useUiStore.getState()).toMatchObject({
       newProjectOpen: false,
-      newProjectPrefill: null,
       newProjectFromChatId: null,
     })
   })

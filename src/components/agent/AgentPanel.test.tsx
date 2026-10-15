@@ -8,12 +8,16 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
+import { useUiStore } from '@/stores/uiStore'
+import { useWorkflowStore } from '@/stores/workflowStore'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
 const initialChatState = useChatStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 const initialSkillPluginsState = useSkillPluginsStore.getState()
+const initialUiState = useUiStore.getState()
+const initialWorkflowState = useWorkflowStore.getState()
 
 describe('AgentPanel keyboard behavior', () => {
   beforeEach(() => {
@@ -23,6 +27,8 @@ describe('AgentPanel keyboard behavior', () => {
     useChatStore.setState(initialChatState, true)
     useSettingsStore.setState(initialSettingsState, true)
     useSkillPluginsStore.setState(initialSkillPluginsState, true)
+    useUiStore.setState(initialUiState, true)
+    useWorkflowStore.setState(initialWorkflowState, true)
 
     useSettingsStore.setState({ language: 'en' })
     useProjectStore.setState({
@@ -260,6 +266,69 @@ describe('AgentPanel keyboard behavior', () => {
     expect(screen.queryByText('Mira is thinking...')).toBeNull()
   })
 
+  it('shows the current ModuleRun activity in the project conversation bubble', () => {
+    useProjectStore.setState({
+      appMode: 'project',
+      activeStage: 'result',
+    })
+    useWorkflowStore.setState({
+      selectedRunByProject: { 'PRJ-0001': 'run-delivery' },
+      snapshots: {
+        'PRJ-0001': {
+          workflow_contract_version: 1,
+          project_id: 'PRJ-0001',
+          project_sequence: 1,
+          workflow: {
+            contract_version: 1,
+            status: 'active',
+            revision: 1,
+            last_project_sequence: 1,
+            selected_run_id: 'run-delivery',
+            handoff_policy: { mode: 'manual', interrupt_grace_seconds: 10, rules: [] },
+          },
+          runs: [{
+            schema_version: 1,
+            workflow_contract_version: 1,
+            run_id: 'run-delivery',
+            project_id: 'PRJ-0001',
+            module_type: 'delivery',
+            label: 'Delivery 1',
+            status: 'running',
+            revision: 2,
+            created_at: '2026-07-31T00:00:00Z',
+            updated_at: '2026-07-31T00:00:01Z',
+            inputs: [],
+            outputs: [],
+            attempt: { number: 1 },
+            attempts: [],
+            conversation_key: 'ui:PRJ-0001:run:run-delivery',
+            last_project_sequence: 1,
+            last_run_sequence: 2,
+            module_data: {},
+          }],
+        },
+      },
+      activityByRun: { 'run-delivery': 'write result/exports/presentation.pdf' },
+    })
+    useAgentStore.setState({
+      streamingBySession: { 'PRJ-0001:run:run-delivery': true },
+      logsByProject: {
+        'PRJ-0001:run:run-delivery': [{
+          id: 'user-run',
+          timestamp: new Date().toISOString(),
+          content: 'Create the presentation',
+          type: 'response',
+          metadata: { _user: true },
+        }],
+      },
+    })
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('Mira is running: write result/exports/presentation.pdf')).toBeInTheDocument()
+    expect(screen.queryByText('Mira is thinking...')).toBeNull()
+  })
+
   it('sends quick chat messages on the active chat thread without a project', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     useChatStore.setState({
@@ -293,7 +362,26 @@ describe('AgentPanel keyboard behavior', () => {
     expect(messageCall).not.toHaveProperty('agent_profile')
   })
 
-  it('shows the AUTO badge when project mode is on auto', () => {
+  it('opens project promotion without prefilling the research description', () => {
+    useChatStore.setState({
+      chats: [{ id: 'chat-promote', title: 'MRI study', createdAt: 0, updatedAt: 0 }],
+      activeChatId: 'chat-promote',
+      workspaceKey: 'ws',
+    })
+    useProjectStore.setState({ appMode: 'normal', selectedTaskId: null })
+    useAgentStore.setState({ logsByProject: { 'chat-promote': [] } })
+
+    render(<AgentPanel />)
+    fireEvent.click(screen.getByRole('button', { name: 'Turn into project' }))
+
+    expect(useUiStore.getState()).toMatchObject({
+      newProjectOpen: true,
+      newProjectFromChatId: 'chat-promote',
+    })
+    expect(useUiStore.getState()).not.toHaveProperty('newProjectDescriptionPrefill')
+  })
+
+  it('does not show a global AUTO badge without an experiment Run', () => {
     useProjectStore.setState({
       appMode: 'project',
       selectedTaskId: 'PRJ-0001',
@@ -303,7 +391,19 @@ describe('AgentPanel keyboard behavior', () => {
 
     render(<AgentPanel />)
 
-    expect(screen.getByText('AUTO')).toBeInTheDocument()
+    expect(screen.queryByText('AUTO')).not.toBeInTheDocument()
+  })
+
+  it.each(['auto', 'manual'] as const)('shows the selected experiment mode: %s', (mode) => {
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: 'PRJ-0001', mode: mode === 'auto' ? 'manual' : 'auto' })
+    useWorkflowStore.setState({
+      selectedRunByProject: { 'PRJ-0001': 'experiment-run' },
+      snapshots: { 'PRJ-0001': { runs: [{ run_id: 'experiment-run', module_type: 'experiment',
+        status: 'running', module_data: { experiment_execution_mode: mode } }] } },
+    } as never)
+    render(<AgentPanel />)
+    expect(screen.getByText(mode.toUpperCase())).toBeInTheDocument()
+    expect(screen.queryByText(mode === 'auto' ? 'MANUAL' : 'AUTO')).not.toBeInTheDocument()
   })
 
   it('hides the AUTO badge in normal mode even when mode is still auto', () => {

@@ -56,6 +56,17 @@ describe('projectStore runtime preferences', () => {
     expect(useProjectStore.getState().contractVersion).toBe(2)
   })
 
+  it('keeps one project entry when reusing an already registered directory', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'PRJ-0001', display_name: 'Existing Study', project_dir: '/projects/PRJ-0001',
+    }), {status: 201})))
+    await useProjectStore.getState().createProjectShell('Existing Study', {
+      projectId: 'PRJ-0001', projectParentDir: '/projects', allowExistingDir: true,
+    })
+    expect(useProjectStore.getState().tasks.filter((task) => task.id === 'PRJ-0001')).toHaveLength(1)
+    expect(useProjectStore.getState().selectedTaskId).toBe('PRJ-0001')
+  })
+
   it('clears stale logs when creating a reused project id', async () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
@@ -346,7 +357,7 @@ describe('projectStore runtime preferences', () => {
     expect(useProjectStore.getState().tasks).toEqual([])
     expect(useProjectStore.getState().selectedTaskId).toBeNull()
     expect(useProjectStore.getState().selectedExpId).toBeNull()
-    expect(useProjectStore.getState().activeStage).toBe('research')
+    expect(useProjectStore.getState().activeStage).toBe('modules')
     expect(useProjectStore.getState().stats).toEqual({
       experiments: 0,
       completed: 0,

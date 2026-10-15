@@ -7,11 +7,14 @@ import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useChatStore } from '@/stores/chatStore'
+import { wsClient } from '@/services/websocket'
 
 const initialUiState = useUiStore.getState()
 const initialProjectState = useProjectStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 const initialAgentState = useAgentStore.getState()
+const initialChatState = useChatStore.getState()
 
 describe('NewProjectModal', () => {
   beforeEach(() => {
@@ -24,6 +27,7 @@ describe('NewProjectModal', () => {
     useProjectStore.setState(initialProjectState, true)
     useSettingsStore.setState(initialSettingsState, true)
     useAgentStore.setState(initialAgentState, true)
+    useChatStore.setState(initialChatState, true)
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(
       JSON.stringify({ run_mode: 'auto', agent_profile: 'research', contract_version: 1 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -54,7 +58,7 @@ describe('NewProjectModal', () => {
     expect(screen.queryByText('New Research Project')).not.toBeInTheDocument()
   })
 
-  it('keeps profile and contract choices local until the project is created', () => {
+  it('syncs profile while keeping experiment acceptance out of project creation', () => {
     useProjectStore.setState({
       tasks: [{
         id: 'PRJ-0001',
@@ -88,33 +92,15 @@ describe('NewProjectModal', () => {
       useUiStore.setState({ newProjectOpen: true })
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Engineer' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Strict' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Research' }))
+    expect(screen.queryByRole('button', { name: 'Strict' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Compat' })).not.toBeInTheDocument()
 
     const store = useProjectStore.getState()
     expect(store.agentProfile).toBe('research')
     expect(store.contractVersion).toBe(1)
     expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.agentProfile).toBe('research')
     expect(store.tasks.find((task) => task.id === 'PRJ-0001')?.contractVersion).toBe(1)
-  })
-
-  it('allows profile selection while another session is streaming', () => {
-    useAgentStore.setState({ streamingBySession: { 'PRJ-0001': true } })
-
-    render(
-      <StrictMode>
-        <NewProjectModal />
-      </StrictMode>,
-    )
-
-    act(() => {
-      useUiStore.setState({ newProjectOpen: true })
-    })
-
-    const engineer = screen.getByRole('button', { name: 'Engineer' })
-    expect(engineer).not.toBeDisabled()
-    fireEvent.click(engineer)
-    expect(engineer).toHaveClass('text-[var(--color-accent)]')
   })
 
   it('shows advanced literature source controls with all libraries enabled by default', () => {
@@ -253,10 +239,13 @@ describe('NewProjectModal', () => {
     expect(screen.queryByText('dataset/tables/a.csv')).not.toBeInTheDocument()
   })
 
-  it('deletes the remote project when file upload fails during creation', async () => {
+  it.each([false, true])('cleans up a failed upload without deleting pre-existing files (reuse=%s)', async (reuse) => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url.endsWith('/projects') && init?.method === 'POST') {
+        if (reuse && !JSON.parse(String(init.body)).allow_existing_dir) {
+          return new Response(JSON.stringify({code: 'project_directory_exists', project_dir: '/tmp/projects/upload-fails'}), {status: 409})
+        }
         return new Response(
           JSON.stringify({
             id: 'upload-fails',
@@ -275,6 +264,9 @@ describe('NewProjectModal', () => {
           JSON.stringify({ error: 'upload failed' }),
           { status: 500, headers: { 'Content-Type': 'application/json' } },
         )
+      }
+      if (url.endsWith('/projects/upload-fails/remove') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ removed: true }), { status: 200 })
       }
       if (url.endsWith('/projects?session_id=upload-fails') && init?.method === 'DELETE') {
         return new Response(
@@ -314,17 +306,133 @@ describe('NewProjectModal', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Create Project' }))
 
+    if (reuse) {
+      expect(await screen.findByRole('alert')).toHaveTextContent('already exists')
+      fireEvent.click(screen.getByRole('button', { name: 'Create in Existing Directory' }))
+    }
     expect(await screen.findByText('upload failed')).toBeInTheDocument()
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining('/projects?session_id=upload-fails'),
-        { method: 'DELETE' },
+        expect.stringContaining(reuse ? '/projects/upload-fails/remove' : '/projects?session_id=upload-fails'),
+        { method: reuse ? 'POST' : 'DELETE' },
       )
     })
+    if (reuse) {
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false)
+    }
     const createCall = fetchMock.mock.calls.find(([input, init]) => (
       String(input).endsWith('/projects') && init?.method === 'POST'
     ))
     expect(JSON.parse(String(createCall?.[1]?.body)).project_id).toBe('upload-fails')
     expect(useProjectStore.getState().tasks.find((task) => task.id === 'upload-fails')).toBeUndefined()
+  })
+
+  it('allows an empty description and previews the attached source chat', async () => {
+    const removeChat = vi.fn()
+    const send = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useChatStore.setState({ removeChat })
+    useUiStore.setState({
+      newProjectOpen: true,
+      newProjectFromChatId: 'chat-source',
+    })
+    const sourceEntries = [
+      {
+        id: 'source-user',
+        timestamp: '2026-09-16T12:00:00',
+        content: 'Compare reconstruction A and B.',
+        type: 'response' as const,
+        metadata: { _user: true },
+      },
+      {
+        id: 'source-mira',
+        timestamp: '2026-09-16T12:01:00',
+        content: 'I suggest PSNR and SSIM.',
+        type: 'response' as const,
+        metadata: {},
+      },
+    ]
+    useAgentStore.setState({ logsByProject: { 'chat-source': sourceEntries } })
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/projects') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          id: 'promoted-study',
+          display_name: 'Promoted Study',
+          project_dir: '/tmp/projects/promoted-study',
+          run_mode: 'auto',
+          agent_profile: 'research',
+          contract_version: 1,
+        }), { status: 201, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.endsWith('/projects/promoted-study/context/from-chat') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          session_id: 'promoted-study',
+          source_session_id: 'chat-source',
+          path: 'context/quick-chat-chat-source-abcd1234.md',
+          message_count: 3,
+        }), { status: 201, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.endsWith('/sessions/chat-source/context-preview') && init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          source_session_id: 'chat-source',
+          content: '# Conversation Context\n\n## User\n\nCompare reconstruction A and B.\n\n## Mira\n\nI suggest PSNR and SSIM.',
+          message_count: 2,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<NewProjectModal />)
+    expect(screen.getByText('The full conversation will be saved in the new project as a context attachment.')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('Describe your research goal, question, or hypothesis...')).toHaveValue('')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    const preview = await screen.findByRole('dialog', { name: 'Conversation context preview' })
+    expect(preview).toHaveTextContent('Compare reconstruction A and B.')
+    expect(preview).toHaveTextContent('I suggest PSNR and SSIM.')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog', { name: 'Conversation context preview' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('e.g. prefix-ratio-grpo'), {
+      target: { value: 'Promoted Study' },
+    })
+    expect(screen.getByRole('button', { name: 'Create Project' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Create Project' }))
+
+    await waitFor(() => expect(removeChat).toHaveBeenCalledWith('chat-source'))
+    const attachCall = fetchMock.mock.calls.find(([input]) => (
+      String(input).endsWith('/projects/promoted-study/context/from-chat')
+    ))
+    expect(JSON.parse(String(attachCall?.[1]?.body))).toEqual({
+      source_session_id: 'chat-source',
+      entries: sourceEntries,
+    })
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('## Conversation Context Attachment'),
+      session_id: 'promoted-study',
+    }))
+    const projectMessage = send.mock.calls.at(-1)?.[0]?.content ?? ''
+    expect(projectMessage).not.toContain('## Research Description')
+    expect(projectMessage).toContain('derive the current objective from the user messages')
+    expect(projectMessage).toContain('context/quick-chat-chat-source-abcd1234.md')
+  })
+
+  it('explains when the running engine cannot serve a context preview', async () => {
+    useUiStore.setState({
+      newProjectOpen: true,
+      newProjectFromChatId: 'chat-source',
+    })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    render(<NewProjectModal />)
+    fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not reach the conversation preview endpoint. Restart the Mira engine and try again.',
+    )
   })
 })
