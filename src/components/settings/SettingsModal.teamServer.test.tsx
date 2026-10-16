@@ -58,13 +58,13 @@ describe('SettingsModal Team server', () => {
 
   function renderSettings() {
     render(<><SettingsModal /><TeamServerLoginDialog /></>)
-    fireEvent.click(screen.getByRole('radio', { name: 'Team server' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Team server' }))
     return screen.getByLabelText('Server URL')
   }
 
   it('offers a Team server mode with a server URL field', () => {
     const input = renderSettings()
-    expect(screen.getByRole('radio', { name: 'Team server' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('tab', { name: 'Team server' })).toHaveAttribute('aria-selected', 'true')
     expect(input).toHaveAttribute('placeholder', 'https://mira.example.com')
     expect(screen.getByText(/Signs in to a Mira Server/)).toBeInTheDocument()
   })

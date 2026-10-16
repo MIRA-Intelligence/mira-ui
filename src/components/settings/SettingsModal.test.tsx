@@ -144,7 +144,7 @@ describe('SettingsModal remote runtime config', () => {
     })
   })
 
-  it('no longer shows a separate Local Engine tab and exposes a Manage providers entry', async () => {
+  it('shows one tab per deployment mode and exposes a Manage providers entry', async () => {
     vi.mocked(fetchRuntimeConfig).mockResolvedValue(runtimePayload('/old/workspace', '/old/config.json'))
 
     openRemoteSettings('https://old.example/api', 'wss://old.example/ws', '/old/workspace')
@@ -154,9 +154,24 @@ describe('SettingsModal remote runtime config', () => {
       expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled()
     })
 
-    // The two-tab structure (with a "Local Engine" tab) is gone.
-    expect(screen.queryByRole('tab')).toBeNull()
-    expect(screen.queryByText('Local Engine')).toBeNull()
+    // Deployment modes are tabs; the active one is the saved mode and only its
+    // parameters are shown.
+    expect(screen.getByRole('tab', { name: /Direct URL/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Local' })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('API URL')
+    expect(screen.queryByText('Repair service')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Local' }))
+    expect(screen.getByRole('tab', { name: 'Local' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tabpanel')).toHaveTextContent('Phase:')
+    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('API URL')
+    // Without the desktop bridges (browser build) only Local and Direct URL are
+    // offered; the legacy engine maintenance buttons are gone.
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+      'Local', 'Direct URL(deprecated)',
+    ])
+    for (const legacy of ['Repair service', 'Run doctor', 'Upgrade local engine', 'Refresh config']) {
+      expect(screen.queryByRole('button', { name: legacy })).toBeNull()
+    }
     // Provider/runtime config is reachable via the Providers page entry point.
     expect(screen.getAllByText('Manage providers').length).toBeGreaterThan(0)
   })
@@ -241,7 +256,7 @@ describe('SettingsModal remote runtime config', () => {
       const { container } = render(<SettingsModal />)
       await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled())
 
-      fireEvent.click(screen.getByRole('radio', { name: 'Remote server (SSH)' }))
+      fireEvent.click(screen.getByRole('tab', { name: 'Remote server (SSH)' }))
       expect(screen.queryByText('API URL')).toBeNull()
       expect(screen.queryByText('Engine token')).toBeNull()
       await waitFor(() => expect(container.querySelectorAll('#mira-ssh-hosts option')).toHaveLength(2))
