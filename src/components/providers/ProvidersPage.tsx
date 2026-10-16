@@ -228,6 +228,7 @@ export function ProvidersPage() {
     setSearch('')
     setNewModel('')
     setFetchedModels([])
+    setRoleMenu(null)
     void (async () => {
       try {
         const data = await fetchRuntimeConfig(apiUrl)
@@ -251,12 +252,6 @@ export function ProvidersPage() {
       }
     })()
   }, [providersOpen, apiUrl])
-
-  // Reset the fetched-models panel + any open role menu when the provider changes.
-  useEffect(() => {
-    setFetchedModels([])
-    setRoleMenu(null)
-  }, [selected])
 
   // Auto-dismiss the feedback toast (errors linger a little longer).
   useEffect(() => {
@@ -330,6 +325,15 @@ export function ProvidersPage() {
 
   if (!providersOpen) return null
 
+  // Switching provider resets the fetched-models panel and any open role menu.
+  // Done here rather than in an effect on ``selected``: an effect flushed late
+  // could close a role menu the user opened right after the switch.
+  const selectProvider = (name: string | null) => {
+    setSelected(name)
+    setFetchedModels([])
+    setRoleMenu(null)
+  }
+
   const updateDraft = (name: string, patch: Partial<ProviderDraft>) => {
     setDrafts((current) => ({ ...current, [name]: { ...current[name], ...patch } }))
   }
@@ -357,7 +361,7 @@ export function ProvidersPage() {
       },
     }))
     setDrafts((current) => ({ ...current, [id]: { apiKey: '', apiBase: '', models: [], enabled: true, name } }))
-    setSelected(id)
+    selectProvider(id)
   }
 
   const deleteCustomProvider = (id: string) => {
@@ -381,7 +385,7 @@ export function ProvidersPage() {
       return next
     })
     const fallback = providerEntries.find(([name]) => name !== id)
-    setSelected(fallback ? fallback[0] : null)
+    selectProvider(fallback ? fallback[0] : null)
   }
 
   const updateActive = (patch: Partial<ActiveDraft>) => {
@@ -497,7 +501,7 @@ export function ProvidersPage() {
     if (!payload || !active) return
     const invalid = providerEntries.map(([name]) => [name, nameErrorFor(name)] as const).find(([, error]) => error)
     if (invalid) {
-      setSelected(invalid[0])
+      selectProvider(invalid[0])
       setFeedback({ text: invalid[1]!, error: true })
       return
     }
@@ -657,7 +661,7 @@ export function ProvidersPage() {
           <div className="flex-1 overflow-y-auto p-2 space-y-3">
             <button
               type="button"
-              onClick={() => setSelected(MODEL_PARAMS_VIEW)}
+              onClick={() => selectProvider(MODEL_PARAMS_VIEW)}
               className={cn(
                 'w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors',
                 selected === MODEL_PARAMS_VIEW ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]/60',
@@ -668,7 +672,7 @@ export function ProvidersPage() {
             </button>
             <button
               type="button"
-              onClick={() => setSelected(RUNTIME_VIEW)}
+              onClick={() => selectProvider(RUNTIME_VIEW)}
               className={cn(
                 'w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors',
                 selected === RUNTIME_VIEW ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]/60',
@@ -681,14 +685,14 @@ export function ProvidersPage() {
               title={t('providersGroupEnabled', lang)}
               entries={filtered.enabled}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={selectProvider}
               enabledGroup
             />
             <ProviderGroup
               title={t('providersGroupDisabled', lang)}
               entries={filtered.disabled}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={selectProvider}
               enabledGroup={false}
             />
             {multiCustom && payload?.providers.custom && (
