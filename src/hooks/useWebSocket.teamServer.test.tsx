@@ -101,6 +101,16 @@ describe('useWebSocket in Team server mode', () => {
     expect(probeEngineCompatibility).not.toHaveBeenCalled()
   })
 
+  it('does not look for an engine for an account that only administers the team', async () => {
+    await bridge.manager.login(ORIGIN, 'dana', 'admin only')
+    render(<HookHarness />)
+    await waitFor(() => expect(useSettingsStore.getState().engineStatus).toBe('unreachable'))
+    expect(useSettingsStore.getState().connectionMessage).toContain('as an administrator without a workspace')
+    expect(probeEngineCompatibility).not.toHaveBeenCalled()
+    expect(websocketMock.connect).not.toHaveBeenCalled()
+    expect(server.requests.some((r) => r.path === '/server/engine/start')).toBe(false)
+  })
+
   it('keeps the WebSocket on token refresh and drops it when the session ends', async () => {
     await bridge.manager.login(ORIGIN, 'alice', 'correct horse')
     render(<HookHarness />)

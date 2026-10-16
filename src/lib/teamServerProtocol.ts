@@ -79,6 +79,12 @@ export function isAdmin(user: TeamServerUser | null | undefined): boolean {
   return Boolean(user?.roles.includes('admin'))
 }
 
+// Members of the users group run an engine; an account only in the admins
+// group signs in to change the team settings and has none.
+export function hasEngineRole(user: TeamServerUser | null | undefined): boolean {
+  return Boolean(user?.roles.includes('user'))
+}
+
 // Accepts both the wire format ({name, display_name, roles}) and the IPC one.
 export function sanitizeTeamServerUser(value: unknown): TeamServerUser | null {
   if (!isRecord(value) || typeof value.name !== 'string' || !value.name) return null

@@ -35,6 +35,7 @@ import {
 } from '@/services/teamServer'
 import { useTeamServerStore } from '@/stores/teamServerStore'
 import { serverHost, serverOrigin } from '@/lib/teamServerUrl'
+import { hasEngineRole } from '@/lib/teamServerProtocol'
 
 async function syncOnConnect() {
   const {
@@ -246,6 +247,11 @@ export function useWebSocket() {
           }
           const engine = await fetchTeamServerMe(origin)
           if (disposed) return
+          if (!hasEngineRole(useTeamServerStore.getState().user)) {
+            // Administration account outside mira-users: no engine to connect
+            // to, but Settings and Providers edit the team settings.
+            return unreachable(t('teamServerAdminOnly', lang, { host }))
+          }
           if (engine?.state === 'conflict') {
             return unreachable(teamServerEngineIssueMessage('engine_conflict', lang, origin))
           }

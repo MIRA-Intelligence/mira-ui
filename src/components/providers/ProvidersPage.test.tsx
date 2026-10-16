@@ -81,6 +81,50 @@ describe('ProvidersPage', () => {
     vi.mocked(testProvider).mockResolvedValue({ ok: true, message: 'ok', model_count: 2 })
   })
 
+  it('shows a team-managed provider read-only and never saves it', async () => {
+    const team = payload()
+    team.providers.deepseek = { ...team.providers.deepseek, managed_by: 'team', api_key_preview: null, api_base: 'http://127.0.0.1:8740/llm/deepseek' }
+    team.team = { revision: 'r1', providers: ['deepseek'], model_params: false, defaults: [] }
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(team)
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    expect(await screen.findByText(/Your Team Server administrators manage DeepSeek/)).toBeInTheDocument()
+    expect(screen.getByText('Team')).toBeInTheDocument()  // rail badge
+    expect(screen.queryByText('Fetch from provider')).not.toBeInTheDocument()
+    expect(screen.queryByText('Remove')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/key/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('switch')).toBeDisabled()
+    // Testing goes through the engine (and Mira Server's LLM proxy): still allowed.
+    fireEvent.click(screen.getByText('Test connection'))
+    await waitFor(() => expect(testProvider).toHaveBeenCalledWith('deepseek', expect.any(Object), expect.any(String)))
+
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+    expect(vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0].providers).not.toHaveProperty('deepseek')
+  })
+
+  it('shows team model-parameter rules read-only and does not send them', async () => {
+    const team = payload()
+    team.model_params = [{ pattern: 'gpt-5*', params: { temperature: null } }]
+    team.team = { revision: 'r1', providers: [], model_params: true, defaults: [] }
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(team)
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    await screen.findByText('Fetch from provider')
+    fireEvent.click(screen.getAllByText('Model Parameters')[0])
+    expect(await screen.findByText(/set these rules; they cannot be changed here/)).toBeInTheDocument()
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+    expect(vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0]).not.toHaveProperty('model_params')
+  })
+
+  it('marks the team settings when an administrator edits them', async () => {
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue({ ...payload(), scope: 'team' })
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    expect(await screen.findByText(/Team settings · Changes here apply to every user/)).toBeInTheDocument()
+  })
+
   it('renders nothing when closed', () => {
     const { container } = render(<ProvidersPage />)
     expect(container).toBeEmptyDOMElement()

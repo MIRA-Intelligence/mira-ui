@@ -383,11 +383,13 @@ export function ProvidersPage() {
     setFeedback(null)
     try {
       const nextRules = formsToRules(ruleForms)
-      const rulesChanged = JSON.stringify(nextRules) !== JSON.stringify(payload.model_params ?? [])
+      const rulesChanged = !payload.team?.model_params
+        && JSON.stringify(nextRules) !== JSON.stringify(payload.model_params ?? [])
 
       const providerUpdates: Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }> = {}
       for (const [name, draft] of Object.entries(drafts)) {
         const original = payload.providers[name]
+        if (original?.managed_by === 'team') continue
         const apiKey = draft.apiKey.trim()
         const apiBase = draft.apiBase.trim() ? draft.apiBase.trim() : null
         const modelsChanged = JSON.stringify(draft.models) !== JSON.stringify(original?.models ?? [])
@@ -460,6 +462,8 @@ export function ProvidersPage() {
 
   const selectedSettings = selected ? payload?.providers[selected] : undefined
   const selectedDraft = selected ? drafts[selected] : undefined
+  // Team server: administrators manage this provider; the user only picks models.
+  const teamManaged = selectedSettings?.managed_by === 'team'
   const modelOptionsFor = (provider: string): string[] =>
     drafts[provider]?.models ?? payload?.providers[provider]?.models ?? []
 
@@ -485,7 +489,17 @@ export function ProvidersPage() {
         </div>
       )}
       <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
-        <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('providersTitle', lang)}</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('providersTitle', lang)}</h2>
+          {payload?.scope === 'team' && (
+            <span
+              title={t('providersTeamScopeHint', lang)}
+              className="text-[11px] px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-300"
+            >
+              {t('providersTeamScope', lang)} · {t('providersTeamScopeHint', lang)}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => void handleSave()}
@@ -547,6 +561,7 @@ export function ProvidersPage() {
               selected={selected}
               onSelect={setSelected}
               enabledGroup
+              teamBadge={t('providersTeamBadge', lang)}
             />
             <ProviderGroup
               title={t('providersGroupDisabled', lang)}
@@ -554,6 +569,7 @@ export function ProvidersPage() {
               selected={selected}
               onSelect={setSelected}
               enabledGroup={false}
+              teamBadge={t('providersTeamBadge', lang)}
             />
           </div>
         </div>
@@ -562,7 +578,16 @@ export function ProvidersPage() {
             fetched-models list fills the blank space to their right. */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {selected === MODEL_PARAMS_VIEW ? (
-            <ModelParamsEditor forms={ruleForms} setForms={setRuleForms} lang={lang} />
+            payload?.team?.model_params ? (
+              <div className="space-y-3">
+                <p className="text-[11px] text-amber-300">{t('modelParamsTeamManaged', lang)}</p>
+                <fieldset disabled className="opacity-70">
+                  <ModelParamsEditor forms={ruleForms} setForms={setRuleForms} lang={lang} />
+                </fieldset>
+              </div>
+            ) : (
+              <ModelParamsEditor forms={ruleForms} setForms={setRuleForms} lang={lang} />
+            )
           ) : selected === RUNTIME_VIEW ? (
             <RuntimeSettingsEditor form={runtimeForm} setForm={setRuntimeForm} lang={lang} />
           ) : (
@@ -598,11 +623,16 @@ export function ProvidersPage() {
                     checked={selectedDraft.enabled}
                     onChange={(value) => updateDraft(selected, { enabled: value })}
                     label={selectedDraft.enabled ? t('providersEnableOff', lang) : t('providersEnableOn', lang)}
+                    disabled={teamManaged}
                   />
                 </div>
               </div>
 
-              {selectedSettings.is_oauth ? (
+              {teamManaged ? (
+                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                  {t('providersTeamManaged', lang, { provider: selectedSettings.display_name })}
+                </p>
+              ) : selectedSettings.is_oauth ? (
                 <p className="text-[11px] text-[var(--color-text-muted)]">
                   {t('providersOauthNote', lang, { provider: selectedSettings.display_name })}
                 </p>
@@ -654,9 +684,11 @@ export function ProvidersPage() {
                         {testing ? t('providersTesting', lang) : t('providersTest', lang)}
                       </SmallButton>
                     )}
-                    <SmallButton disabled={fetchingModels} onClick={() => void handleFetchModels(selected)}>
-                      {fetchingModels ? t('providersFetching', lang) : t('providersFetchModels', lang)}
-                    </SmallButton>
+                    {!teamManaged && (
+                      <SmallButton disabled={fetchingModels} onClick={() => void handleFetchModels(selected)}>
+                        {fetchingModels ? t('providersFetching', lang) : t('providersFetchModels', lang)}
+                      </SmallButton>
+                    )}
                   </div>
                 </div>
 
@@ -754,19 +786,22 @@ export function ProvidersPage() {
                             )}
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => removeModel(selected, model)}
-                            className="text-[11px] text-[var(--color-text-muted)] hover:text-red-400"
-                          >
-                            {t('providersRemove', lang)}
-                          </button>
+                          {!teamManaged && (
+                            <button
+                              type="button"
+                              onClick={() => removeModel(selected, model)}
+                              className="text-[11px] text-[var(--color-text-muted)] hover:text-red-400"
+                            >
+                              {t('providersRemove', lang)}
+                            </button>
+                          )}
                         </div>
                       </li>
                     ))}
                   </ul>
                 )}
 
+                {!teamManaged && (
                 <div className="flex items-center gap-2">
                   <input
                     value={newModel}
@@ -782,6 +817,7 @@ export function ProvidersPage() {
                   />
                   <SmallButton onClick={() => addModel(selected, newModel)}>{t('providersAddModel', lang)}</SmallButton>
                 </div>
+                )}
               </div>
             </div>
           )}
@@ -899,11 +935,13 @@ function ProviderGroup({
   selected,
   onSelect,
   enabledGroup,
+  teamBadge,
 }: {
   title: string
   entries: Array<[string, RuntimeConfigPayload['providers'][string]]>
   selected: string | null
   onSelect: (name: string) => void
+  teamBadge: string
   // Whether this group lists enabled providers. The green "ready" dot is only
   // meaningful for enabled providers — disabled ones (e.g. local vLLM/Ollama/
   // OVMS that report ``configured`` without a key) must not show it.
@@ -928,6 +966,11 @@ function ProviderGroup({
             >
               <ProviderIcon provider={name} displayName={settings.display_name} size={22} />
               <span className="text-sm text-[var(--color-text-primary)] truncate flex-1">{settings.display_name}</span>
+              {settings.managed_by === 'team' && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 shrink-0">
+                  {teamBadge}
+                </span>
+              )}
               {enabledGroup && settings.configured && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" />}
             </button>
           </li>
@@ -1248,17 +1291,24 @@ function SmallButton({ children, disabled, onClick }: { children: React.ReactNod
   )
 }
 
-function Switch({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label?: string }) {
+function Switch({ checked, onChange, label, disabled = false }: {
+  checked: boolean
+  onChange: (value: boolean) => void
+  label?: string
+  disabled?: boolean
+}) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
         checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]',
+        disabled && 'opacity-50 cursor-not-allowed',
       )}
     >
       <span

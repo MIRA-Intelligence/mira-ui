@@ -9,6 +9,7 @@ import { requestTeamServerLogin, useTeamServerStore, type TeamServerEngine, type
 import { serverHost, serverOrigin, type ServerUrlError } from '@/lib/teamServerUrl'
 import {
   failure,
+  hasEngineRole,
   sanitizeInfoResult,
   sanitizeSessionEvent,
   sanitizeSessionResult,
@@ -209,7 +210,8 @@ export async function startTeamServerEngine(origin: string): Promise<TeamServerE
 // so the next reconnect finds it.
 export async function checkTeamServerAfterDisconnect(): Promise<void> {
   const origin = activeTeamServerOrigin()
-  if (!origin || useTeamServerStore.getState().phase !== 'signedIn') return
+  const store = useTeamServerStore.getState()
+  if (!origin || store.phase !== 'signedIn' || !hasEngineRole(store.user)) return
   const engine = await fetchTeamServerMe(origin)
   if (engine?.state === 'stopped') await startTeamServerEngine(origin)
 }

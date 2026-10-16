@@ -46,6 +46,8 @@ export function createMockMiraServer(options: MockMiraServerOptions = {}) {
   const users = new Map<string, MockUser>([
     ['alice', { password: 'correct horse', displayName: 'Alice Liddell', roles: ['user'], allowed: true }],
     ['root', { password: 'admin pass', displayName: 'Rita Root', roles: ['user', 'admin'], allowed: true }],
+    // Administration account outside mira-users: signs in, has no engine.
+    ['dana', { password: 'admin only', displayName: 'Dana Admin', roles: ['admin'], allowed: true }],
     ['mallory', { password: 'pw', displayName: 'Mallory', roles: ['user'], allowed: false }],
   ])
   const access = new Map<string, AccessEntry>()

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { TopBar } from './TopBar'
 import { StatusBar } from './StatusBar'
+import { TeamAdminBanner } from './TeamAdminBanner'
 import { PipelineProgress } from '@/components/pipeline/PipelineProgress'
 import { ProjectQueue } from '@/components/queue/ProjectQueue'
 import { ExperimentTimeline } from '@/components/experiment/ExperimentTimeline'
@@ -159,6 +160,7 @@ export function AppLayout() {
   return (
     <div className="h-screen flex flex-col">
       <TopBar />
+      <TeamAdminBanner />
       <UpdateBanner />
       <PipelineProgress />
 

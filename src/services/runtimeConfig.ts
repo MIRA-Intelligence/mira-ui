@@ -17,6 +17,17 @@ export interface RuntimeProviderSettings {
   default_api_base: string | null
   is_oauth: boolean
   is_local: boolean
+  // Team server: the administrators manage this provider (its key stays on
+  // Mira Server); the user cannot change it.
+  managed_by?: 'team'
+}
+
+// Team server: what the team settings manage in this engine.
+export interface TeamManagedSummary {
+  revision: string
+  providers: string[]
+  model_params: boolean
+  defaults: string[]
 }
 
 // ``team`` profile roles bindable to a provider + model on the providers page.
@@ -89,6 +100,10 @@ export interface RuntimeConfigPayload {
   providers: Record<string, RuntimeProviderSettings>
   // User-defined per-model parameter rules. Empty when none are configured.
   model_params?: ModelParamRule[]
+  // Team server: "team" when an administrator is editing the team settings.
+  scope?: 'team'
+  // Team server: present in a user's engine when team settings apply.
+  team?: TeamManagedSummary
 }
 
 function resolveApiUrl(apiUrl?: string): string {
