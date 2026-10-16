@@ -306,4 +306,129 @@ describe('ProvidersPage', () => {
       supervisor_model: 'deepseek/deepseek-chat',
     })
   })
+
+  describe('custom providers', () => {
+    function customPayload(): RuntimeConfigPayload {
+      const base = payload()
+      const custom = (over: Partial<RuntimeConfigPayload['providers'][string]>) => ({
+        ...base.providers.openai,
+        api_key_required: false,
+        api_base_required: true,
+        is_custom: true,
+        ...over,
+      })
+      return {
+        ...base,
+        runtime: { ...base.runtime, critic_provider: 'custom_lab', critic_model: 'lab-model' },
+        providers: {
+          auto: base.providers.auto,
+          custom: custom({ display_name: 'Custom' }),
+          custom_lab: custom({ display_name: 'Lab vLLM', enabled: true, configured: true, api_base: 'http://lab/v1', models: ['lab-model'] }),
+          deepseek: { ...base.providers.deepseek, is_custom: false },
+          openai: { ...base.providers.openai, is_custom: false },
+        },
+      }
+    }
+
+    const railButton = (label: string) =>
+      screen.getAllByText(label).map((el) => el.closest('button')).find(Boolean)!
+
+    beforeEach(() => {
+      vi.mocked(fetchRuntimeConfig).mockResolvedValue(customPayload())
+      vi.mocked(saveProvidersConfig).mockResolvedValue(customPayload())
+    })
+
+    it('adds a named custom provider and saves it', async () => {
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      fireEvent.click(await screen.findByText('+ Add custom provider'))
+
+      const nameInput = await screen.findByRole('textbox', { name: 'Name' })
+      expect(nameInput).toHaveValue('Custom 2')
+      // Unsaved providers cannot be tested yet.
+      expect(screen.getByText('Fetch from provider')).toBeDisabled()
+      fireEvent.change(nameInput, { target: { value: 'Team gateway' } })
+      fireEvent.change(screen.getByPlaceholderText('Leave empty to use the provider default'), { target: { value: 'https://gw/v1' } })
+      expect(railButton('Team gateway')).toBeInTheDocument()
+
+      fireEvent.click(screen.getByText('Save'))
+      await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+      const providers = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0].providers!
+      const [id, update] = Object.entries(providers).find(([name]) => name.startsWith('custom_') && name !== 'custom_lab')!
+      expect(id).toMatch(/^custom_[a-z0-9]{1,32}$/)
+      expect(update).toEqual({ api_base: 'https://gw/v1', models: [], enabled: true, name: 'Team gateway' })
+    })
+
+    it('renames a custom provider and blocks duplicate or empty names', async () => {
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      await screen.findByText('Fetch from provider')
+      fireEvent.click(railButton('Lab vLLM'))
+
+      const nameInput = await screen.findByRole('textbox', { name: 'Name' })
+      expect(screen.queryByRole('alert')).toBeNull()
+      fireEvent.change(nameInput, { target: { value: ' deepseek ' } })
+      expect(screen.getByRole('alert')).toHaveTextContent('Another provider is already named "DeepSeek"')
+
+      // Saving is refused while a name collides.
+      fireEvent.click(screen.getByText('Save'))
+      expect(await screen.findByText('Another provider is already named "DeepSeek". Choose a different name.', { selector: 'span' })).toBeInTheDocument()
+      expect(saveProvidersConfig).not.toHaveBeenCalled()
+
+      fireEvent.change(nameInput, { target: { value: '  ' } })
+      expect(screen.getByRole('alert')).toHaveTextContent('Enter a name for this provider.')
+
+      fireEvent.change(nameInput, { target: { value: 'Lab cluster' } })
+      expect(screen.queryByRole('alert')).toBeNull()
+      fireEvent.click(screen.getByText('Save'))
+      await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+      const providers = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0].providers!
+      expect(providers.custom_lab).toMatchObject({ name: 'Lab cluster' })
+    })
+
+    it('jumps to the custom provider whose name collides when saving', async () => {
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      await screen.findByText('Fetch from provider')
+      fireEvent.click(railButton('Lab vLLM'))
+      fireEvent.change(await screen.findByRole('textbox', { name: 'Name' }), { target: { value: 'Custom' } })
+      fireEvent.click(railButton('DeepSeek'))
+      expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull()
+
+      fireEvent.click(screen.getByText('Save'))
+      expect(await screen.findByRole('textbox', { name: 'Name' })).toHaveValue('Custom')
+      expect(saveProvidersConfig).not.toHaveBeenCalled()
+    })
+
+    it('deletes an additional custom provider and unbinds roles that used it', async () => {
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      await screen.findByText('Fetch from provider')
+      fireEvent.click(railButton('Custom'))
+      // The built-in custom provider can be renamed but not deleted.
+      expect(await screen.findByRole('textbox', { name: 'Name' })).toBeInTheDocument()
+      expect(screen.queryByText('Delete provider')).toBeNull()
+
+      fireEvent.click(railButton('Lab vLLM'))
+      fireEvent.click(await screen.findByText('Delete provider'))
+      expect(screen.queryAllByText('Lab vLLM').filter((el) => el.closest('button'))).toHaveLength(0)
+
+      fireEvent.click(screen.getByText('Save'))
+      await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+      const arg = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0]
+      expect(arg.providers?.custom_lab).toBeNull()
+      expect(arg.runtime?.critic_provider).toBe('auto')
+      expect(arg.runtime?.critic_model).toBe('')
+    })
+
+    it('hides multi-custom controls for engines without is_custom', async () => {
+      vi.mocked(fetchRuntimeConfig).mockResolvedValue(payload())
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      await screen.findByText('Fetch from provider')
+      expect(screen.queryByText('+ Add custom provider')).toBeNull()
+      expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull()
+    })
+  })
 })
+

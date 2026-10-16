@@ -17,7 +17,19 @@ export interface RuntimeProviderSettings {
   default_api_base: string | null
   is_oauth: boolean
   is_local: boolean
+  // OpenAI-compatible custom provider (``custom`` or ``custom_<id>``). Older
+  // engines omit it and support only the single ``custom`` entry.
+  is_custom?: boolean
 }
+
+// Updates for one provider. ``null`` deletes an additional custom provider.
+export type ProviderUpdate = {
+  api_key?: string
+  api_base?: string | null
+  models?: string[]
+  enabled?: boolean
+  name?: string | null
+} | null
 
 // ``team`` profile roles bindable to a provider + model on the providers page.
 export type TeamRole = 'supervisor' | 'student' | 'critic'
@@ -157,7 +169,7 @@ export async function saveProvidersConfig(payload: {
     auto_max_rounds: number
     restrict_to_workspace: boolean
   } & RuntimeRoleBindings>
-  providers?: Partial<Record<string, { api_key?: string; api_base?: string | null; models?: string[]; enabled?: boolean }>>
+  providers?: Partial<Record<string, ProviderUpdate>>
   model_params?: ModelParamRule[]
 }, apiUrl?: string): Promise<RuntimeConfigPayload> {
   return postRuntimeConfig(payload, apiUrl)
