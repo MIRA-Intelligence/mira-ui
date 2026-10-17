@@ -61,9 +61,9 @@ export function TeamServerUserMenu() {
         type="button"
         onClick={() => void requestTeamServerLogin(origin, 'manual')}
         title={t('teamServerSignedOut', lang, { host })}
-        className="flex items-center gap-1.5 px-2 h-full text-amber-300 hover:bg-[var(--color-bg-hover)] transition-colors"
+        className="flex items-center gap-1.5 px-2 h-full text-[var(--color-notice-text)] hover:bg-[var(--color-bg-hover)] transition-colors"
       >
-        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400" aria-hidden />
+        <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-warning)]" aria-hidden />
         <span className="truncate">{t('teamServerSignedOutShort', lang)} — {t('teamServerSignIn', lang)}</span>
       </button>
     )
@@ -135,7 +135,7 @@ export function TeamServerUserMenu() {
             )}
           </dl>
           {!persistent && (
-            <p className="px-3 pb-2 text-[11px] leading-relaxed text-amber-300">{t('teamServerNotPersistent', lang)}</p>
+            <p className="px-3 pb-2 text-[11px] leading-relaxed text-[var(--color-notice-text)]">{t('teamServerNotPersistent', lang)}</p>
           )}
           <div className="px-3 py-2 border-t border-[var(--color-border)] flex justify-end">
             <button

@@ -82,15 +82,15 @@ export function StatusBar() {
   return (
     <footer className="border-t border-[var(--color-border)] bg-[var(--color-bg-primary)]">
       {showEngineWarning && (
-        <div className="px-6 py-2 text-xs text-amber-300 bg-amber-950/40 border-b border-amber-500/30">
+        <div className="px-6 py-2 text-xs text-[var(--color-notice-text)] bg-[var(--color-notice-bg)] border-b border-[var(--color-notice-border)]">
           {bannerMessage || t('engineWarningFallback', lang)}
           {authMessage && teamOrigin && (
-            <button type="button" onClick={() => void requestTeamServerLogin(teamOrigin, 'manual')} className="ml-2 underline hover:text-amber-200">
+            <button type="button" onClick={() => void requestTeamServerLogin(teamOrigin, 'manual')} className="ml-2 underline hover:opacity-80">
               {t('teamServerSignIn', lang)}
             </button>
           )}
           {authMessage && !teamOrigin && (
-            <button type="button" onClick={openSettings} className="ml-2 underline hover:text-amber-200">
+            <button type="button" onClick={openSettings} className="ml-2 underline hover:opacity-80">
               {t('engineTokenOpenSettings', lang)}
             </button>
           )}

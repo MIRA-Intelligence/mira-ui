@@ -636,7 +636,7 @@ export function ProvidersPage() {
           {payload?.scope === 'team' && (
             <span
               title={t('providersTeamScopeHint', lang)}
-              className="text-[11px] px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-300"
+              className="text-[11px] px-2 py-0.5 rounded-full border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] text-[var(--color-notice-text)]"
             >
               {t('providersTeamScope', lang)} · {t('providersTeamScopeHint', lang)}
             </span>
@@ -731,7 +731,7 @@ export function ProvidersPage() {
           {selected === MODEL_PARAMS_VIEW ? (
             payload?.team?.model_params ? (
               <div className="space-y-3">
-                <p className="text-[11px] text-amber-300">{t('modelParamsTeamManaged', lang)}</p>
+                <p className="text-[11px] text-[var(--color-notice-text)]">{t('modelParamsTeamManaged', lang)}</p>
                 <fieldset disabled className="opacity-70">
                   <ModelParamsEditor forms={ruleForms} setForms={setRuleForms} lang={lang} />
                 </fieldset>
@@ -813,7 +813,7 @@ export function ProvidersPage() {
               )}
 
               {teamManaged ? (
-                <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+                <p className="rounded-lg border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] px-3 py-2 text-[11px] text-[var(--color-notice-text)]">
                   {t('providersTeamManaged', lang, { provider: selectedSettings.display_name })}
                 </p>
               ) : selectedSettings.is_oauth ? (
@@ -1151,7 +1151,7 @@ function ProviderGroup({
               <ProviderIcon provider={name} displayName={settings.display_name} size={22} />
               <span className="text-sm text-[var(--color-text-primary)] truncate flex-1">{settings.display_name}</span>
               {settings.managed_by === 'team' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 shrink-0">
+                <span className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] text-[var(--color-notice-text)] shrink-0">
                   {teamBadge}
                 </span>
               )}

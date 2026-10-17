@@ -15,6 +15,10 @@
   --color-accent: #2563eb;
   --color-success: #16a34a;
   --color-warning: #d97706;
+  /* Notices (Team Server, warnings): dark amber on pale amber, about 7:1. */
+  --color-notice-text: #92400e;
+  --color-notice-bg: #fef3c7;
+  --color-notice-border: #f59e0b;
   --color-text-primary: #000000;
   --color-text-secondary: #1f2328;
   --color-text-muted: #4a5159;
@@ -32,6 +36,9 @@
   --color-accent: #3b82f6;
   --color-success: #22c55e;
   --color-warning: #f59e0b;
+  --color-notice-text: #fcd34d;
+  --color-notice-bg: rgba(245, 158, 11, 0.14);
+  --color-notice-border: rgba(245, 158, 11, 0.45);
   --color-text-primary: #e5e7eb;
   --color-text-secondary: #9ca3af;
   --color-text-muted: #6b7280;

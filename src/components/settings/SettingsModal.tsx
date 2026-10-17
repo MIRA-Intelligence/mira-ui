@@ -1046,7 +1046,7 @@ function RemoteSshStatusLine({ lang, host, active }: { lang: Language; host: str
   if (!active || status.phase === 'idle') return null
   const tone = status.phase === 'error'
     ? 'text-red-300'
-    : status.phase === 'connected' ? 'text-[var(--color-text-secondary)]' : 'text-amber-300'
+    : status.phase === 'connected' ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-notice-text)]'
   return (
     <>
       <p role="status" className={cn('mt-2 text-[11px] leading-relaxed break-words', tone)}>
@@ -1075,14 +1075,14 @@ function TeamServerStatusLine({ lang, origin, active }: { lang: Language; origin
           {t('teamServerSignedInAs', lang, { host, user: user.displayName || user.name })}
         </p>
         {!persistent && (
-          <p className="mt-1 text-[11px] leading-relaxed text-amber-300">{t('teamServerNotPersistent', lang)}</p>
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-notice-text)]">{t('teamServerNotPersistent', lang)}</p>
         )}
       </>
     )
   }
   if (phase === 'signedOut') {
     return (
-      <p role="status" className="mt-2 text-[11px] leading-relaxed text-amber-300 break-words">
+      <p role="status" className="mt-2 text-[11px] leading-relaxed text-[var(--color-notice-text)] break-words">
         {t('teamServerSignedOut', lang, { host })}
       </p>
     )

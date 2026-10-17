@@ -19,9 +19,9 @@ export function TeamAdminBanner() {
   return (
     <div
       role="status"
-      className="flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/30 bg-amber-500/10 text-[12px] text-[var(--color-text-primary)]"
+      className="flex items-center gap-2 px-4 py-1.5 border-b border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] text-[12px] text-[var(--color-notice-text)]"
     >
-      <span aria-hidden className="shrink-0 text-amber-400">●</span>
+      <span aria-hidden className="shrink-0 text-[var(--color-warning)]">●</span>
       <p className="min-w-0 truncate">
         <span className="font-medium">{t('teamServerAdminBanner', lang, { host: serverHost(origin) })}</span>
         {!hasEngineRole(user) && (
