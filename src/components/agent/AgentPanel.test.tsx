@@ -10,6 +10,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
+import { useKnowledgeStore } from '@/stores/knowledgeStore'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
@@ -420,5 +421,57 @@ describe('AgentPanel keyboard behavior', () => {
     render(<AgentPanel />)
 
     expect(screen.queryByText('AUTO')).not.toBeInTheDocument()
+  })
+})
+
+describe('AgentPanel knowledge bases', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    useAgentStore.setState(initialAgentState, true)
+    useProjectStore.setState(initialProjectState, true)
+    useChatStore.setState(initialChatState, true)
+    useSettingsStore.setState({ ...initialSettingsState, language: 'en' }, true)
+    useUiStore.setState(initialUiState, true)
+    useWorkflowStore.setState(initialWorkflowState, true)
+    useAgentStore.setState({ connected: true, logsByProject: {} })
+    useKnowledgeStore.setState({
+      bases: [{ id: 'kb_a', name: 'Specs', description: '', created_at: '', updated_at: '', sources: 1, documents: 1, chunks: 3 }],
+      loaded: true,
+      loadBases: async () => {},
+      loadProjectBases: async () => {},
+      chatBases: { 'chat-kb': ['kb_a'] },
+      projectBases: { 'PRJ-0001': ['kb_a'] },
+    })
+  })
+
+  const sentMessage = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.map((call) => call[0] as Record<string, unknown>).find((p) => p?.type === 'message')
+
+  it('sends the chat selection with Quick Chat messages', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useChatStore.setState({
+      chats: [{ id: 'chat-kb', title: '', createdAt: 0, updatedAt: 0 }],
+      activeChatId: 'chat-kb',
+      workspaceKey: 'ws',
+    })
+    useProjectStore.setState({ appMode: 'normal', selectedTaskId: null })
+    render(<AgentPanel />)
+
+    const textarea = screen.getByRole('textbox')
+    fireEvent.change(textarea, { target: { value: 'what is the latency budget?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
+    expect(sentMessage(sendSpy)).toEqual(expect.objectContaining({ selected_kb_ids: ['kb_a'] }))
+  })
+
+  it('leaves project messages to the project attachment', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useProjectStore.setState({ selectedTaskId: 'PRJ-0001', mode: 'manual', agentProfile: 'research' })
+    render(<AgentPanel />)
+
+    expect(screen.getByRole('button', { name: 'Knowledge' })).toHaveTextContent('1')
+    const textarea = screen.getByRole('textbox')
+    fireEvent.change(textarea, { target: { value: 'hello' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
+    expect(sentMessage(sendSpy)).not.toHaveProperty('selected_kb_ids')
   })
 })

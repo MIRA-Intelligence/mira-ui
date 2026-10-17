@@ -72,6 +72,7 @@ export function PipelineProgress() {
   const openSettings = useSettingsStore((s) => s.openSettings)
   const openSkillsPlugins = useUiStore((s) => s.openSkillsPlugins)
   const openProviders = useUiStore((s) => s.openProviders)
+  const openKnowledge = useUiStore((s) => s.openKnowledge)
   const task = tasks.find((t) => t.id === selectedTaskId)
   const hasRunningExperiment = !!task?.experiments.some((e) => e.status === 'running')
   const canSwitchAgentProfile = !isStreaming && !hasRunningExperiment
@@ -152,6 +153,17 @@ export function PipelineProgress() {
           <rect x="14" y="3" width="7" height="7" rx="1" />
           <rect x="3" y="14" width="7" height="7" rx="1" />
           <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      </button>
+      <button
+        onClick={openKnowledge}
+        className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+        aria-label={t('knowledgeBases', lang)}
+        title={t('knowledgeBases', lang)}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
         </svg>
       </button>
     </div>

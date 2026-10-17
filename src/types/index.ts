@@ -530,6 +530,7 @@ export interface WsMessage {
   turn_id?: string
   request_id?: string
   selected_skill_ids?: string[]
+  selected_kb_ids?: string[]
   approved?: boolean
   // Interactive plan-mode payloads.
   answers?: Record<string, string | string[]>

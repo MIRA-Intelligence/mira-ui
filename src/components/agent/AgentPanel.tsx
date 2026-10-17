@@ -12,6 +12,8 @@ import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry } from '@/types'
 import { t } from '@/i18n'
 import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
+import { useKnowledgeStore } from '@/stores/knowledgeStore'
+import { KnowledgePicker } from '@/components/knowledge/KnowledgePicker'
 
 function createClientId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -58,10 +60,12 @@ function ChatComposer({
   isStopping,
   lang,
   availableSkills,
+  knowledgeScope,
   onSend,
   onStop,
 }: {
   sessionId: string | null
+  knowledgeScope: 'project' | 'chat'
   isStreaming: boolean
   isStopping: boolean
   lang: ReturnType<typeof useSettingsStore.getState>['language']
@@ -197,6 +201,7 @@ function ChatComposer({
             </div>
           )}
         </div>
+        <KnowledgePicker sessionId={sessionId} scope={knowledgeScope} lang={lang} disabled={isStopping} />
         <div className="relative min-w-0 flex-1 self-end">
           <textarea
             ref={textareaRef}
@@ -441,6 +446,9 @@ export function AgentPanel() {
     const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     const turnId = createClientId('turn')
     activeTurnIds.current[sessionId] = turnId
+    // Projects keep their knowledge bases server-side; a chat sends its own choice.
+    const chatKbIds = isChat ? useKnowledgeStore.getState().chatBases[sessionId] : undefined
+    const knowledge = chatKbIds?.length ? { selected_kb_ids: chatKbIds } : {}
     const workflowState = useWorkflowStore.getState()
     const workflowRunId = appMode === 'project'
       ? workflowState.selectedRunByProject[sessionId]
@@ -454,7 +462,7 @@ export function AgentPanel() {
           type: 'message', content: text, session_id: sessionId, user_id: 'ui_user',
           loop_mode: appMode, stream: useSettingsStore.getState().streamResponses,
           mode: currentMode, agent_profile: currentAgentProfile,
-          turn_id: turnId, selected_skill_ids: selectedSkills,
+          turn_id: turnId, selected_skill_ids: selectedSkills, ...knowledge,
           workflow_run_id: workflowRun.run_id, workflow_module_type: workflowRun.module_type,
         })
       })
@@ -469,6 +477,7 @@ export function AgentPanel() {
       stream: useSettingsStore.getState().streamResponses,
       turn_id: turnId,
       selected_skill_ids: selectedSkills,
+      ...knowledge,
       ...(appMode === 'project' && {
         mode: currentMode,
         agent_profile: currentAgentProfile,
@@ -749,6 +758,7 @@ export function AgentPanel() {
         isStreaming={isStreaming}
         isStopping={isStopping}
         availableSkills={availableSkills}
+        knowledgeScope={isChat ? 'chat' : 'project'}
         lang={lang}
         onSend={handleSend}
         onStop={handleStop}
