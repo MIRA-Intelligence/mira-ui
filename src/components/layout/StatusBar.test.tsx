@@ -234,7 +234,7 @@ describe('StatusBar', () => {
     expect(within(dialog).getByText('14,100')).toBeInTheDocument()
     expect(within(dialog).getByText('10,000')).toBeInTheDocument()
     expect(within(dialog).getByText('4,000')).toBeInTheDocument()
-    expect(within(dialog).getByText('71.4%')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/hit rate/)).not.toBeInTheDocument()
     act(() => useTokenUsageStore.getState().ingest('chat-one', { ...snapshot,
       input_tokens: 28000, total_tokens: 28100, cached_tokens: 20000, calls: 2, cache_reported_calls: 2 }))
     expect(within(dialog).getByText('28,100')).toBeInTheDocument()
@@ -255,9 +255,9 @@ describe('StatusBar', () => {
   })
 
   it.each([
-    [undefined, 0, 'Unknown'], [0, 0, 'Unknown'], [1, 0, 'Unknown'],
-    [1, 80, '≥ 80'], [2, 0, '0'], [2, 80, '80'],
-  ])('distinguishes cache coverage %s and value %s', (reported, cached, expected) => {
+    [undefined, 0, 'Unknown', '≤ 200'], [0, 0, 'Unknown', '≤ 200'], [1, 0, 'Unknown', '≤ 200'],
+    [1, 80, '≥ 80', '≤ 120'], [2, 0, '0', '200'], [2, 80, '80', '120'],
+  ])('distinguishes cache coverage %s and value %s', (reported, cached, expected, uncached) => {
     useAgentStore.setState({ connected: false })
     useProjectStore.setState({ appMode: 'project', selectedTaskId: 'project-one' })
     useTokenUsageStore.getState().ingest('project-one', {
@@ -268,6 +268,8 @@ describe('StatusBar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Token usage details' }))
     const row = screen.getByText('Cache-read tokens (part of input)').parentElement!
     expect(within(row).getByText(expected as string)).toBeInTheDocument()
+    const uncachedRow = screen.getByText('Input tokens not served from cache').parentElement!
+    expect(within(uncachedRow).getByText(uncached as string)).toBeInTheDocument()
     if (reported !== 2) expect(screen.getByText(/Unknown does not mean a cache miss/)).toBeInTheDocument()
   })
 
@@ -284,6 +286,8 @@ describe('StatusBar', () => {
     }))
     expect(screen.getByText(/部分调用未返回 token 用量/)).toBeInTheDocument()
     expect(screen.getByText(/未知不代表未命中/)).toBeInTheDocument()
+    // Without complete input counts there is no bound either.
+    expect(within(screen.getByText('未命中缓存的输入 token').parentElement!).getByText('未知')).toBeInTheDocument()
   })
 
   it('explains a rejected engine token and links to settings in remote mode', () => {

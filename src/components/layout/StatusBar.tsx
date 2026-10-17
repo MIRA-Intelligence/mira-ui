@@ -269,6 +269,11 @@ function TokenChip({
     && cacheReported === snapshot.calls && snapshot.unreported_calls === 0)
   const cachedLabel = snapshot && (cacheComplete || snapshot.cached_tokens > 0)
     ? `${cacheComplete ? '' : '≥ '}${snapshot.cached_tokens.toLocaleString()}` : unknownLabel
+  // Exact when every call reported its cache reads; otherwise an upper bound
+  // (calls without cache details may have hit the cache too), as long as the
+  // input itself is complete.
+  const uncachedLabel = snapshot && (cacheComplete || (snapshot.calls > 0 && snapshot.unreported_calls === 0))
+    ? `${cacheComplete ? '' : '≤ '}${(snapshot.input_tokens - snapshot.cached_tokens).toLocaleString()}` : unknownLabel
 
   useEffect(() => {
     if (!open) return
@@ -330,8 +335,7 @@ function TokenChip({
                 [zh ? '输入 token' : 'Input tokens', `${snapshot.unreported_calls ? '≥ ' : ''}${snapshot.input_tokens.toLocaleString()}`],
                 [zh ? '输出 token' : 'Output tokens', `${snapshot.unreported_calls ? '≥ ' : ''}${snapshot.output_tokens.toLocaleString()}`],
                 [zh ? '缓存命中 token（包含在输入中）' : 'Cache-read tokens (part of input)', cachedLabel],
-                [zh ? '未命中缓存的输入 token' : 'Input tokens not served from cache', cacheComplete ? (snapshot.input_tokens - snapshot.cached_tokens).toLocaleString() : unknownLabel],
-                [zh ? '缓存命中率（按输入 token）' : 'Cache hit rate (input tokens)', cacheComplete && snapshot.input_tokens > 0 ? `${(snapshot.cached_tokens / snapshot.input_tokens * 100).toFixed(1)}%` : '—'],
+                [zh ? '未命中缓存的输入 token' : 'Input tokens not served from cache', uncachedLabel],
                 [zh ? '模型调用次数' : 'Model calls', snapshot.calls.toLocaleString()],
                 [zh ? '有缓存明细的调用' : 'Calls reporting cache usage', `${cacheReported} / ${snapshot.calls}`],
                 [zh ? '未返回用量的调用' : 'Calls missing token usage', snapshot.unreported_calls.toLocaleString()],
@@ -340,8 +344,8 @@ function TokenChip({
               </div>)}
             </dl>
             {!cacheComplete && snapshot.calls > 0 && <p className="text-amber-500">{zh
-              ? '部分或全部调用缺少缓存明细（含旧版记录）。未知不代表未命中；已知缓存量仅为下限，不能推算完整命中率。'
-              : 'Some or all calls lack cache details (including older records). Unknown does not mean a cache miss; known cache reads are only a lower bound.'}</p>}
+              ? '部分或全部调用缺少缓存明细（含旧版记录）。未知不代表未命中：缓存命中 token 仅为下限（≥），未命中缓存的输入 token 仅为上限（≤）。'
+              : 'Some or all calls lack cache details (including older records). Unknown does not mean a cache miss: cache reads are only a lower bound (≥), and input not served from cache an upper bound (≤).'}</p>}
             {snapshot.unreported_calls > 0 && <p className="text-amber-500">{zh ? '部分调用未返回 token 用量，累计统计不完整。' : 'Some calls did not return token usage; totals are incomplete.'}</p>}
           </> : <p>{zh ? '详细用量尚不可用。旧版统计仅提供总量，请连接支持明细的 engine。' : 'Detailed usage is unavailable. Legacy counters only provide totals; connect to an engine supporting details.'}</p>}
           <p className="text-[var(--color-text-muted)]">{zh
