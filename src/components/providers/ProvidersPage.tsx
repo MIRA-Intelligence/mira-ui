@@ -812,8 +812,7 @@ export function ProvidersPage() {
 
               {teamManaged ? (
                 <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
-                  {t(selectedSettings.enabled ? 'providersTeamManaged' : 'providersTeamDisabled', lang,
-                    { provider: selectedSettings.display_name })}
+                  {t('providersTeamManaged', lang, { provider: selectedSettings.display_name })}
                 </p>
               ) : selectedSettings.is_oauth ? (
                 <p className="text-[11px] text-[var(--color-text-muted)]">

@@ -29,8 +29,6 @@ export interface RuntimeProviderSettings {
 export interface TeamManagedSummary {
   revision: string
   providers: string[]
-  // Providers the administrators turned off for everyone (newer servers).
-  disabled?: string[]
   model_params: boolean
   defaults: string[]
 }

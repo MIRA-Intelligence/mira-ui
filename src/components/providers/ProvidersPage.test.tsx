@@ -103,19 +103,6 @@ describe('ProvidersPage', () => {
     expect(vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0].providers).not.toHaveProperty('deepseek')
   })
 
-  it('explains a provider the team turned off', async () => {
-    const team = payload()
-    team.providers.openai = { ...team.providers.openai, managed_by: 'team', enabled: false }
-    team.team = { revision: 'r1', providers: [], disabled: ['openai'], model_params: false, defaults: [] }
-    vi.mocked(fetchRuntimeConfig).mockResolvedValue(team)
-    useUiStore.getState().openProviders()
-    render(<ProvidersPage />)
-    await screen.findByText('Fetch from provider')
-    fireEvent.click(screen.getAllByText('OpenAI').find((el) => el.closest('button'))!)
-    expect(await screen.findByText(/administrators turned OpenAI off/)).toBeInTheDocument()
-    expect(screen.getByRole('switch')).toBeDisabled()
-  })
-
   it('shows team model-parameter rules read-only and does not send them', async () => {
     const team = payload()
     team.model_params = [{ pattern: 'gpt-5*', params: { temperature: null } }]
