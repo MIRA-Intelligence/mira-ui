@@ -199,6 +199,8 @@ export interface ProjectTask {
 /* ── Modular workflow v1 ───────────────────────── */
 
 export type WorkflowModuleType = 'initiation' | 'planning' | 'experiment' | 'delivery'
+// Workflows a user can start directly; planning is reached only as an upstream module.
+export type StartableModuleType = Extract<WorkflowModuleType, 'initiation' | 'experiment' | 'delivery'>
 export type WorkflowRunStatus =
   | 'created' | 'queued' | 'running' | 'waiting_input'
   | 'paused' | 'completed' | 'failed' | 'cancelled'

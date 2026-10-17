@@ -91,7 +91,7 @@ describe('WorkflowWorkspace module entry', () => {
       agentProfile: 'research',
     } as never)
     useSettingsStore.setState({ language: 'en', streamResponses: true })
-    useUiStore.setState({ agentPanelCollapsed: true })
+    useUiStore.setState({ agentPanelCollapsed: true, pendingModuleStart: null })
     useAgentStore.setState({
       connected: true,
       logsByProject: {},
@@ -256,6 +256,36 @@ describe('WorkflowWorkspace module entry', () => {
     expect(visiblePrompt).toContain('User references:\nhttps://doi.org/10.1000/example')
     expect(visiblePrompt).toContain('structured research result')
     expect(visiblePrompt).toContain('auditable reference cards')
+  })
+
+  it('opens a promoted chat in the requested module and forwards its context attachment', async () => {
+    useUiStore.setState({ pendingModuleStart: {
+      projectId: 'PRJ-1', moduleType: 'delivery', intent: 'Continue from chat context/q.md', contextPath: 'context/q.md',
+    } })
+    render(<WorkflowWorkspace />)
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('Goal for this run')).toHaveValue('Continue from chat context/q.md')
+    expect(useUiStore.getState().pendingModuleStart).toBeNull()
+  })
+
+  it('ignores a module start requested for another project', () => {
+    useUiStore.setState({ pendingModuleStart: { projectId: 'PRJ-2', moduleType: 'experiment', intent: 'x' } })
+    render(<WorkflowWorkspace />)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(useUiStore.getState().pendingModuleStart).not.toBeNull()
+  })
+
+  it('sends the promoted context path with a started run', async () => {
+    useUiStore.setState({ pendingModuleStart: {
+      projectId: 'PRJ-1', moduleType: 'initiation', intent: 'Study it', contextPath: 'context/q.md',
+    } })
+    render(<WorkflowWorkspace />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Start and open module' }))
+    await waitFor(() => expect(createWorkflowRun).toHaveBeenCalledWith('PRJ-1', expect.objectContaining({
+      moduleType: 'initiation',
+      moduleData: expect.objectContaining({ context_attachment_paths: ['context/q.md'], intent: 'Study it' }),
+    })))
   })
 
   it('keeps the overview constrained to the viewport after opening a module and returning', () => {

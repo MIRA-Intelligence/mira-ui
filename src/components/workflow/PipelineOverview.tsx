@@ -6,11 +6,11 @@ import {
 } from '@/lib/workflowCandidates'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
-import type { WorkflowModuleType, WorkflowRun } from '@/types'
+import type { StartableModuleType, WorkflowModuleType, WorkflowRun } from '@/types'
 import { WorkflowCandidateList } from './WorkflowCandidateList'
 
-const PIPELINE_STAGES: Array<{
-  moduleType: Extract<WorkflowModuleType, 'initiation' | 'experiment' | 'delivery'>
+export const PIPELINE_STAGES: Array<{
+  moduleType: StartableModuleType
   icon: string
   step: number
   zh: string

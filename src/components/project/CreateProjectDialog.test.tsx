@@ -4,6 +4,9 @@ import { ProjectDirectoryExistsError } from '@/services/api'
 import { CreateProjectDialog } from './CreateProjectDialog'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useUiStore } from '@/stores/uiStore'
+import { useChatStore } from '@/stores/chatStore'
+import { useAgentStore } from '@/stores/agentStore'
 import type { RuntimeConfigPayload } from '@/services/runtimeConfig'
 
 const initialProjects = useProjectStore.getState()
@@ -152,4 +155,53 @@ describe('CreateProjectDialog', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
+
+  describe('Quick Chat promotion', () => {
+    const promotion = { chatId: 'chat-1', moduleType: 'experiment' as const }
+
+    beforeEach(() => {
+      useUiStore.setState({ pendingModuleStart: null })
+      useChatStore.setState({ chats: [{ id: 'chat-1', title: 'MRI', createdAt: 0, updatedAt: 0 }], activeChatId: 'chat-1' })
+      useAgentStore.setState({ logsByProject: { 'chat-1': [] } })
+    })
+
+    it('attaches the chat and requests the chosen module start dialog', async () => {
+      const create = vi.fn().mockResolvedValue('study')
+      useProjectStore.setState({ createProjectShell: create })
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+        JSON.stringify({ path: 'context/quick-chat-mri.md', message_count: 2 }), { status: 200 },
+      ))
+      const close = vi.fn()
+      render(<CreateProjectDialog onClose={close} promotion={promotion} />)
+      expect(screen.getByRole('heading', { name: 'Turn into project · Experiment' })).toBeInTheDocument()
+      fireEvent.change(screen.getByLabelText('Project Name'), { target: { value: 'Study' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create Project' }))
+
+      await waitFor(() => expect(close).toHaveBeenCalledOnce())
+      expect(String(vi.mocked(fetch).mock.calls[0][0])).toContain('/projects/study/context/from-chat')
+      expect(useUiStore.getState().pendingModuleStart).toMatchObject({
+        projectId: 'study',
+        moduleType: 'experiment',
+        contextPath: 'context/quick-chat-mri.md',
+        intent: expect.stringContaining('context/quick-chat-mri.md'),
+      })
+      expect(useChatStore.getState().chats).toEqual([])
+    })
+
+    it('rolls the project back and keeps the chat when attaching fails', async () => {
+      const deleteTask = vi.fn().mockResolvedValue(true)
+      useProjectStore.setState({ createProjectShell: vi.fn().mockResolvedValue('study'), deleteTask })
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"detail":"boom"}', { status: 500 }))
+      const close = vi.fn()
+      render(<CreateProjectDialog onClose={close} promotion={promotion} />)
+      fireEvent.change(screen.getByLabelText('Project Name'), { target: { value: 'Study' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Create Project' }))
+
+      await waitFor(() => expect(deleteTask).toHaveBeenCalledWith('study', true))
+      expect(await screen.findByRole('alert')).toBeInTheDocument()
+      expect(close).not.toHaveBeenCalled()
+      expect(useUiStore.getState().pendingModuleStart).toBeNull()
+      expect(useChatStore.getState().chats).toHaveLength(1)
+    })
+  })
 })
