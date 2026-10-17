@@ -10,6 +10,7 @@ import { AgentPanel } from '@/components/agent/AgentPanel'
 import { SettingsModal } from '@/components/settings/SettingsModal'
 import { SkillsPluginsModal } from '@/components/settings/SkillsPluginsModal'
 import { ProvidersPage } from '@/components/providers/ProvidersPage'
+import { TeamUsagePage } from '@/components/team/TeamUsagePage'
 import { NewProjectModal } from '@/components/project/NewProjectModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
@@ -245,6 +246,7 @@ export function AppLayout() {
       <TeamServerLoginDialog />
       <SkillsPluginsModal />
       <ProvidersPage />
+      <TeamUsagePage />
       <NewProjectModal />
       <FeedbackDialog />
     </div>
