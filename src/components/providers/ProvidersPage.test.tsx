@@ -144,11 +144,68 @@ describe('ProvidersPage', () => {
     useUiStore.getState().openProviders()
     render(<ProvidersPage />)
     await waitFor(() => expect(fetchRuntimeConfig).toHaveBeenCalled())
-    // Both groups render their headers; DeepSeek (enabled) + OpenAI (disabled).
+    // DeepSeek (enabled) + OpenAI (not enabled, pay-as-you-go).
     expect(await screen.findByText(/Enabled \(1\)/)).toBeInTheDocument()
-    expect(screen.getByText(/Disabled \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Pay-as-you-go \(1\)/)).toBeInTheDocument()
+    expect(screen.queryByText(/Subscription plans \(/)).not.toBeInTheDocument()
     expect(screen.getAllByText('DeepSeek').length).toBeGreaterThan(0)
     expect(screen.getAllByText('OpenAI').length).toBeGreaterThan(0)
+  })
+
+  it('splits providers that are not enabled into subscription and pay-as-you-go groups', async () => {
+    const data = payload()
+    data.providers.kimi_code = { ...data.providers.openai, display_name: 'Kimi Code', is_subscription: true }
+    data.providers.openai_codex = { ...data.providers.openai, display_name: 'OpenAI Codex', is_subscription: true, is_oauth: true, enabled: true, configured: true }
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(data)
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+
+    const enabledHeader = await screen.findByText(/Enabled \(2\)/)
+    const subscriptionHeader = screen.getByRole('button', { name: /Subscription plans \(1\)/ })
+    const paygHeader = screen.getByRole('button', { name: /Pay-as-you-go \(1\)/ })
+    // Enabled first, then subscription plans above pay-as-you-go.
+    expect(enabledHeader.compareDocumentPosition(subscriptionHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(subscriptionHeader.compareDocumentPosition(paygHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const railButton = (label: string) => screen.queryAllByText(label).find((el) => el.closest('button') && !el.closest('select'))
+    expect(railButton('Kimi Code')).toBeDefined()
+
+    // Collapsing a group hides its entries; searching shows them again.
+    fireEvent.click(subscriptionHeader)
+    expect(subscriptionHeader).toHaveAttribute('aria-expanded', 'false')
+    expect(railButton('Kimi Code')).toBeUndefined()
+    fireEvent.change(screen.getByPlaceholderText('Search providers...'), { target: { value: 'kimi' } })
+    expect(railButton('Kimi Code')).toBeDefined()
+  })
+
+  it('warns about the GLM Coding Plan usage terms on its provider page', async () => {
+    const data = payload()
+    data.providers.zhipu_coding_plan = { ...data.providers.openai, display_name: 'GLM Coding Plan', is_subscription: true }
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(data)
+    useUiStore.getState().openProviders()
+    render(<ProvidersPage />)
+    await screen.findByText('Fetch from provider')
+    // DeepSeek (no usage terms) is selected first.
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+
+    const railButton = screen.getAllByText('GLM Coding Plan').find((el) => el.closest('button') && !el.closest('select'))!
+    fireEvent.click(railButton)
+    expect(await screen.findByRole('note')).toHaveTextContent(/Mira is not on that list/)
+  })
+
+  it('groups subscription providers first in the provider dropdowns', async () => {
+    const data = payload()
+    data.providers.kimi_code = { ...data.providers.openai, display_name: 'Kimi Code', is_subscription: true }
+    vi.mocked(fetchRuntimeConfig).mockResolvedValue(data)
+    useUiStore.getState().openProviders()
+    const { container } = render(<ProvidersPage />)
+    await screen.findByText('Fetch from provider')
+
+    const select = container.querySelector('select')!
+    const groups = Array.from(select.querySelectorAll('optgroup'))
+    expect(groups.map((group) => group.label)).toEqual(['Subscription plans', 'Pay-as-you-go'])
+    expect(Array.from(groups[0].querySelectorAll('option')).map((option) => option.value)).toEqual(['kimi_code'])
+    expect(Array.from(groups[1].querySelectorAll('option')).map((option) => option.value)).toEqual(['deepseek', 'openai'])
   })
 
   it('toggles a provider on and persists the enabled flag', async () => {

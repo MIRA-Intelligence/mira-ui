@@ -19,7 +19,7 @@ import { t } from '@/i18n'
 import type { I18nKey } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { ProviderIcon } from './ProviderIcon'
-import { providerDescription, providerDocsUrl } from './catalog'
+import { providerDescription, providerDocsUrl, providerNotice } from './catalog'
 
 interface ProviderDraft {
   apiKey: string
@@ -320,7 +320,11 @@ export function ProvidersPage() {
     )
     const enabled = list.filter(([name]) => isEnabled(name))
     const disabled = list.filter(([name]) => !isEnabled(name))
-    return { enabled, disabled }
+    // Providers that are not enabled yet are split by billing model, so
+    // subscription plans (Coding Plan, Token Plan, ...) are easy to find.
+    const subscription = disabled.filter(([, settings]) => settings.is_subscription)
+    const payAsYouGo = disabled.filter(([, settings]) => !settings.is_subscription)
+    return { enabled, subscription, payAsYouGo }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerEntries, search, drafts, payload])
 
@@ -717,12 +721,24 @@ export function ProvidersPage() {
               teamBadge={t('providersTeamBadge', lang)}
             />
             <ProviderGroup
-              title={t('providersGroupDisabled', lang)}
-              entries={filtered.disabled}
+              title={t('providersGroupSubscription', lang)}
+              entries={filtered.subscription}
               selected={selected}
               onSelect={selectProvider}
               enabledGroup={false}
               teamBadge={t('providersTeamBadge', lang)}
+              collapsible
+              forceOpen={Boolean(search.trim())}
+            />
+            <ProviderGroup
+              title={t('providersGroupPayAsYouGo', lang)}
+              entries={filtered.payAsYouGo}
+              selected={selected}
+              onSelect={selectProvider}
+              enabledGroup={false}
+              teamBadge={t('providersTeamBadge', lang)}
+              collapsible
+              forceOpen={Boolean(search.trim())}
             />
             {multiCustom && payload?.providers.custom && (
               <button
@@ -789,6 +805,12 @@ export function ProvidersPage() {
                   />
                 </div>
               </div>
+
+              {providerNotice(catalogKey, lang) && (
+                <p role="note" className="rounded-lg border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] px-3 py-2 text-[11px] leading-relaxed text-[var(--color-notice-text)]">
+                  {providerNotice(catalogKey, lang)}
+                </p>
+              )}
 
               {selectedIsCustom && multiCustom && !teamManaged && (
                 <div>
@@ -1131,6 +1153,8 @@ function ProviderGroup({
   onSelect,
   enabledGroup,
   teamBadge,
+  collapsible = false,
+  forceOpen = false,
 }: {
   title: string
   entries: Array<[string, RuntimeConfigPayload['providers'][string]]>
@@ -1141,36 +1165,57 @@ function ProviderGroup({
   // meaningful for enabled providers — disabled ones (e.g. local vLLM/Ollama/
   // OVMS that report ``configured`` without a key) must not show it.
   enabledGroup: boolean
+  // Collapsible groups get a toggle header; ``forceOpen`` (e.g. while
+  // searching) shows the entries even when the group is collapsed.
+  collapsible?: boolean
+  forceOpen?: boolean
 }) {
+  const [collapsed, setCollapsed] = useState(false)
   if (entries.length === 0) return null
+  const open = !collapsible || forceOpen || !collapsed
+  const heading = `${title} (${entries.length})`
   return (
     <div>
-      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-        {title} ({entries.length})
-      </p>
-      <ul>
-        {entries.map(([name, settings]) => (
-          <li key={name}>
-            <button
-              type="button"
-              onClick={() => onSelect(name)}
-              className={cn(
-                'w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors',
-                selected === name ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]/60',
-              )}
-            >
-              <ProviderIcon provider={name} displayName={settings.display_name} size={22} />
-              <span className="text-sm text-[var(--color-text-primary)] truncate flex-1">{settings.display_name}</span>
-              {settings.managed_by === 'team' && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] text-[var(--color-notice-text)] shrink-0">
-                  {teamBadge}
-                </span>
-              )}
-              {enabledGroup && settings.configured && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" />}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-expanded={open}
+          className="w-full flex items-center gap-1 px-2 py-1 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors"
+        >
+          <span aria-hidden className="w-3 shrink-0">{open ? '▾' : '▸'}</span>
+          <span>{heading}</span>
+        </button>
+      ) : (
+        <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+          {heading}
+        </p>
+      )}
+      {open && (
+        <ul>
+          {entries.map(([name, settings]) => (
+            <li key={name}>
+              <button
+                type="button"
+                onClick={() => onSelect(name)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors',
+                  selected === name ? 'bg-[var(--color-bg-hover)]' : 'hover:bg-[var(--color-bg-hover)]/60',
+                )}
+              >
+                <ProviderIcon provider={name} displayName={settings.display_name} size={22} />
+                <span className="text-sm text-[var(--color-text-primary)] truncate flex-1">{settings.display_name}</span>
+                {settings.managed_by === 'team' && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-[var(--color-notice-border)] bg-[var(--color-notice-bg)] text-[var(--color-notice-text)] shrink-0">
+                    {teamBadge}
+                  </span>
+                )}
+                {enabledGroup && settings.configured && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] shrink-0" />}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -1203,6 +1248,14 @@ function ModelBinding({
   lang: Parameters<typeof t>[1]
 }) {
   const listId = `models-${label.replace(/\s+/g, '-')}`
+  const renderOptions = (entries: typeof providerEntries) =>
+    entries.map(([name, settings]) => (
+      <option key={name} value={name}>
+        {settings.display_name}
+      </option>
+    ))
+  const subscriptionEntries = providerEntries.filter(([, settings]) => settings.is_subscription)
+  const payAsYouGoEntries = providerEntries.filter(([, settings]) => !settings.is_subscription)
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -1213,11 +1266,15 @@ function ModelBinding({
         <div className="w-44 shrink-0">
           <select value={providerValue} onChange={(e) => onProviderChange(e.target.value)} className={inputClass}>
             {includeAuto && <option value="auto">{autoLabel ?? t('providersAutoDetect', lang)}</option>}
-            {providerEntries.map(([name, settings]) => (
-              <option key={name} value={name}>
-                {settings.display_name}
-              </option>
-            ))}
+            {/* Older engines don't flag subscription providers: keep a flat list. */}
+            {subscriptionEntries.length === 0 ? (
+              renderOptions(providerEntries)
+            ) : (
+              <>
+                <optgroup label={t('providersGroupSubscription', lang)}>{renderOptions(subscriptionEntries)}</optgroup>
+                <optgroup label={t('providersGroupPayAsYouGo', lang)}>{renderOptions(payAsYouGoEntries)}</optgroup>
+              </>
+            )}
           </select>
         </div>
         <div className="flex-1">

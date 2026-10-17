@@ -20,6 +20,9 @@ export interface RuntimeProviderSettings {
   // OpenAI-compatible custom provider (``custom`` or ``custom_<id>``). Older
   // engines omit it and support only the single ``custom`` entry.
   is_custom?: boolean
+  // Billed by a subscription (Coding Plan, Token Plan, ChatGPT login, ...)
+  // rather than pay-as-you-go tokens. Older engines omit it.
+  is_subscription?: boolean
   // Team server: the administrators manage this provider (its key stays on
   // Mira Server); the user cannot change it.
   managed_by?: 'team'

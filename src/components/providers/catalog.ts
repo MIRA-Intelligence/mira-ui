@@ -25,6 +25,9 @@ import wenxin from '@lobehub/icons-static-svg/icons/wenxin-color.svg'
 import azure from '@lobehub/icons-static-svg/icons/azure-color.svg'
 import codex from '@lobehub/icons-static-svg/icons/codex-color.svg'
 import githubcopilot from '@lobehub/icons-static-svg/icons/githubcopilot.svg'
+import kimi from '@lobehub/icons-static-svg/icons/kimi-color.svg'
+import bailian from '@lobehub/icons-static-svg/icons/bailian-color.svg'
+import xai from '@lobehub/icons-static-svg/icons/xai.svg'
 
 import type { Language } from '@/stores/settingsStore'
 
@@ -32,6 +35,8 @@ export interface ProviderCatalogEntry {
   icon?: string
   docsUrl?: string
   desc: Record<Language, string>
+  // Warning shown prominently on the provider page, e.g. usage terms.
+  notice?: Record<Language, string>
 }
 
 export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> = {
@@ -70,10 +75,30 @@ export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> = {
     docsUrl: 'https://open.bigmodel.cn/dev/api',
     desc: { en: 'Zhipu GLM models.', zh: '智谱 GLM 系列模型。' },
   },
+  zhipu_coding_plan: {
+    icon: zhipu,
+    docsUrl: 'https://docs.z.ai/devpack/quick-start',
+    desc: {
+      en: 'GLM Coding Plan subscription. Z.ai (international) subscribers: set the API base to https://api.z.ai/api/coding/paas/v4.',
+      zh: '智谱 GLM Coding Plan 订阅套餐。Z.ai 国际版用户请将 API Base 设为 https://api.z.ai/api/coding/paas/v4。',
+    },
+    notice: {
+      en: 'Terms of use: Zhipu (Z.ai) limits the GLM Coding Plan to the coding tools it officially supports, and Mira is not on that list. Using the plan in Mira may violate its terms and put your subscription at risk. To stay within the terms, use the pay-as-you-go Zhipu AI provider instead.',
+      zh: '使用条款提示：智谱（Z.ai）规定 GLM Coding Plan 仅限在官方支持的编程工具中使用，Mira 目前不在该名单内。在 Mira 中使用此套餐可能违反条款，存在套餐权益受限的风险。如需合规使用，请改用按量计费的 Zhipu AI。',
+    },
+  },
   dashscope: {
     icon: qwen,
     docsUrl: 'https://help.aliyun.com/zh/model-studio',
     desc: { en: 'Alibaba Qwen models via DashScope.', zh: '阿里云百炼 DashScope 的通义千问模型。' },
+  },
+  dashscope_token_plan: {
+    icon: bailian,
+    docsUrl: 'https://help.aliyun.com/zh/model-studio/token-plan-quickstart',
+    desc: {
+      en: 'Alibaba Cloud Bailian Token Plan subscription (keys start with sk-sp-).',
+      zh: '阿里云百炼 Token Plan 订阅套餐（专属 API Key 以 sk-sp- 开头）。',
+    },
   },
   vllm: {
     icon: vllm,
@@ -98,15 +123,36 @@ export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> = {
     docsUrl: 'https://platform.moonshot.cn',
     desc: { en: 'Moonshot Kimi models.', zh: '月之暗面 Kimi 系列模型。' },
   },
+  kimi_code: {
+    icon: kimi,
+    docsUrl: 'https://www.kimi.com/code/docs/en/',
+    desc: {
+      en: 'Kimi Code, included in the Kimi membership. Overseas members: set the API base to https://api.kimi.ai/coding/v1.',
+      zh: 'Kimi 会员附带的 Kimi Code。海外会员请将 API Base 设为 https://api.kimi.ai/coding/v1。',
+    },
+  },
   minimax: {
     icon: minimax,
     docsUrl: 'https://platform.minimaxi.com',
     desc: { en: 'MiniMax models.', zh: 'MiniMax 系列模型。' },
   },
+  minimax_token_plan: {
+    icon: minimax,
+    docsUrl: 'https://platform.minimaxi.com/docs/token-plan/quickstart',
+    desc: {
+      en: 'MiniMax Token Plan subscription. International subscribers: set the API base to https://api.minimax.io/v1.',
+      zh: 'MiniMax Token Plan 订阅套餐。国际版用户请将 API Base 设为 https://api.minimax.io/v1。',
+    },
+  },
   mistral: {
     icon: mistral,
     docsUrl: 'https://docs.mistral.ai',
     desc: { en: 'Mistral AI models.', zh: 'Mistral AI 系列模型。' },
+  },
+  xai: {
+    icon: xai,
+    docsUrl: 'https://docs.x.ai',
+    desc: { en: 'xAI Grok models.', zh: 'xAI 的 Grok 系列模型。' },
   },
   stepfun: {
     icon: stepfun,
@@ -135,6 +181,10 @@ export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> = {
   volcengine_coding_plan: {
     icon: volcengine,
     desc: { en: 'VolcEngine coding plan endpoint.', zh: '火山引擎编程套餐端点。' },
+  },
+  volcengine_agent_plan: {
+    icon: volcengine,
+    desc: { en: 'VolcEngine Ark Agent Plan subscription.', zh: '火山方舟 Agent Plan 订阅套餐。' },
   },
   byteplus: {
     icon: volcengine,
@@ -170,6 +220,10 @@ export const PROVIDER_CATALOG: Record<string, ProviderCatalogEntry> = {
 
 export function providerDescription(provider: string, lang: Language): string | null {
   return PROVIDER_CATALOG[provider]?.desc[lang] ?? null
+}
+
+export function providerNotice(provider: string, lang: Language): string | null {
+  return PROVIDER_CATALOG[provider]?.notice?.[lang] ?? null
 }
 
 export function providerDocsUrl(provider: string): string | null {
