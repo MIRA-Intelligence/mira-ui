@@ -61,6 +61,8 @@ interface UiState {
   newProjectFromChatId: string | null
   skillsPluginsOpen: boolean
   providersOpen: boolean
+  // Team server administrators: everyone's usage and the token quotas.
+  teamUsageOpen: boolean
   // Set by useUpdateCheck when the main process detects a newer GitHub
   // release. Cleared by "Skip this version" / "Later". Transient — never
   // persisted; main process is the source of truth on every boot.
@@ -81,6 +83,8 @@ interface UiState {
   closeSkillsPlugins: () => void
   openProviders: () => void
   closeProviders: () => void
+  openTeamUsage: () => void
+  closeTeamUsage: () => void
   setAvailableUpdate: (info: UpdateInfo | null) => void
   dismissUpdateBanner: () => void
   resetUpdateBannerDismissed: () => void
@@ -104,6 +108,7 @@ export const useUiStore = create<UiState>((set) => ({
   newProjectFromChatId: null,
   skillsPluginsOpen: false,
   providersOpen: false,
+  teamUsageOpen: false,
   availableUpdate: null,
   updateBannerDismissed: false,
   systemMessages: [],
@@ -132,6 +137,8 @@ export const useUiStore = create<UiState>((set) => ({
   closeSkillsPlugins: () => set({ skillsPluginsOpen: false }),
   openProviders: () => set({ providersOpen: true }),
   closeProviders: () => set({ providersOpen: false }),
+  openTeamUsage: () => set({ teamUsageOpen: true }),
+  closeTeamUsage: () => set({ teamUsageOpen: false }),
   setAvailableUpdate: (info) => set({ availableUpdate: info, updateBannerDismissed: false }),
   dismissUpdateBanner: () => set({ updateBannerDismissed: true }),
   resetUpdateBannerDismissed: () => set({ updateBannerDismissed: false }),

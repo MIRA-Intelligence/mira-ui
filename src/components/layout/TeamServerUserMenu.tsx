@@ -4,7 +4,10 @@ import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { requestTeamServerLogin, useTeamServerStore, type TeamServerEngineState } from '@/stores/teamServerStore'
 import { signOutTeamServer } from '@/services/teamServer'
-import { isAdmin } from '@/lib/teamServerProtocol'
+import { fetchMyUsage, type MyUsage } from '@/services/teamUsage'
+import { hasEngineRole, isAdmin } from '@/lib/teamServerProtocol'
+import { QuotaCell } from '@/components/team/TeamUsagePage'
+import { useUiStore } from '@/stores/uiStore'
 import { serverHost, serverOrigin } from '@/lib/teamServerUrl'
 
 const ENGINE_STATE_KEYS: Record<TeamServerEngineState, I18nKey> = {
@@ -29,6 +32,8 @@ export function TeamServerUserMenu() {
   const persistent = useTeamServerStore((s) => s.persistent)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [usage, setUsage] = useState<MyUsage | null>(null)
+  const openTeamUsage = useUiStore((s) => s.openTeamUsage)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
   const menuId = useId()
@@ -50,6 +55,18 @@ export function TeamServerUserMenu() {
   }, [open])
 
   const origin = deploymentMode === 'teamServer' ? serverOrigin(serverUrl) : null
+  const usageUser = phase === 'signedIn' && sessionOrigin === origin && hasEngineRole(user) ? user?.name : null
+
+  // The caller's team-provider usage, fresh each time the menu opens.
+  useEffect(() => {
+    if (!open || !origin || !usageUser) return
+    let cancelled = false
+    fetchMyUsage(origin).then((value) => { if (!cancelled) setUsage(value) }).catch(() => {
+      if (!cancelled) setUsage(null)
+    })
+    return () => { cancelled = true }
+  }, [open, origin, usageUser])
+
   if (!origin) return null
   const host = serverHost(origin)
   const signedIn = phase === 'signedIn' && sessionOrigin === origin && user
@@ -134,10 +151,32 @@ export function TeamServerUserMenu() {
               </div>
             )}
           </dl>
+          {usage && usageUser && (
+            <div className="px-3 py-2 border-t border-[var(--color-border)] text-xs space-y-1.5" aria-label={t('teamUsageMine', lang)}>
+              <p className="text-[var(--color-text-muted)]">{t('teamUsageMine', lang)}</p>
+              <div className="flex justify-between gap-3">
+                <span className="text-[var(--color-text-muted)]">{t('teamUsageToday', lang)}</span>
+                <QuotaCell status={usage.quota.daily} lang={lang} />
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-[var(--color-text-muted)]">{t('teamUsageMonth', lang)}</span>
+                <QuotaCell status={usage.quota.monthly} lang={lang} />
+              </div>
+            </div>
+          )}
           {!persistent && (
             <p className="px-3 pb-2 text-[11px] leading-relaxed text-[var(--color-notice-text)]">{t('teamServerNotPersistent', lang)}</p>
           )}
-          <div className="px-3 py-2 border-t border-[var(--color-border)] flex justify-end">
+          <div className="px-3 py-2 border-t border-[var(--color-border)] flex justify-end gap-2">
+            {admin && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); openTeamUsage() }}
+                className="h-7 px-3 rounded-md border border-[var(--color-border)] text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+              >
+                {t('teamUsageOpen', lang)}
+              </button>
+            )}
             <button
               type="button"
               disabled={busy}
