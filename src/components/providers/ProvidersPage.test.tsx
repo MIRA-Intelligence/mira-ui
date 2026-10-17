@@ -403,6 +403,27 @@ describe('ProvidersPage', () => {
       expect(update).toEqual({ api_base: 'https://gw/v1', models: [], enabled: true, name: 'Team gateway' })
     })
 
+    it('adds a custom provider of the user\'s own when the team manages "custom"', async () => {
+      const team = customPayload()
+      team.providers.custom = { ...team.providers.custom, display_name: 'ECNU', managed_by: 'team', api_key_preview: null }
+      team.team = { revision: 'r1', providers: ['custom'], model_params: false, defaults: [] }
+      vi.mocked(fetchRuntimeConfig).mockResolvedValue(team)
+      useUiStore.getState().openProviders()
+      render(<ProvidersPage />)
+      fireEvent.click(await screen.findByText('+ Add custom provider'))
+
+      const nameInput = await screen.findByRole('textbox', { name: 'Name' })
+      expect(screen.queryByText(/Your Team Server administrators manage/)).not.toBeInTheDocument()
+      fireEvent.change(nameInput, { target: { value: 'My gateway' } })
+      fireEvent.change(screen.getByPlaceholderText('Leave empty to use the provider default'), { target: { value: 'https://mine/v1' } })
+      fireEvent.click(screen.getByText('Save'))
+      await waitFor(() => expect(saveProvidersConfig).toHaveBeenCalled())
+      const providers = vi.mocked(saveProvidersConfig).mock.calls.at(-1)![0].providers!
+      expect(providers).not.toHaveProperty('custom')
+      const [, update] = Object.entries(providers).find(([name]) => name.startsWith('custom_') && name !== 'custom_lab')!
+      expect(update).toEqual({ api_base: 'https://mine/v1', models: [], enabled: true, name: 'My gateway' })
+    })
+
     it('renames a custom provider and blocks duplicate or empty names', async () => {
       useUiStore.getState().openProviders()
       render(<ProvidersPage />)

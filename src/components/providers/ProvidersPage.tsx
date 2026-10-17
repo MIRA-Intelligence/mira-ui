@@ -339,8 +339,10 @@ export function ProvidersPage() {
   }
 
   const addCustomProvider = () => {
-    const base = payload?.providers.custom
-    if (!base) return
+    const custom = payload?.providers.custom
+    if (!custom) return
+    // A new provider is the user's own, even when the team manages "custom".
+    const { managed_by: _managedBy, ...base } = custom
     const id = newCustomProviderId(new Set(Object.keys(allSettings)))
     const labels = new Set(providerEntries.map(([, settings]) => normalizedName(settings.display_name)))
     let index = 2
