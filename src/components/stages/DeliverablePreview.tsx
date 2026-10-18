@@ -82,7 +82,7 @@ function DownloadLink({
         onClick={() => window.open(editUrl.toString(), '_blank', 'noopener,noreferrer')}
         className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
       >
-        {lang === 'zh' ? '下载原文件' : 'Download original'}
+        {lang === 'zh' ? '编辑幻灯' : 'Edit slides'}
       </button>
     )
   }

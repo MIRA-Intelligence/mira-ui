@@ -115,7 +115,7 @@ describe('DeliverablePreview', () => {
     )
 
     await screen.findByTestId('slides-preview')
-    fireEvent.click(screen.getByRole('button', { name: '下载原文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑幻灯' }))
     expect(open).toHaveBeenCalledTimes(1)
     const [url, target, features] = open.mock.calls[0]
     const opened = new URL(String(url))
@@ -148,7 +148,7 @@ describe('DeliverablePreview', () => {
 
     const frame = await screen.findByTestId('slides-preview')
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
-    fireEvent.click(screen.getByRole('button', { name: '下载原文件' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑幻灯' }))
     const opened = new URL(String(open.mock.calls[0][0]))
     expect(opened.pathname).toContain('/artifacts/art-deck/content')
     expect(opened.searchParams.get('mode')).toBe('edit')
