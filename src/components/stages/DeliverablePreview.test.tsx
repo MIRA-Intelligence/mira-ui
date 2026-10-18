@@ -125,6 +125,35 @@ describe('DeliverablePreview', () => {
     expect(features).toContain('noopener')
   })
 
+  it('treats a stored slides artifact as a deck even when it is named payload.html', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        artifact_id: 'art-deck',
+        artifact_type: 'slides',
+        label: '科学结果幻灯片',
+        media_type: 'text/html',
+        byte_size: 765867,
+        payload_ref: '.mira/artifacts/art-deck/payload.html',
+      }),
+    }))
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    render(
+      <DeliverablePreview
+        projectId="PRJ-1"
+        run={{ ...makeRun(''), outputs: ['art-deck'] }}
+        lang="zh"
+      />,
+    )
+
+    const frame = await screen.findByTestId('slides-preview')
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    fireEvent.click(screen.getByRole('button', { name: '下载原文件' }))
+    const opened = new URL(String(open.mock.calls[0][0]))
+    expect(opened.pathname).toContain('/artifacts/art-deck/content')
+    expect(opened.searchParams.get('mode')).toBe('edit')
+  })
+
   it('keeps ordinary html fully sandboxed', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
     render(

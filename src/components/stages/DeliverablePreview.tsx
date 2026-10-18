@@ -15,6 +15,7 @@ type PreviewArtifact = {
   mediaType: string
   byteSize?: number
   url: string
+  artifactType?: string
   probeUntilAvailable?: boolean
 }
 
@@ -48,7 +49,10 @@ function previewKind(artifact: PreviewArtifact):
   if (mediaType.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension)) {
     return 'image'
   }
-  if (/\.(bento|mira)\.html$/.test(artifact.name.toLowerCase())) return 'slides'
+  // Stored deliverables are named payload.html, so trust the artifact type too.
+  if (artifact.artifactType === 'slides' || /\.(bento|mira)\.html$/.test(artifact.name.toLowerCase())) {
+    return 'slides'
+  }
   if (extension === '.ipynb') return 'notebook'
   if (extension === '.html' || extension === '.htm' || mediaType === 'text/html') return 'html'
   if (
@@ -397,6 +401,7 @@ export function DeliverablePreview({
           mediaType: artifact.media_type,
           byteSize: artifact.byte_size,
           url: getWorkflowArtifactContentUrl(projectId, artifact.artifact_id),
+          artifactType: artifact.artifact_type,
         }))
       }
       const outputPath = configuredPath || legacyOutputPath?.trim()
