@@ -48,7 +48,7 @@ function previewKind(artifact: PreviewArtifact):
   if (mediaType.startsWith('image/') || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'].includes(extension)) {
     return 'image'
   }
-  if (artifact.name.toLowerCase().endsWith('.bento.html')) return 'slides'
+  if (/\.(bento|mira)\.html$/.test(artifact.name.toLowerCase())) return 'slides'
   if (extension === '.ipynb') return 'notebook'
   if (extension === '.html' || extension === '.htm' || mediaType === 'text/html') return 'html'
   if (
@@ -67,6 +67,21 @@ function DownloadLink({
   artifact: PreviewArtifact
   lang: 'zh' | 'en'
 }) {
+  if (previewKind(artifact) === 'slides') {
+    // The engine serves `mode=edit` as a sandboxed copy without the deck's
+    // read-only flag, so the tab opens the editor (Save downloads the file).
+    const editUrl = new URL(artifact.url, window.location.href)
+    editUrl.searchParams.set('mode', 'edit')
+    return (
+      <button
+        type="button"
+        onClick={() => window.open(editUrl.toString(), '_blank', 'noopener,noreferrer')}
+        className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+      >
+        {lang === 'zh' ? '下载原文件' : 'Download original'}
+      </button>
+    )
+  }
   return (
     <a
       href={artifact.url}

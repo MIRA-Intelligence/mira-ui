@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const renderWord = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -101,6 +101,28 @@ describe('DeliverablePreview', () => {
     const frame = await screen.findByTestId('slides-preview')
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
     expect(frame.getAttribute('sandbox')).not.toContain('allow-same-origin')
+  })
+
+  it('opens slide decks in edit mode in a new tab', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }))
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    render(
+      <DeliverablePreview
+        projectId="PRJ-1"
+        run={makeRun('result/exports/slides.mira.html')}
+        lang="zh"
+      />,
+    )
+
+    await screen.findByTestId('slides-preview')
+    fireEvent.click(screen.getByRole('button', { name: '下载原文件' }))
+    expect(open).toHaveBeenCalledTimes(1)
+    const [url, target, features] = open.mock.calls[0]
+    const opened = new URL(String(url))
+    expect(opened.searchParams.get('mode')).toBe('edit')
+    expect(opened.searchParams.get('path')).toBe('result/exports/slides.mira.html')
+    expect(target).toBe('_blank')
+    expect(features).toContain('noopener')
   })
 
   it('keeps ordinary html fully sandboxed', async () => {
