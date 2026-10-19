@@ -90,10 +90,31 @@ describe('AppLayout project surfaces', () => {
     useProjectStore.setState({ appMode: 'normal', tasks: [] })
     useUiStore.getState().focusQuickChatWorkbench()
     render(<AppLayout />)
-    const toggle = screen.getByRole('button', { name: 'Toggle quick chat home panel' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const toggle = screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
+    expect(useUiStore.getState().chatCenterCollapsed).toBe(true)
     expect(screen.getByText('agent-panel')).toBeInTheDocument()
     fireEvent.click(toggle)
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
+  })
+
+  it('resizes the Quick Chat workbench by dragging the splitter', () => {
+    useProjectStore.setState({ appMode: 'normal', tasks: [] })
+    useUiStore.setState({ chatCenterCollapsed: false })
+    useUiStore.getState().setAgentPanelWidth(600)
+    render(<AppLayout />)
+    const splitter = screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
+    // jsdom has no pointer capture.
+    splitter.setPointerCapture = vi.fn()
+    splitter.releasePointerCapture = vi.fn()
+
+    const right = window.innerWidth
+    fireEvent.pointerDown(splitter, { button: 0, pointerId: 1, clientX: right - 600 })
+    fireEvent.pointerMove(splitter, { pointerId: 1, clientX: right - 820 })
+    fireEvent.pointerUp(splitter, { pointerId: 1, clientX: right - 820 })
+    fireEvent.click(splitter)
+
+    expect(useUiStore.getState().agentPanelWidth).toBe(820)
+    // A drag is not a click: the home pane stays open.
+    expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
   })
 })

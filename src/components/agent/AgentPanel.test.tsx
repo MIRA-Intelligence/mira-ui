@@ -202,7 +202,7 @@ describe('AgentPanel keyboard behavior', () => {
     })
     render(<AgentPanel />)
 
-    fireEvent.click(screen.getByRole('button', { name: '$ Skill' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Skill' }))
     fireEvent.click(screen.getByRole('button', { name: '$mrstation' }))
     const textarea = screen.getByRole('textbox')
     fireEvent.change(textarea, { target: { value: 'analyze this dataset' } })

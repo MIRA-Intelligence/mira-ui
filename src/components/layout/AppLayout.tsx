@@ -141,6 +141,7 @@ export function AppLayout() {
     setAgentPanelCollapsed,
     chatCenterCollapsed,
     toggleChatCenter,
+    setChatCenterCollapsed,
     promotion,
     closePromotion,
   } = useUiStore()
@@ -213,21 +214,31 @@ export function AppLayout() {
         {/* Center: file preview/home in Quick Chat, or the project detail. */}
         <div
           hidden={centerCollapsed}
-          className={cn('overflow-hidden min-w-0', centerCollapsed ? 'w-0' : 'flex-1')}
+          className={cn(
+            'overflow-hidden',
+            centerCollapsed ? 'w-0' : 'flex-1',
+            // Dragging the workbench wider must not squeeze the chat home away.
+            isChat && !centerCollapsed ? 'min-w-[280px]' : 'min-w-0',
+          )}
         >
           {isChat ? <ChatMainPlaceholder /> : <TaskDetail />}
         </div>
 
+        {/* Quick Chat: click collapses the home pane, drag resizes the workbench. */}
         {isChat && (
-          <button
-            type="button"
-            onClick={toggleChatCenter}
-            className="w-4 shrink-0 border-l border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)]"
-            aria-label={t('toggleChatCenter', lang)}
-            aria-expanded={!chatCenterCollapsed}
+          <SplitterToggle
+            onToggle={toggleChatCenter}
+            onStart={() => {
+              setChatCenterCollapsed(false)
+              setResizing(true)
+            }}
+            onEnd={() => setResizing(false)}
+            onMove={(clientX) => setAgentPanelWidth(window.innerWidth - clientX)}
+            className="border-l border-[var(--color-border)]"
+            ariaLabel={t('toggleChatCenter', lang)}
           >
             {chatCenterCollapsed ? <ChevronRight /> : <ChevronLeft />}
-          </button>
+          </SplitterToggle>
         )}
 
         {!isProjectOverview && (
@@ -250,11 +261,13 @@ export function AppLayout() {
 
             <div
               className={cn(
-                'shrink-0 overflow-hidden',
-                centerCollapsed && 'flex-1 min-w-0',
+                'overflow-hidden',
+                // In Quick Chat the workbench gives way to the home pane's minimum on narrow windows.
+                isChat ? 'shrink min-w-0' : 'shrink-0',
+                centerCollapsed && 'flex-1',
                 !resizing && 'transition-[width] duration-200 ease-in-out',
               )}
-              style={{ width: workbenchWidth, maxWidth: isChat && !centerCollapsed ? '50%' : undefined }}
+              style={{ width: workbenchWidth }}
             >
               <div className="h-full" style={{ width: isChat ? '100%' : agentPanelWidth }}>
                 <AgentWorkspacePanel />

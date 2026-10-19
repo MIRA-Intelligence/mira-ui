@@ -179,7 +179,7 @@ function ChatComposer({
             className="h-10 rounded-lg border border-[var(--color-border)] px-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
             title={t('selectSkill', lang)}
           >
-            $ Skill
+            Skill
           </button>
           {skillPickerOpen && (
             <div className="absolute bottom-12 left-0 z-30 w-64 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-2 shadow-xl">
