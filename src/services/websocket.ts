@@ -12,6 +12,17 @@ function getWsUrl(): string {
   return useSettingsStore.getState().wsUrl
 }
 
+/** Ask the engine for turn_started/turn_finished; it withholds them from older clients. */
+function withTurnEvents(wsUrl: string): string {
+  try {
+    const url = new URL(wsUrl)
+    url.searchParams.set('turn_events', '1')
+    return url.toString()
+  } catch {
+    return wsUrl
+  }
+}
+
 function currentLanguage() {
   return useSettingsStore.getState().language
 }
@@ -78,7 +89,7 @@ class WebSocketClient {
 
   private _connect(): void {
     try {
-      this.ws = new WebSocket(withEngineAuth(getWsUrl()))
+      this.ws = new WebSocket(withEngineAuth(withTurnEvents(getWsUrl())))
     } catch {
       this._scheduleReconnect()
       return

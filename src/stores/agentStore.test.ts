@@ -485,7 +485,13 @@ describe('agentStore turn lifecycle', () => {
     const state = useAgentStore.getState()
     expect(state.streamingBySession['PRJ-1']).toBeUndefined()
     expect(state.streamingBySession['PRJ-1:run:run-3']).toBe(true)
-    expect(state.turnEventsSupported).toBe(true)
+  })
+
+  it('keeps inferring from messages when /turns answers but no turn events arrive', () => {
+    useAgentStore.getState().syncActiveTurns('PRJ-1', [])
+    expect(useAgentStore.getState().turnEventsSupported).toBe(false)
+    send('tool_call', {}, 'exec')
+    expect(useAgentStore.getState().streamingBySession['PRJ-1']).toBe(true)
   })
 
   it('relearns turn-event support after a reconnect', () => {

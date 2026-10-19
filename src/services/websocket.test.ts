@@ -52,7 +52,7 @@ describe('wsClient', () => {
     wsClient.connect()
 
     const socket = MockWebSocket.instances.at(-1)
-    expect(socket?.url).toBe('ws://127.0.0.1:18790/ws')
+    expect(socket?.url).toBe('ws://127.0.0.1:18790/ws?turn_events=1')
     socket?.emitOpen()
 
     const statuses: boolean[] = []
@@ -91,6 +91,7 @@ describe('wsClient', () => {
 
     const socket = MockWebSocket.instances.at(-1)
     expect(new URL(socket!.url).searchParams.get('access_token')).toBe('remote-token-0123456789')
+    expect(new URL(socket!.url).searchParams.get('turn_events')).toBe('1')
     wsClient.disconnect()
     expect(details.join(' ')).not.toContain('remote-token')
   })

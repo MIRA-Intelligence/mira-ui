@@ -18,7 +18,8 @@ interface AgentState {
   // panel (e.g. a brand-new chat showing "mira is thinking"). Keyed by session.
   streamingBySession: Record<string, boolean>
   stoppingBySession: Record<string, boolean>
-  // Set once the engine sends turn_started/turn_finished (or answers /turns).
+  // Set once the engine sends turn_started/turn_finished over this socket.
+  // (Answering /turns is not enough: a proxy could drop the socket opt-in.)
   // From then on those events alone decide whether a session is working;
   // older engines fall back to inferring it from message types.
   turnEventsSupported: boolean
@@ -505,8 +506,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (now - (_lastActivityAt[key] ?? 0) < TURN_SYNC_GRACE_MS) continue
         streaming = setSessionStreaming(streaming, key, false)
       }
-      if (streaming === state.streamingBySession && state.turnEventsSupported) return state
-      return { streamingBySession: streaming, turnEventsSupported: true }
+      return streaming === state.streamingBySession ? state : { streamingBySession: streaming }
     }),
 
   setConnected: (connected) =>
