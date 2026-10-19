@@ -90,3 +90,9 @@ html, body, #root {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-muted);
 }
+
+/* The logo's grey lettering is drawn for light backgrounds; invert it on dark
+   ones and rotate the hue back so the coloured star keeps its colours. */
+[data-theme="dark"] .mira-logo {
+  filter: invert(1) hue-rotate(180deg);
+}

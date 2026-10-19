@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import miraLogo from '@/assets/mira-logo.png'
 import { ArtifactPreview } from '@/components/artifacts'
 import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
@@ -108,6 +109,7 @@ export function ChatMainPlaceholder() {
     <div className="h-full overflow-y-auto bg-[var(--color-bg-primary)]">
       <div className="max-w-xl mx-auto px-8 py-10 flex flex-col gap-8">
         <header className="text-center space-y-2">
+          <img src={miraLogo} alt="MIRA" className="mira-logo mx-auto mb-4 h-14 w-auto select-none" draggable={false} />
           <p className="text-base font-medium text-[var(--color-text-primary)]">
             {t('normalChatTitle', lang)}
           </p>
