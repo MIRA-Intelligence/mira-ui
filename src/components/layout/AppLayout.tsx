@@ -24,6 +24,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useTurnSync } from '@/hooks/useTurnSync'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { useWorkflowWebSocket } from '@/hooks/useWorkflowWebSocket'
 import { cn } from '@/lib/utils'
@@ -159,6 +160,7 @@ export function AppLayout() {
   const flushPendingFeedback = useFeedbackStore((s) => s.flushPending)
   useWebSocket()
   useWorkflowWebSocket()
+  useTurnSync()
   useUpdateCheck()
 
   useEffect(() => {

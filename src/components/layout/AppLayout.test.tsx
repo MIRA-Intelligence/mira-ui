@@ -20,6 +20,7 @@ vi.mock('@/components/feedback/FeedbackDialog', () => ({ FeedbackDialog: () => n
 vi.mock('@/hooks/useWebSocket', () => ({ useWebSocket: vi.fn() }))
 vi.mock('@/hooks/useWorkflowWebSocket', () => ({ useWorkflowWebSocket: vi.fn() }))
 vi.mock('@/hooks/useUpdateCheck', () => ({ useUpdateCheck: vi.fn() }))
+vi.mock('@/hooks/useTurnSync', () => ({ useTurnSync: vi.fn() }))
 
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'

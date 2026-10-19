@@ -543,11 +543,32 @@ export interface WsMessage {
 }
 
 export interface WsResponse {
-  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required' | 'skill_loaded' | 'token_usage'
+  type: 'response' | 'progress' | 'tool_call' | 'error' | 'stream_delta' | 'stream_end' | 'stop_ack' | 'skill_fallback_required' | 'skill_loaded' | 'token_usage' | 'turn_started' | 'turn_finished'
   session_id?: string
   content: string
   media?: string[]
   metadata?: Record<string, unknown>
+}
+
+/** Why the engine ended a turn (turn_finished.metadata.stop_reason). */
+export type TurnStopReason =
+  | 'completed'
+  | 'max_iterations'
+  | 'max_tokens'
+  | 'waiting_input'
+  | 'budget_exceeded'
+  | 'stopped'
+  | 'error'
+
+export interface TurnEnd {
+  turnId: string
+  stopReason: TurnStopReason
+}
+
+/** A turn the engine is still running (GET /sessions/{id}/turns). */
+export interface ActiveTurn {
+  turn_id: string
+  workflow_run_id: string | null
 }
 
 export interface SkillLoadEvent {

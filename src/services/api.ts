@@ -2,6 +2,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { createUuid } from '@/lib/uuid'
 import { withEngineAuth } from './engineAuth'
 import type {
+  ActiveTurn,
   AgentProfile,
   ContractVersion,
   LogEntry,
@@ -334,6 +335,24 @@ export async function fetchSessionHistory(sessionId: string, workflowRunId?: str
     return Array.isArray(data?.entries) ? (data.entries as LogEntry[]) : []
   } catch {
     return []
+  }
+}
+
+/** Turns still running for a session, or null when the engine cannot say (older engine, offline). */
+export async function fetchActiveTurns(sessionId: string): Promise<ActiveTurn[] | null> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/sessions/${encodeURIComponent(sessionId)}/turns`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (!Array.isArray(data?.active)) return null
+    return (data.active as unknown[]).flatMap((raw) => {
+      const row = raw as Record<string, unknown> | null
+      if (!row || typeof row.turn_id !== 'string') return []
+      const runId = typeof row.workflow_run_id === 'string' && row.workflow_run_id ? row.workflow_run_id : null
+      return [{ turn_id: row.turn_id, workflow_run_id: runId }]
+    })
+  } catch {
+    return null
   }
 }
 

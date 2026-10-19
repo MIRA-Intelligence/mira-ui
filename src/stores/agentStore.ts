@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LogEntry, WsResponse } from '@/types'
+import type { ActiveTurn, LogEntry, TurnEnd, TurnStopReason, WsResponse } from '@/types'
 import { isChatSessionId, isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
@@ -18,6 +18,12 @@ interface AgentState {
   // panel (e.g. a brand-new chat showing "mira is thinking"). Keyed by session.
   streamingBySession: Record<string, boolean>
   stoppingBySession: Record<string, boolean>
+  // Set once the engine sends turn_started/turn_finished (or answers /turns).
+  // From then on those events alone decide whether a session is working;
+  // older engines fall back to inferring it from message types.
+  turnEventsSupported: boolean
+  // How each conversation's last turn ended, keyed like streamingBySession.
+  lastTurnEndBySession: Record<string, TurnEnd>
   connected: boolean
   // Cumulative token usage broadcast by the engine via message metadata.
   // Indexed by session id (which the renderer treats as the project id).
@@ -30,6 +36,7 @@ interface AgentState {
   markSessionIdle: (sessionId: string) => void
   markSessionStopping: (sessionId: string) => void
   isSessionStreaming: (sessionId: string | null) => boolean
+  syncActiveTurns: (sessionId: string, active: ActiveTurn[]) => void
   setConnected: (v: boolean) => void
   clearLogs: (projectId: string) => void
   resetWorkspaceState: () => void
@@ -139,6 +146,29 @@ function scheduleResponseRefreshes(projectId: string | null, enterPlan: boolean)
   }, delayMs))
 }
 
+const TURN_STOP_REASONS: ReadonlySet<string> = new Set<TurnStopReason>([
+  'completed', 'max_iterations', 'max_tokens', 'waiting_input', 'budget_exceeded', 'stopped', 'error',
+])
+
+// A turn the engine has not reported yet (message just sent, turn_started in
+// flight) must not be cleared by a /turns poll, so recent activity wins.
+export const TURN_SYNC_GRACE_MS = 20_000
+const _lastActivityAt: Record<string, number> = {}
+
+function noteActivity(conversationId: string) {
+  _lastActivityAt[conversationId] = Date.now()
+}
+
+function clearStreamingFlags(list: LogEntry[] | undefined): LogEntry[] | undefined {
+  if (!list || !list.some((e) => e.metadata?._streaming)) return list
+  return list.map((entry) => {
+    if (!entry.metadata?._streaming) return entry
+    const metadata = { ...entry.metadata }
+    delete metadata._streaming
+    return { ...entry, metadata }
+  })
+}
+
 function setSessionStreaming(
   map: Record<string, boolean>,
   sessionId: string,
@@ -159,6 +189,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   logsByProject: {},
   streamingBySession: {},
   stoppingBySession: {},
+  turnEventsSupported: false,
+  lastTurnEndBySession: {},
   connected: false,
   usageBySession: {},
 
@@ -232,6 +264,43 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     const workflowRunId = readMetadataString(msg.metadata, 'workflow_run_id')
     const logSessionId = workflowRunId ? `${sessionId}:run:${workflowRunId}` : sessionId
+    noteActivity(logSessionId)
+
+    if (msg.type === 'turn_started') {
+      set((state) => {
+        const lastTurnEnd = { ...state.lastTurnEndBySession }
+        delete lastTurnEnd[logSessionId]
+        return {
+          turnEventsSupported: true,
+          lastTurnEndBySession: lastTurnEnd,
+          streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, true),
+        }
+      })
+      return
+    }
+
+    if (msg.type === 'turn_finished') {
+      const rawReason = readMetadataString(msg.metadata, 'stop_reason')
+      const stopReason = (rawReason && TURN_STOP_REASONS.has(rawReason) ? rawReason : 'completed') as TurnStopReason
+      const turnId = readMetadataString(msg.metadata, 'turn_id') ?? ''
+      set((state) => {
+        const stopping = { ...state.stoppingBySession }
+        delete stopping[sessionId]
+        const list = state.logsByProject[logSessionId]
+        const cleared = clearStreamingFlags(list)
+        return {
+          turnEventsSupported: true,
+          stoppingBySession: stopping,
+          streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, false),
+          lastTurnEndBySession: { ...state.lastTurnEndBySession, [logSessionId]: { turnId, stopReason } },
+          logsByProject: cleared === list || !cleared
+            ? state.logsByProject
+            : { ...state.logsByProject, [logSessionId]: cleared },
+        }
+      })
+      stopPlanPolling(resolveProjectRefreshId(msg, sessionId))
+      return
+    }
 
     if (msg.type === 'stop_ack') {
       set((state) => {
@@ -303,7 +372,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         return {
           logsByProject: nextLogs,
-          streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, false),
+          // stream_end closes one LLM call, not the turn; with lifecycle events
+          // turn_finished decides when the session is idle.
+          streamingBySession: state.turnEventsSupported
+            ? state.streamingBySession
+            : setSessionStreaming(state.streamingBySession, logSessionId, false),
         }
       })
       return
@@ -328,7 +401,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set((state) => {
       const streaming = (msg.type === 'progress' && !terminalProgress) || msg.type === 'tool_call'
       const next: Partial<AgentState> = {
-        streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, streaming),
+        // Legacy engines only: infer from the message type.
+        streamingBySession: state.turnEventsSupported
+          ? state.streamingBySession
+          : setSessionStreaming(state.streamingBySession, logSessionId, streaming),
       }
       if (!statusOnly) {
         next.logsByProject = {
@@ -394,6 +470,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   markSessionPending: (sessionId) =>
     set((state) => {
+      noteActivity(sessionId)
       const next = setSessionStreaming(state.streamingBySession, sessionId, true)
       return next === state.streamingBySession ? state : { streamingBySession: next }
     }),
@@ -414,6 +491,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     return get().streamingBySession[sessionId] ?? false
   },
 
+  syncActiveTurns: (sessionId, active) =>
+    set((state) => {
+      const activeKeys = new Set(active.map((turn) => (
+        turn.workflow_run_id ? `${sessionId}:run:${turn.workflow_run_id}` : sessionId
+      )))
+      let streaming = state.streamingBySession
+      for (const key of activeKeys) streaming = setSessionStreaming(streaming, key, true)
+      const now = Date.now()
+      for (const key of Object.keys(streaming)) {
+        if (!streaming[key] || activeKeys.has(key)) continue
+        if (key !== sessionId && !key.startsWith(`${sessionId}:run:`)) continue
+        if (now - (_lastActivityAt[key] ?? 0) < TURN_SYNC_GRACE_MS) continue
+        streaming = setSessionStreaming(streaming, key, false)
+      }
+      if (streaming === state.streamingBySession && state.turnEventsSupported) return state
+      return { streamingBySession: streaming, turnEventsSupported: true }
+    }),
+
   setConnected: (connected) =>
     set((state) => {
       if (state.connected === connected) return state
@@ -421,7 +516,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         const streamingBySession = Object.fromEntries(
           Object.keys(state.streamingBySession).map((id) => [id, false]),
         ) as Record<string, boolean>
-        return { connected, streamingBySession }
+        // The engine may have been replaced while offline; relearn on reconnect.
+        return { connected, streamingBySession, turnEventsSupported: false }
       }
       return { connected }
     }),
@@ -457,6 +553,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       logsByProject: {},
       streamingBySession: {},
       stoppingBySession: {},
+      lastTurnEndBySession: {},
       usageBySession: {},
     })
   },

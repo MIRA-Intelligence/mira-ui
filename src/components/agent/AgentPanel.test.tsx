@@ -53,6 +53,45 @@ describe('AgentPanel keyboard behavior', () => {
     })
   })
 
+  it('explains a turn that hit the tool-call limit and offers to continue', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    useAgentStore.setState({
+      lastTurnEndBySession: { 'PRJ-0001': { turnId: 't1', stopReason: 'max_iterations' } },
+    })
+    render(<AgentPanel />)
+
+    expect(screen.getByText(/hit the tool-call limit/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    const sent = sendSpy.mock.calls.map((call) => call[0]).filter((p) => p?.type === 'message')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ content: 'Continue from where you stopped.', session_id: 'PRJ-0001' })
+  })
+
+  it('shows no notice for ordinary endings or while the next turn runs', () => {
+    useAgentStore.setState({
+      lastTurnEndBySession: { 'PRJ-0001': { turnId: 't1', stopReason: 'completed' } },
+    })
+    const { rerender } = render(<AgentPanel />)
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
+
+    act(() => useAgentStore.setState({
+      lastTurnEndBySession: { 'PRJ-0001': { turnId: 't1', stopReason: 'max_tokens' } },
+      streamingBySession: { 'PRJ-0001': true },
+    }))
+    rerender(<AgentPanel />)
+    expect(screen.queryByText(/cut off at the output length limit/)).not.toBeInTheDocument()
+  })
+
+  it('reports a budget stop without a continue button', () => {
+    useAgentStore.setState({
+      lastTurnEndBySession: { 'PRJ-0001': { turnId: 't1', stopReason: 'budget_exceeded' } },
+    })
+    render(<AgentPanel />)
+    expect(screen.getByText(/token budget or round limit/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
+  })
+
   it('sends on Enter and keeps Shift+Enter for newline by default', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     render(<AgentPanel />)

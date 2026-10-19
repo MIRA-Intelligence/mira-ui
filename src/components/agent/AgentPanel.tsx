@@ -4,13 +4,13 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useUiStore } from '@/stores/uiStore'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { useSettingsStore, type Language } from '@/stores/settingsStore'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
 import { LogEntry } from './LogEntry'
 import { formatTime } from '@/lib/utils'
-import type { LogEntry as AgentLogEntry } from '@/types'
-import { t } from '@/i18n'
+import type { LogEntry as AgentLogEntry, TurnStopReason } from '@/types'
+import { t, type I18nKey } from '@/i18n'
 import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { KnowledgePicker } from '@/components/knowledge/KnowledgePicker'
@@ -378,8 +378,40 @@ export function AgentPanelActions() {
   )
 }
 
+const TURN_END_NOTICES: Partial<Record<TurnStopReason, I18nKey>> = {
+  max_iterations: 'turnEndMaxIterations',
+  max_tokens: 'turnEndMaxTokens',
+  budget_exceeded: 'turnEndBudgetExceeded',
+}
+// Endings the user can resume by just asking Mira to carry on.
+const CONTINUABLE: ReadonlySet<TurnStopReason> = new Set(['max_iterations', 'max_tokens'])
+
+/** Explains a turn that ended before the task did; other endings speak for themselves. */
+function TurnEndNotice({ reason, lang, onContinue }: {
+  reason: TurnStopReason
+  lang: Language
+  onContinue?: () => void
+}) {
+  const message = TURN_END_NOTICES[reason]
+  if (!message) return null
+  return (
+    <div className="mx-4 my-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2" role="status">
+      <p className="flex-1 text-xs text-[var(--color-text-primary)]">{t(message, lang)}</p>
+      {onContinue && CONTINUABLE.has(reason) && (
+        <button
+          type="button"
+          onClick={onContinue}
+          className="shrink-0 rounded-md bg-[var(--color-accent)] px-3 py-1 text-xs text-white"
+        >
+          {t('turnContinue', lang)}
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
-  const { connected, logsByProject, hydrateLogs, streamingBySession, stoppingBySession } = useAgentStore()
+  const { connected, logsByProject, hydrateLogs, streamingBySession, stoppingBySession, lastTurnEndBySession } = useAgentStore()
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
   const lang = useSettingsStore((s) => s.language)
@@ -423,6 +455,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   // lights up this panel (e.g. a freshly created chat).
   const isStreaming = Boolean(conversationId && streamingBySession[conversationId])
   const isStopping = Boolean(sessionId && stoppingBySession[sessionId])
+  const lastTurnEnd = conversationId ? lastTurnEndBySession[conversationId] : undefined
   const skillPlugins = useSkillPluginsStore((s) => s.plugins)
   const loadSkillPlugins = useSkillPluginsStore((s) => s.load)
   const activeTurnIds = useRef<Record<string, string>>({})
@@ -807,6 +840,14 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
           }
           return <LogEntry key={entry.id} entry={entry} />
         })}
+
+        {!isStreaming && lastTurnEnd && (
+          <TurnEndNotice
+            reason={lastTurnEnd.stopReason}
+            lang={lang}
+            onContinue={composerSessionId ? () => handleSend(t('turnContinueMessage', lang)) : undefined}
+          />
+        )}
 
         {showThinking && (
           <div className="px-4 py-2" role="status" aria-live="polite">

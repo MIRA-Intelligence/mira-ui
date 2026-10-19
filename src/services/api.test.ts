@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { deleteProject, fetchProjectFilesResult, fetchSkillHistory, getArtifactDownloadUrl, uploadProjectFiles } from './api'
+import { deleteProject, fetchActiveTurns, fetchProjectFilesResult, fetchSkillHistory, getArtifactDownloadUrl, uploadProjectFiles } from './api'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const initialSettingsState = useSettingsStore.getState()
@@ -142,5 +142,34 @@ describe('deleteProject', () => {
     )))
 
     await expect(deleteProject('PRJ-NOPE', { deleteFiles: true })).rejects.toThrow('not found')
+  })
+})
+
+describe('fetchActiveTurns', () => {
+  beforeEach(() => {
+    useSettingsStore.setState({ apiUrl: 'http://127.0.0.1:18790/api' })
+  })
+
+  it('returns the running turns with their workflow runs', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      session_id: 'PRJ-1',
+      active: [
+        { turn_id: 't1', workflow_run_id: 'run-1', started_at: 1 },
+        { turn_id: 't2', workflow_run_id: null },
+        { workflow_run_id: 'no-id' },
+      ],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchActiveTurns('PRJ-1')).resolves.toEqual([
+      { turn_id: 't1', workflow_run_id: 'run-1' },
+      { turn_id: 't2', workflow_run_id: null },
+    ])
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:18790/api/sessions/PRJ-1/turns')
+  })
+
+  it('returns null when the engine has no turns endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })))
+    await expect(fetchActiveTurns('PRJ-1')).resolves.toBeNull()
   })
 })

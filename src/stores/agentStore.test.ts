@@ -422,3 +422,76 @@ describe('agentStore session usage tracking', () => {
     expect(useAgentStore.getState().connected).toBe(true)
   })
 })
+
+describe('agentStore turn lifecycle', () => {
+  const send = (type: string, metadata: Record<string, unknown> = {}, content = '') =>
+    useAgentStore.getState().handleWsMessage({ type, session_id: 'PRJ-1', content, metadata } as never)
+
+  beforeEach(() => {
+    useAgentStore.setState(initialAgentState, true)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('stays busy across responses and stream ends until turn_finished', () => {
+    send('turn_started', { turn_id: 't1' })
+    send('stream_delta', {}, 'Let me check')
+    send('stream_end')
+    send('response', {}, 'interim answer')
+    expect(useAgentStore.getState().streamingBySession['PRJ-1']).toBe(true)
+
+    send('turn_finished', { turn_id: 't1', stop_reason: 'max_iterations' })
+    const state = useAgentStore.getState()
+    expect(state.streamingBySession['PRJ-1']).toBeUndefined()
+    expect(state.lastTurnEndBySession['PRJ-1']).toEqual({ turnId: 't1', stopReason: 'max_iterations' })
+  })
+
+  it('keys workflow-run turns by run and clears the notice when the next turn starts', () => {
+    send('turn_finished', { turn_id: 't1', workflow_run_id: 'run-9', stop_reason: 'max_tokens' })
+    expect(useAgentStore.getState().lastTurnEndBySession['PRJ-1:run:run-9']?.stopReason).toBe('max_tokens')
+
+    send('turn_started', { turn_id: 't2', workflow_run_id: 'run-9' })
+    const state = useAgentStore.getState()
+    expect(state.lastTurnEndBySession['PRJ-1:run:run-9']).toBeUndefined()
+    expect(state.streamingBySession['PRJ-1:run:run-9']).toBe(true)
+  })
+
+  it('treats an unknown stop reason as completed', () => {
+    send('turn_finished', { turn_id: 't1', stop_reason: 'something_new' })
+    expect(useAgentStore.getState().lastTurnEndBySession['PRJ-1']?.stopReason).toBe('completed')
+  })
+
+  it('still infers busy state from message types for engines without turn events', () => {
+    send('tool_call', {}, 'exec')
+    expect(useAgentStore.getState().streamingBySession['PRJ-1']).toBe(true)
+    send('response', {}, 'done')
+    expect(useAgentStore.getState().streamingBySession['PRJ-1']).toBeUndefined()
+  })
+
+  it('syncs with the engine: clears stale turns, keeps fresh ones, restores running runs', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-19T10:00:00Z'))
+    send('turn_started', { turn_id: 'old' })
+    useAgentStore.getState().markSessionPending('PRJ-2')
+
+    // Just sent: the engine has not reported the turn yet, so keep it.
+    useAgentStore.getState().syncActiveTurns('PRJ-2', [])
+    expect(useAgentStore.getState().streamingBySession['PRJ-2']).toBe(true)
+
+    vi.setSystemTime(new Date('2026-10-19T10:01:00Z'))
+    useAgentStore.getState().syncActiveTurns('PRJ-1', [{ turn_id: 'r', workflow_run_id: 'run-3' }])
+    const state = useAgentStore.getState()
+    expect(state.streamingBySession['PRJ-1']).toBeUndefined()
+    expect(state.streamingBySession['PRJ-1:run:run-3']).toBe(true)
+    expect(state.turnEventsSupported).toBe(true)
+  })
+
+  it('relearns turn-event support after a reconnect', () => {
+    send('turn_started', { turn_id: 't1' })
+    useAgentStore.getState().setConnected(true)
+    useAgentStore.getState().setConnected(false)
+    expect(useAgentStore.getState().turnEventsSupported).toBe(false)
+  })
+})
