@@ -1,4 +1,5 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTimer } from '@/hooks/useTimer'
@@ -7,7 +8,7 @@ import { FeedbackButton } from '@/components/feedback/FeedbackButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
-  const { appMode, tasks, selectedTaskId } = useProjectStore()
+  const { appMode, tasks, selectedTaskId } = useProjectStore(useShallow((s) => ({ appMode: s.appMode, tasks: s.tasks, selectedTaskId: s.selectedTaskId })))
   const activeChatId = useChatStore((s) => s.activeChatId)
   const chats = useChatStore((s) => s.chats)
   const lang = useSettingsStore((s) => s.language)

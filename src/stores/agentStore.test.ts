@@ -211,12 +211,28 @@ describe('agentStore token streaming', () => {
   it('accumulates stream deltas into a single growing assistant entry', () => {
     const store = useAgentStore.getState()
     store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'Hel' })
-    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'lo' })
+    // The first token shows synchronously; later ones are coalesced per frame.
+    expect(useAgentStore.getState().logsByProject['PRJ-S'][0].content).toBe('Hel')
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'l' })
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'o' })
+    expect(useAgentStore.getState().logsByProject['PRJ-S'][0].content).toBe('Hel')
+    store.flushStreamDeltas()
 
     const logs = useAgentStore.getState().logsByProject['PRJ-S']
     expect(logs).toHaveLength(1)
     expect(logs[0]).toMatchObject({ type: 'response', content: 'Hello', metadata: { _streaming: true } })
     expect(useAgentStore.getState().isSessionStreaming('PRJ-S')).toBe(true)
+  })
+
+  it('flushes buffered deltas before a non-delta event for the session', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'a' })
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'b' })
+    store.handleWsMessage({ type: 'stream_end', session_id: 'PRJ-S', content: '' })
+    const logs = useAgentStore.getState().logsByProject['PRJ-S']
+    expect(logs).toHaveLength(1)
+    expect(logs[0].content).toBe('ab')
+    expect(logs[0].metadata?._streaming).toBeUndefined()
   })
 
   it('finalizes the streamed entry and clears streaming on stream_end', () => {

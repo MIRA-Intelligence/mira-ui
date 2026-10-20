@@ -1,4 +1,5 @@
 import { useProjectStore } from '@/stores/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { Experiment } from '@/types'
 import { t } from '@/i18n'
@@ -78,7 +79,7 @@ function ExpItem({ exp, isSelected, onSelect, lang }: {
 }
 
 export function ExperimentTimeline() {
-  const { tasks, selectedTaskId, selectedExpId, selectExperiment } = useProjectStore()
+  const { tasks, selectedTaskId, selectedExpId, selectExperiment } = useProjectStore(useShallow((s) => ({ tasks: s.tasks, selectedTaskId: s.selectedTaskId, selectedExpId: s.selectedExpId, selectExperiment: s.selectExperiment })))
   const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
 

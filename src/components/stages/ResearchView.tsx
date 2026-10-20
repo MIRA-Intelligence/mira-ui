@@ -1,10 +1,12 @@
-import type { InitiationResearchResult, ResearchData, Reference } from '@/types'
+import type { InitiationResearchResult, LogEntry, ResearchData, Reference } from '@/types'
 import { LogEntry as AgentLogEntryView } from '@/components/agent/LogEntry'
 import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { t } from '@/i18n'
+
+const EMPTY_RUN_LOGS: LogEntry[] = []
 
 const LITERATURE_SOURCE_LABELS: Record<string, string> = {
   pubmed: 'PubMed',
@@ -79,8 +81,9 @@ export function ResearchView({ data, coreQuestion }: {
   const conversationId = projectId && selectedRun?.module_type === 'initiation'
     ? `${projectId}:run:${selectedRun.run_id}`
     : null
-  const logsByProject = useAgentStore((state) => state.logsByProject)
-  const runLogs = conversationId ? (logsByProject[conversationId] ?? []) : []
+  // Subscribe to this conversation only; the whole map changes on every
+  // streamed token of every session.
+  const runLogs = useAgentStore((state) => (conversationId ? state.logsByProject[conversationId] : undefined)) ?? EMPTY_RUN_LOGS
   const researchEntries = runLogs.filter(
     (entry) => entry.type === 'response' && entry.metadata?._user !== true,
   )

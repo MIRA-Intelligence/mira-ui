@@ -128,23 +128,24 @@ function SplitterToggle({
 }
 
 export function AppLayout() {
-  const {
-    sidebarCollapsed,
-    toggleSidebar,
-    agentPanelCollapsed,
-    toggleAgentPanel,
-    sidebarWidth,
-    setSidebarWidth,
-    agentPanelWidth,
-    setAgentPanelWidth,
-    setSidebarCollapsed,
-    setAgentPanelCollapsed,
-    chatCenterCollapsed,
-    toggleChatCenter,
-    setChatCenterCollapsed,
-    promotion,
-    closePromotion,
-  } = useUiStore()
+  // Per-field selectors: AppLayout is the root of the whole tree, and a bare
+  // useUiStore() re-rendered everything on every toast, splitter drag tick and
+  // draft-prompt update.
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed)
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar)
+  const agentPanelCollapsed = useUiStore((s) => s.agentPanelCollapsed)
+  const toggleAgentPanel = useUiStore((s) => s.toggleAgentPanel)
+  const sidebarWidth = useUiStore((s) => s.sidebarWidth)
+  const setSidebarWidth = useUiStore((s) => s.setSidebarWidth)
+  const agentPanelWidth = useUiStore((s) => s.agentPanelWidth)
+  const setAgentPanelWidth = useUiStore((s) => s.setAgentPanelWidth)
+  const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed)
+  const setAgentPanelCollapsed = useUiStore((s) => s.setAgentPanelCollapsed)
+  const chatCenterCollapsed = useUiStore((s) => s.chatCenterCollapsed)
+  const toggleChatCenter = useUiStore((s) => s.toggleChatCenter)
+  const setChatCenterCollapsed = useUiStore((s) => s.setChatCenterCollapsed)
+  const promotion = useUiStore((s) => s.promotion)
+  const closePromotion = useUiStore((s) => s.closePromotion)
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const activeStage = useProjectStore((s) => s.activeStage)
   const appMode = useProjectStore((s) => s.appMode)

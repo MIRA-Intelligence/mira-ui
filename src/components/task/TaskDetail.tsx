@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { useProjectStore } from '@/stores/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { ExperimentDetail } from '../experiment/ExperimentDetail'
 import { KnowledgePanel } from '../experiment/KnowledgePanel'
@@ -22,7 +23,7 @@ function ModulePage({ children }: { children: ReactNode }) {
 }
 
 export function TaskDetail() {
-  const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore()
+  const { tasks, selectedTaskId, selectedExpId, activeStage } = useProjectStore(useShallow((s) => ({ tasks: s.tasks, selectedTaskId: s.selectedTaskId, selectedExpId: s.selectedExpId, activeStage: s.activeStage })))
   const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
 

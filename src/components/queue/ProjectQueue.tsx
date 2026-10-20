@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProjectStore } from '@/stores/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useChatStore } from '@/stores/chatStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -27,7 +28,7 @@ export function ProjectQueue() {
     deleteTask,
     duplicateTask,
     stats,
-  } = useProjectStore()
+  } = useProjectStore(useShallow((s) => ({ tasks: s.tasks, appMode: s.appMode, selectedTaskId: s.selectedTaskId, setAppMode: s.setAppMode, selectTask: s.selectTask, renameTask: s.renameTask, deleteTask: s.deleteTask, duplicateTask: s.duplicateTask, stats: s.stats })))
   const lang = useSettingsStore((s) => s.language)
   const pushSystemMessage = useUiStore((s) => s.pushSystemMessage)
 
@@ -46,7 +47,7 @@ export function ProjectQueue() {
       )
     }
   }
-  const { chats, activeChatId, workspaceKey, createChat, selectChat, renameChat, deleteChats } = useChatStore()
+  const { chats, activeChatId, workspaceKey, createChat, selectChat, renameChat, deleteChats } = useChatStore(useShallow((s) => ({ chats: s.chats, activeChatId: s.activeChatId, workspaceKey: s.workspaceKey, createChat: s.createChat, selectChat: s.selectChat, renameChat: s.renameChat, deleteChats: s.deleteChats })))
   const { folders, assignments, loaded: organizationLoaded, createFolder, renameFolder, deleteFolder, moveItem } = useOrganizationStore()
   const isChatActive = appMode === 'normal'
 

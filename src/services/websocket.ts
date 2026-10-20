@@ -27,8 +27,11 @@ function currentLanguage() {
   return useSettingsStore.getState().language
 }
 
-const MAX_RECONNECT_DELAY = 30_000
-const INITIAL_RECONNECT_DELAY = 1_000
+const MAX_RECONNECT_DELAY = 10_000
+const INITIAL_RECONNECT_DELAY = 500
+// Messages the user sends while the socket is (re)connecting are held and
+// flushed on open instead of being dropped on the floor.
+const MAX_QUEUED_MESSAGES = 32
 
 class WebSocketClient {
   private ws: WebSocket | null = null
@@ -38,6 +41,7 @@ class WebSocketClient {
   private statusHandlers = new Set<StatusHandler>()
   private shouldReconnect = true
   private lastDisconnectDetail: string | null = null
+  private outbox: string[] = []
 
   get connected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
@@ -58,6 +62,7 @@ class WebSocketClient {
   disconnect(): void {
     this.shouldReconnect = false
     this.lastDisconnectDetail = null
+    this.outbox = []
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -69,11 +74,24 @@ class WebSocketClient {
   }
 
   send(msg: WsMessage): void {
+    const requestId = msg.request_id || createUuid()
+    const frame = JSON.stringify({ ...msg, request_id: requestId })
     if (this.ws?.readyState === WebSocket.OPEN) {
-      const requestId = msg.request_id || createUuid()
       recordDiagnostic('websocket.sent', { operation: msg.type, request_id: requestId })
-      this.ws.send(JSON.stringify({ ...msg, request_id: requestId }))
+      this.ws.send(frame)
+      return
     }
+    if (!this.shouldReconnect) return
+    recordDiagnostic('websocket.queued', { operation: msg.type, request_id: requestId })
+    this.outbox.push(frame)
+    if (this.outbox.length > MAX_QUEUED_MESSAGES) this.outbox.shift()
+  }
+
+  private flushOutbox(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    const queued = this.outbox
+    this.outbox = []
+    for (const frame of queued) this.ws.send(frame)
   }
 
   onMessage(handler: MessageHandler): () => void {
@@ -100,6 +118,7 @@ class WebSocketClient {
       this.reconnectDelay = INITIAL_RECONNECT_DELAY
       this.lastDisconnectDetail = null
       this.statusHandlers.forEach((h) => h(true, null))
+      this.flushOutbox()
     }
 
     this.ws.onmessage = (event) => {
@@ -127,9 +146,11 @@ class WebSocketClient {
     // A rejected handshake looks like any other close; pick up a rotated
     // desktop or re-attached Remote-SSH token before trying again.
     void refreshManagedEngineTokens()
+    // Jitter keeps many windows/tabs from hammering the engine in lockstep.
+    const jitter = Math.random() * 0.3 * this.reconnectDelay
     this.reconnectTimer = setTimeout(() => {
       this._connect()
-    }, this.reconnectDelay)
+    }, this.reconnectDelay + jitter)
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY)
   }
 }

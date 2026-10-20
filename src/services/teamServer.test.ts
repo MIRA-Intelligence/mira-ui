@@ -163,7 +163,7 @@ describe('Team server traffic', () => {
   it('probes the engine through /api on Mira Server', async () => {
     await signIn()
     const probe = await probeEngineCompatibility(`${ORIGIN}/api`)
-    expect(server.requests.map((r) => r.path)).toEqual(expect.arrayContaining(['/api/health', '/api/version', '/api/config']))
+    expect(server.requests.map((r) => r.path)).toEqual(expect.arrayContaining(['/api/version', '/api/config']))
     expect(server.requests.some((r) => r.path === '/health' || r.path === '/version')).toBe(false)
     expect(probe.version).toBe('0.5.0')
   })

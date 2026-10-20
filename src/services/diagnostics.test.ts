@@ -35,7 +35,7 @@ describe('renderer runtime diagnostics', () => {
     const { probeEngineCompatibility } = await import('./engine')
     await probeEngineCompatibility('http://127.0.0.1:18790/api')
     expect(nativeFetch.mock.calls.map((call)=>String(call[0]))).toEqual([
-      'http://127.0.0.1:18790/health', 'http://127.0.0.1:18790/version'])
+      'http://127.0.0.1:18790/version', 'http://127.0.0.1:18790/api/config'])
     await fetch('http://127.0.0.1:18790/api/sessions')
     const args = nativeFetch.mock.calls.at(-1) as unknown as [string,RequestInit]
     expect(new Headers(args[1].headers).get('X-Mira-Request-Id')).toBeTruthy()

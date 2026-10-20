@@ -314,6 +314,11 @@ function deriveTaskStatus(rawStatus: unknown, result: ResultData): ProjectTask['
   return 'in_progress'
 }
 
+// Last plan+contract payload applied per project and the task object it
+// produced (see refreshPlan). Skipping is only safe while that exact task
+// object is still in the store.
+const _lastApplied = new Map<string, { fingerprint: string; task: ProjectTask }>()
+
 function applyPlanToTask(task: ProjectTask, raw: any): ProjectTask {
   const exps: any[] = Array.isArray(raw.experiments) ? raw.experiments : []
   const parsedExperiments = exps.map((e, i) => parseExperiment(e, i))
@@ -775,6 +780,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       fetchPlanContract(projectId),
     ])
     if (!plan && !contract) return
+    // Plans are polled every few seconds while a project runs. When the server
+    // payload is byte-identical to the last one applied, skip the store write:
+    // otherwise every poll replaces `tasks`/`stats` and re-renders every
+    // subscriber for nothing. An explicit enterPlan request still goes through.
+    const fingerprint = JSON.stringify([plan, contract])
+    const previous = _lastApplied.get(projectId)
+    const currentTask = get().tasks.find((t) => t.id === projectId)
+    if (
+      !options?.enterPlan
+      && previous
+      && previous.fingerprint === fingerprint
+      && currentTask !== undefined
+      && currentTask === previous.task
+    ) {
+      return
+    }
 
     const { tasks, selectedTaskId, contractsByTask } = get()
     const idx = tasks.findIndex((t) => t.id === projectId)
@@ -794,6 +815,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const updated = [...tasks]
     updated[idx] = applyPlanToTask(tasks[idx], plan)
+    _lastApplied.set(projectId, { fingerprint, task: updated[idx] })
 
     const isSelected = selectedTaskId === projectId
     const applied = updated[idx]

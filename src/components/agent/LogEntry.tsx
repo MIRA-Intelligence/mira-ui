@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { formatTime } from '@/lib/utils'
 import type { LogEntry as LogEntryType } from '@/types'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useSettingsStore, type Language } from '@/stores/settingsStore'
 import { t, type I18nKey } from '@/i18n'
@@ -35,63 +35,67 @@ function localizeError(entry: LogEntryType, lang: Language): string {
   return t(key, lang, { detail })
 }
 
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-        ul: ({ children }) => <ul className="mb-2 ml-5 list-disc">{children}</ul>,
-        ol: ({ children }) => <ol className="mb-2 ml-5 list-decimal">{children}</ol>,
-        li: ({ children }) => <li className="mb-1">{children}</li>,
-        a: ({ href, children }) => (
-          <a
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[var(--color-accent)] underline underline-offset-2"
-          >
-            {children}
-          </a>
-        ),
-        code: ({ className, children }) => {
-          const isBlock = className?.startsWith('language-')
-          if (isBlock) {
-            return (
-              <code className="block overflow-x-auto rounded-md bg-[var(--color-bg-tertiary)] px-3 py-2 font-mono text-xs">
-                {children}
-              </code>
-            )
-          }
-          return (
-            <code className="rounded bg-[var(--color-bg-tertiary)] px-1 py-0.5 font-mono text-xs">
-              {children}
-            </code>
-          )
-        },
-        pre: ({ children }) => <pre className="mb-2">{children}</pre>,
-        blockquote: ({ children }) => (
-          <blockquote className="mb-2 border-l-2 border-[var(--color-border)] pl-3 text-[var(--color-text-muted)]">
-            {children}
-          </blockquote>
-        ),
-        hr: () => <hr className="my-2 border-[var(--color-border)]" />,
-        table: ({ children }) => (
-          <div className="mb-2 overflow-x-auto">
-            <table className="min-w-full border-collapse text-xs">{children}</table>
-          </div>
-        ),
-        thead: ({ children }) => <thead className="border-b border-[var(--color-border)]">{children}</thead>,
-        th: ({ children }) => <th className="px-2 py-1 text-left font-medium text-[var(--color-text-muted)]">{children}</th>,
-        td: ({ children }) => <td className="px-2 py-1 align-top">{children}</td>,
-      }}
+// Hoisted so react-markdown sees stable plugin/component identities and the
+// parse is only redone when the markdown source itself changes.
+const REMARK_PLUGINS = [remarkGfm]
+const MARKDOWN_COMPONENTS: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 ml-5 list-disc">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 ml-5 list-decimal">{children}</ol>,
+  li: ({ children }) => <li className="mb-1">{children}</li>,
+  a: ({ href, children }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-[var(--color-accent)] underline underline-offset-2"
     >
+      {children}
+    </a>
+  ),
+  code: ({ className, children }) => {
+    const isBlock = className?.startsWith('language-')
+    if (isBlock) {
+      return (
+        <code className="block overflow-x-auto rounded-md bg-[var(--color-bg-tertiary)] px-3 py-2 font-mono text-xs">
+          {children}
+        </code>
+      )
+    }
+    return (
+      <code className="rounded bg-[var(--color-bg-tertiary)] px-1 py-0.5 font-mono text-xs">
+        {children}
+      </code>
+    )
+  },
+  pre: ({ children }) => <pre className="mb-2">{children}</pre>,
+  blockquote: ({ children }) => (
+    <blockquote className="mb-2 border-l-2 border-[var(--color-border)] pl-3 text-[var(--color-text-muted)]">
+      {children}
+    </blockquote>
+  ),
+  hr: () => <hr className="my-2 border-[var(--color-border)]" />,
+  table: ({ children }) => (
+    <div className="mb-2 overflow-x-auto">
+      <table className="min-w-full border-collapse text-xs">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="border-b border-[var(--color-border)]">{children}</thead>,
+  th: ({ children }) => <th className="px-2 py-1 text-left font-medium text-[var(--color-text-muted)]">{children}</th>,
+  td: ({ children }) => <td className="px-2 py-1 align-top">{children}</td>,
+}
+
+const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
       {content}
     </ReactMarkdown>
   )
-}
+})
 
-export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
+// Memoised: while a reply streams only the live entry's reference changes, so
+// every earlier message skips re-rendering (and re-parsing its markdown).
+export const LogEntry = memo(function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
   const lang = useSettingsStore((s) => s.language)
   const [collapsed, setCollapsed] = useState(entry.collapsed ?? defaultCollapsed)
 
@@ -169,4 +173,4 @@ export function LogEntry({ entry, defaultCollapsed = false }: LogEntryProps) {
       </div>
     </div>
   )
-}
+})

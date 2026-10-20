@@ -116,20 +116,16 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
   // Mira Server proxies only /api/*; the engine serves health and version there too.
   const probeBase = teamServer ? `${base}/api` : base
   try {
-    const healthResp = await fetch(`${probeBase}/health`)
-    if (!healthResp.ok) {
-      const teamMessage = teamServer ? teamServerHealthMessage(healthResp.status, teamOrigin) : null
-      if (teamMessage) return { status: 'unreachable', message: teamMessage, version: null, uptimeSeconds: null }
-      return {
-        status: 'unreachable',
-        message: t('engineHealthCheckFailed', lang, { status: healthResp.status }),
-        version: null,
-        uptimeSeconds: null,
-      }
-    }
-
-    const versionResp = await fetch(`${probeBase}/version`)
+    // One round-trip instead of three: /version answers the health question
+    // as well, and the runtime config is fetched alongside it. The config
+    // response is only consulted once the version/contract checks pass.
+    const [versionResp, configResp] = await Promise.all([
+      fetch(`${probeBase}/version`),
+      fetch(`${base}/api/config`),
+    ])
     if (!versionResp.ok) {
+      const teamMessage = teamServer ? teamServerHealthMessage(versionResp.status, teamOrigin) : null
+      if (teamMessage) return { status: 'unreachable', message: teamMessage, version: null, uptimeSeconds: null }
       return {
         status: 'unreachable',
         message: t('engineVersionCheckFailed', lang, { status: versionResp.status }),
@@ -176,7 +172,6 @@ export async function probeEngineCompatibility(apiUrl: string): Promise<EnginePr
       }
     }
 
-    const configResp = await fetch(`${base}/api/config`)
     if (configResp.status === 401) {
       // Reachable and compatible, but our gateway token is missing or stale.
       return {

@@ -33,6 +33,8 @@ interface AgentState {
   addLog: (projectId: string, entry: LogEntry) => void
   hydrateLogs: (projectId: string, entries: LogEntry[]) => void
   handleWsMessage: (msg: WsResponse) => void
+  /** Apply any buffered stream deltas immediately (normally flushed per frame). */
+  flushStreamDeltas: () => void
   markSessionPending: (sessionId: string) => void
   markSessionIdle: (sessionId: string) => void
   markSessionStopping: (sessionId: string) => void
@@ -87,6 +89,61 @@ function resolveProjectRefreshId(msg: WsResponse, sessionId: string): string | n
 }
 
 let logIdCounter = 0
+
+// Token deltas arrive many times per second. Applying each one as its own
+// store update re-renders the conversation once per token, so deltas are
+// coalesced per session and flushed once per animation frame. The first
+// delta of a reply still applies synchronously so the bubble appears (and the
+// thinking dots disappear) the instant the model starts talking.
+const STREAM_FLUSH_FALLBACK_MS = 32
+const _pendingDeltas = new Map<string, string>()
+let _flushHandle: { kind: 'raf'; id: number } | { kind: 'timeout'; id: ReturnType<typeof setTimeout> } | null = null
+
+function appendStreamDelta(list: LogEntry[], content: string): LogEntry[] {
+  const last = list[list.length - 1]
+  if (last && last.type === 'response' && last.metadata?._streaming) {
+    const next = list.slice()
+    next[next.length - 1] = { ...last, content: last.content + content }
+    return next
+  }
+  return [
+    ...list,
+    {
+      id: `log-${++logIdCounter}`,
+      timestamp: new Date().toISOString(),
+      content,
+      type: 'response',
+      metadata: { _streaming: true },
+    },
+  ]
+}
+
+function hasLiveStreamEntry(list: LogEntry[] | undefined): boolean {
+  const last = list?.[list.length - 1]
+  return Boolean(last && last.type === 'response' && last.metadata?._streaming)
+}
+
+function cancelScheduledFlush() {
+  if (!_flushHandle) return
+  if (_flushHandle.kind === 'raf') cancelAnimationFrame(_flushHandle.id)
+  else clearTimeout(_flushHandle.id)
+  _flushHandle = null
+}
+
+function scheduleStreamFlush(flush: () => void) {
+  if (_flushHandle) return
+  if (typeof requestAnimationFrame === 'function') {
+    _flushHandle = { kind: 'raf', id: requestAnimationFrame(() => { _flushHandle = null; flush() }) }
+  } else {
+    _flushHandle = { kind: 'timeout', id: setTimeout(() => { _flushHandle = null; flush() }, STREAM_FLUSH_FALLBACK_MS) }
+  }
+}
+
+function discardPendingDeltas(sessionId?: string) {
+  if (sessionId === undefined) _pendingDeltas.clear()
+  else _pendingDeltas.delete(sessionId)
+  if (_pendingDeltas.size === 0) cancelScheduledFlush()
+}
 
 const PLAN_POLL_INTERVAL = 3000
 const PLAN_RESPONSE_REFRESH_DELAYS = [800, 2200] as const
@@ -205,6 +262,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   hydrateLogs: (projectId, entries) =>
     set((state) => {
+      if (_pendingDeltas.has(projectId)) {
+        state = { ...state, logsByProject: { ...state.logsByProject, [projectId]: appendStreamDelta(state.logsByProject[projectId] ?? [], _pendingDeltas.get(projectId) ?? '') } }
+        discardPendingDeltas(projectId)
+      }
       if (entries.length === 0) {
         return state
       }
@@ -254,6 +315,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }),
 
   handleWsMessage: (msg) => {
+    // Anything that is not a delta (stream_end, response, stop_ack, ...) must
+    // observe every token that preceded it.
+    if (msg.type !== 'stream_delta' && _pendingDeltas.size > 0) get().flushStreamDeltas()
     const sessionId = msg.session_id ?? '_unknown'
     if (msg.type === 'token_usage') {
       if (msg.session_id) useTokenUsageStore.getState().ingest(msg.session_id, msg.metadata?.token_usage)
@@ -330,29 +394,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // streaming, so this entry is the canonical message until reload.
     if (msg.type === 'stream_delta') {
       if (!msg.content) return
-      set((state) => {
-        const list = state.logsByProject[logSessionId] ?? []
-        const last = list[list.length - 1]
-        let nextList: LogEntry[]
-        if (last && last.type === 'response' && last.metadata?._streaming) {
-          nextList = [...list.slice(0, -1), { ...last, content: last.content + msg.content }]
-        } else {
-          nextList = [
-            ...list,
-            {
-              id: `log-${++logIdCounter}`,
-              timestamp: new Date().toISOString(),
-              content: msg.content,
-              type: 'response',
-              metadata: { _streaming: true },
-            },
-          ]
-        }
-        return {
-          logsByProject: { ...state.logsByProject, [logSessionId]: nextList },
+      if (!_pendingDeltas.has(logSessionId) && !hasLiveStreamEntry(get().logsByProject[logSessionId])) {
+        // First token of a reply: show it right away.
+        set((state) => ({
+          logsByProject: {
+            ...state.logsByProject,
+            [logSessionId]: appendStreamDelta(state.logsByProject[logSessionId] ?? [], msg.content),
+          },
           streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, true),
-        }
-      })
+        }))
+        return
+      }
+      _pendingDeltas.set(logSessionId, (_pendingDeltas.get(logSessionId) ?? '') + msg.content)
+      scheduleStreamFlush(get().flushStreamDeltas)
       return
     }
 
@@ -522,8 +576,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return { connected }
     }),
 
+  flushStreamDeltas: () => {
+    cancelScheduledFlush()
+    if (_pendingDeltas.size === 0) return
+    const pending = Array.from(_pendingDeltas.entries())
+    _pendingDeltas.clear()
+    set((state) => {
+      const logsByProject = { ...state.logsByProject }
+      let streamingBySession = state.streamingBySession
+      for (const [id, content] of pending) {
+        logsByProject[id] = appendStreamDelta(logsByProject[id] ?? [], content)
+        streamingBySession = setSessionStreaming(streamingBySession, id, true)
+      }
+      return { logsByProject, streamingBySession }
+    })
+  },
+
   clearLogs: (projectId) =>
     set((state) => {
+      discardPendingDeltas(projectId)
       stopPlanPolling(projectId)
       clearResponseRefreshTimers(projectId)
       const updated = { ...state.logsByProject }
@@ -541,6 +612,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }),
 
   resetWorkspaceState: () => {
+    discardPendingDeltas()
     useSkillHistoryStore.getState().reset()
     useTokenUsageStore.getState().reset()
     for (const sessionId of Object.keys(_pollTimers)) {

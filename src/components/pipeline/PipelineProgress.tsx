@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from 'react'
 
 import { useProjectStore } from '@/stores/projectStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -66,7 +67,7 @@ export function PipelineProgress() {
     agentProfile,
     setActiveStage,
     setAgentProfile,
-  } = useProjectStore()
+  } = useProjectStore(useShallow((s) => ({ tasks: s.tasks, appMode: s.appMode, selectedTaskId: s.selectedTaskId, activeStage: s.activeStage, agentProfile: s.agentProfile, setActiveStage: s.setActiveStage, setAgentProfile: s.setAgentProfile })))
   const isStreaming = useAgentStore((s) => (selectedTaskId ? (s.streamingBySession[selectedTaskId] ?? false) : false))
   const lang = useSettingsStore((s) => s.language)
   const openSettings = useSettingsStore((s) => s.openSettings)

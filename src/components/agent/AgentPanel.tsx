@@ -385,6 +385,9 @@ const TURN_END_NOTICES: Partial<Record<TurnStopReason, I18nKey>> = {
 }
 // Endings the user can resume by just asking Mira to carry on.
 const CONTINUABLE: ReadonlySet<TurnStopReason> = new Set(['max_iterations', 'max_tokens'])
+const EMPTY_LOGS: AgentLogEntry[] = []
+// How close to the bottom (px) the user must be for auto-scroll to keep following.
+const SCROLL_STICK_THRESHOLD_PX = 48
 
 /** Explains a turn that ended before the task did; other endings speak for themselves. */
 function TurnEndNotice({ reason, lang, onContinue }: {
@@ -411,7 +414,11 @@ function TurnEndNotice({ reason, lang, onContinue }: {
 }
 
 export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
-  const { connected, logsByProject, hydrateLogs, streamingBySession, stoppingBySession, lastTurnEndBySession } = useAgentStore()
+  // Select narrowly: the agent store updates on every streamed token of every
+  // session, and subscribing to the whole store re-rendered this panel for all
+  // of them (including sessions not shown here).
+  const connected = useAgentStore((s) => s.connected)
+  const hydrateLogs = useAgentStore((s) => s.hydrateLogs)
   const showProgressMessages = useSettingsStore((s) => s.showProgressMessages)
   const showToolCallHistory = useSettingsStore((s) => s.showToolCallHistory ?? false)
   const lang = useSettingsStore((s) => s.language)
@@ -450,12 +457,12 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   )
   const composerSessionId = moduleConversationBlocked ? null : sessionId
 
-  const logs = conversationId ? (logsByProject[conversationId] ?? []) : []
+  const logs = useAgentStore((s) => (conversationId ? s.logsByProject[conversationId] : undefined)) ?? EMPTY_LOGS
   // Streaming is tracked per session so a different session's activity never
   // lights up this panel (e.g. a freshly created chat).
-  const isStreaming = Boolean(conversationId && streamingBySession[conversationId])
-  const isStopping = Boolean(sessionId && stoppingBySession[sessionId])
-  const lastTurnEnd = conversationId ? lastTurnEndBySession[conversationId] : undefined
+  const isStreaming = useAgentStore((s) => Boolean(conversationId && s.streamingBySession[conversationId]))
+  const isStopping = useAgentStore((s) => Boolean(sessionId && s.stoppingBySession[sessionId]))
+  const lastTurnEnd = useAgentStore((s) => (conversationId ? s.lastTurnEndBySession[conversationId] : undefined))
   const skillPlugins = useSkillPluginsStore((s) => s.plugins)
   const loadSkillPlugins = useSkillPluginsStore((s) => s.load)
   const activeTurnIds = useRef<Record<string, string>>({})
@@ -529,11 +536,25 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
     return items
   }, [logs, showToolCallHistory])
 
+  // Follow the conversation while it grows. Deltas extend the last entry
+  // without changing `logs.length`, so key on the tail's content length too;
+  // otherwise the reply streams in below the fold and looks stalled. Only
+  // stick to the bottom when the user has not scrolled up to read.
+  const tailLength = lastEntry?.content.length ?? 0
+  const stickToBottom = useRef(true)
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_STICK_THRESHOLD_PX
+  }
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [logs.length, showThinking])
+    // A new message or a session switch always re-anchors to the bottom.
+    stickToBottom.current = true
+  }, [logs.length, conversationId])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
+  }, [logs.length, tailLength, showThinking, conversationId])
 
   useEffect(() => {
     setCollapsedProgressGroups({})
@@ -575,9 +596,9 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
       type: 'response',
       metadata: { _user: true },
     })
-    if (connected) {
-      useAgentStore.getState().markSessionPending(conversationId ?? sessionId)
-    }
+    // Show the thinking indicator even while the socket is reconnecting: the
+    // client queues the frame and delivers it as soon as the link is back.
+    useAgentStore.getState().markSessionPending(conversationId ?? sessionId)
 
     const { mode: currentMode, agentProfile: currentAgentProfile } = useProjectStore.getState()
     const turnId = createClientId('turn')
@@ -721,7 +742,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
       )}
 
       {/* Message stream */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto min-h-0">
         {renderItems.map((item) => {
           if (item.kind === 'activity_group') {
             const collapsed = collapsedProgressGroups[item.id] ?? !showProgressMessages
