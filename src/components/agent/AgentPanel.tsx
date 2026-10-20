@@ -370,7 +370,7 @@ export function AgentPanelActions() {
         </div>
       )}
       {sessionId && appMode === 'project' && (
-        <span className="ml-auto text-[10px] font-mono text-[var(--color-text-muted)]">
+        <span className="ml-auto min-w-0 truncate text-[10px] font-mono text-[var(--color-text-muted)]">
           {sessionId}
         </span>
       )}

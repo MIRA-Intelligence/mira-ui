@@ -63,7 +63,7 @@ export function AgentWorkspacePanel() {
         </div>
 
         {workbenchTab === 'agent' && (
-          <div className="flex flex-1 items-center justify-end gap-2 min-w-0 pb-1 text-[10px] text-[var(--color-text-muted)] font-mono truncate">
+          <div className="flex flex-1 items-center justify-end gap-2 min-w-0 pb-1 text-[10px] text-[var(--color-text-muted)] font-mono">
             <AgentPanelActions />
           </div>
         )}
