@@ -410,6 +410,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return
     }
 
+    // The engine restarted generation (provider retry or model fallback):
+    // withdraw the partial reply so the retry does not append to it. The
+    // session stays busy, so the thinking indicator comes back.
+    if (msg.type === 'stream_reset') {
+      discardPendingDeltas(logSessionId)
+      set((state) => {
+        const list = state.logsByProject[logSessionId]
+        if (!list || !hasLiveStreamEntry(list)) return state
+        return {
+          logsByProject: { ...state.logsByProject, [logSessionId]: list.slice(0, -1) },
+          streamingBySession: setSessionStreaming(state.streamingBySession, logSessionId, true),
+        }
+      })
+      return
+    }
+
     if (msg.type === 'stream_end') {
       set((state) => {
         const list = state.logsByProject[logSessionId]

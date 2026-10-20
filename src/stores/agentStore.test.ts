@@ -224,6 +224,20 @@ describe('agentStore token streaming', () => {
     expect(useAgentStore.getState().isSessionStreaming('PRJ-S')).toBe(true)
   })
 
+  it('withdraws the partial reply on stream_reset and keeps the session busy', () => {
+    const store = useAgentStore.getState()
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'half-' })
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'baked' })
+    store.handleWsMessage({ type: 'stream_reset', session_id: 'PRJ-S', content: '' })
+    expect(useAgentStore.getState().logsByProject['PRJ-S']).toEqual([])
+    expect(useAgentStore.getState().isSessionStreaming('PRJ-S')).toBe(true)
+
+    store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'whole reply' })
+    store.handleWsMessage({ type: 'stream_end', session_id: 'PRJ-S', content: '' })
+    const logs = useAgentStore.getState().logsByProject['PRJ-S']
+    expect(logs.map((e) => e.content)).toEqual(['whole reply'])
+  })
+
   it('flushes buffered deltas before a non-delta event for the session', () => {
     const store = useAgentStore.getState()
     store.handleWsMessage({ type: 'stream_delta', session_id: 'PRJ-S', content: 'a' })
