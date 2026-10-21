@@ -205,8 +205,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return { chats, activeChatId: activeDeleted ? chats[0]?.id ?? null : state.activeChatId }
       })
       for (const id of deleted) await clearChatLogs(id)
+      // With no chats left, Quick Chat shows its home page rather than leaving the mode.
       if (get().workspaceKey === workspace && activeDeleted && get().chats.length === 0 && useProjectStore.getState().appMode === 'normal') {
-        useProjectStore.getState().setAppMode('project')
+        useUiStore.getState().focusQuickChatWorkbench()
       }
     }
     return { deleted, failed }
@@ -227,7 +228,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().selectChat(remaining[0].id)
     } else {
       set({ activeChatId: null })
-      useProjectStore.getState().setAppMode('project')
+      useUiStore.getState().focusQuickChatWorkbench()
     }
   },
 }))

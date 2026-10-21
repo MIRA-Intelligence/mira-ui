@@ -118,6 +118,15 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
     expanded.forEach((path) => void loadSubfolder(path))
   }
 
+  // Files added outside the explorer (e.g. the Quick Chat home page's upload).
+  const chatFilesRevision = useUiStore((s) => s.chatFilesRevision)
+  const seenRevision = useRef(chatFilesRevision)
+  useEffect(() => {
+    if (seenRevision.current === chatFilesRevision) return
+    seenRevision.current = chatFilesRevision
+    void load(true)
+  }, [chatFilesRevision, load])
+
   const toggleFolder = (path: string) => {
     const next = new Set(expanded)
     if (next.has(path)) {
@@ -146,7 +155,8 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
         setExpanded((current) => new Set([...current, uploadDir]))
         void loadSubfolder(uploadDir)
       }
-      refresh()
+      // Re-lists this folder and anything else showing the chat's files (the home page).
+      useUiStore.getState().bumpChatFiles()
     } catch (err: unknown) {
       pushSystemMessage(err instanceof Error ? err.message : t('uploadFailed', lang), { severity: 'error' })
     } finally {

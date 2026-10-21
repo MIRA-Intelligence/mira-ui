@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./TopBar', () => ({ TopBar: () => <div>top-bar</div> }))
@@ -86,15 +86,61 @@ describe('AppLayout project surfaces', () => {
     expect(screen.getByText(`${folder}/a.txt`)).toBeInTheDocument()
   })
 
-  it('can reopen the center after a new chat focuses the workbench', () => {
-    useProjectStore.setState({ appMode: 'normal', tasks: [] })
-    useUiStore.getState().focusQuickChatWorkbench()
-    render(<AppLayout />)
-    const toggle = screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
-    expect(useUiStore.getState().chatCenterCollapsed).toBe(true)
-    expect(screen.getByText('agent-panel')).toBeInTheDocument()
-    fireEvent.click(toggle)
-    expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
+  describe('Quick Chat home page', () => {
+    const homeVisible = () => !screen.getByText('Quick chat').closest('[hidden]')
+    const toggle = () => screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
+
+    beforeEach(() => {
+      vi.spyOn(api, 'fetchChatWorkdir').mockResolvedValue(null)
+      useProjectStore.setState({ appMode: 'normal', tasks: [] })
+      useChatStore.setState({ activeChatId: null, chats: [] })
+      useUiStore.setState({ chatCenterAuto: true, chatCenterCollapsed: false })
+    })
+
+    it('shows the home page with no chat selected and for a new chat', () => {
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(true)
+
+      act(() => { useChatStore.getState().createChat() })
+      expect(homeVisible()).toBe(true)
+      expect(screen.getByText('agent-panel')).toBeInTheDocument()
+    })
+
+    it('steps aside once the chat has its first message', () => {
+      const id = useChatStore.getState().createChat()
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(true)
+      act(() => useChatStore.getState().touchChat(id, 'Summarise this scan'))
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('stays collapsed when opening a chat that has begun', () => {
+      useChatStore.setState({ chats: [{ id: 'old', title: 'Earlier question', createdAt: 1, updatedAt: 1 }] })
+      act(() => useChatStore.getState().selectChat('old'))
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('follows a manual toggle until another chat is opened', () => {
+      useChatStore.setState({ chats: [
+        { id: 'old', title: 'Earlier question', createdAt: 1, updatedAt: 1 },
+        { id: 'other', title: 'Another', createdAt: 1, updatedAt: 2 },
+      ] })
+      act(() => useChatStore.getState().selectChat('old'))
+      render(<AppLayout />)
+      fireEvent.click(toggle())
+      expect(homeVisible()).toBe(true)
+
+      act(() => useChatStore.getState().selectChat('other'))
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('can be collapsed by hand on a new chat', () => {
+      act(() => { useChatStore.getState().createChat() })
+      render(<AppLayout />)
+      fireEvent.click(toggle())
+      expect(homeVisible()).toBe(false)
+    })
   })
 
   it('resizes the Quick Chat workbench by dragging the splitter', () => {

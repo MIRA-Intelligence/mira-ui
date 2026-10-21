@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useChatStore } from './chatStore'
 import { useProjectStore } from './projectStore'
+import { useUiStore } from './uiStore'
 import { installLocalStorage } from '@/test/localStorage'
 import { deleteOrganizationChat } from '@/services/api'
 
@@ -88,12 +89,14 @@ describe('chatStore', () => {
     expect(useChatStore.getState().activeChatId).toBe(first)
   })
 
-  it('deleteChat switches to project mode when no chats remain', () => {
+  it('deleteChat stays in Quick Chat on its home page when no chats remain', () => {
     useChatStore.getState().loadForWorkspace('ws7')
     const only = useChatStore.getState().createChat()
+    useUiStore.setState({ chatCenterAuto: false })
     useChatStore.getState().deleteChat(only)
     expect(useChatStore.getState().activeChatId).toBeNull()
-    expect(useProjectStore.getState().appMode).toBe('project')
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useUiStore.getState().chatCenterAuto).toBe(true)
   })
 
   it('bulk deletion keeps failed chats and removes only server-confirmed entries', async () => {
