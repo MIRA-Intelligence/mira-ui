@@ -3,7 +3,7 @@ import miraLogo from '@/assets/mira-logo.png'
 import { ArtifactPreview } from '@/components/artifacts'
 import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
-import { getArtifactDownloadUrl, getProjectArtifactUrl } from '@/services/api'
+import { getArtifactDownloadUrl, getExplorerFileUrl } from '@/services/api'
 import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -70,7 +70,7 @@ export function ChatMainPlaceholder() {
           <button
             type="button"
             onClick={() => {
-              const url = getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)
+              const url = getExplorerFileUrl(previewFile)
               const link = document.createElement('a')
               link.href = getArtifactDownloadUrl(url)
               link.download = previewFile.name
@@ -95,7 +95,7 @@ export function ChatMainPlaceholder() {
         <div className="flex-1 overflow-auto p-4 min-h-0">
           <ArtifactPreview
             path={previewFile.relativePath}
-            url={getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)}
+            url={getExplorerFileUrl(previewFile)}
             enabled
             label={previewFile.name}
             bodyOnly={isPreviewableInline(detectArtifactKind(previewFile.relativePath))}

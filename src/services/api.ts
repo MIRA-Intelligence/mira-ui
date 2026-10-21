@@ -12,6 +12,7 @@ import type {
   SkillPluginTargetType,
   TaskPlanContract,
   TaskPlan,
+  ProjectFileEntry,
   ProjectFileInfo,
 } from '@/types'
 
@@ -653,6 +654,72 @@ export function getProjectArtifactUrl(sessionId: string, artifactPath: string): 
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
   return withEngineAuth(`${getApiUrl()}/projects/${sid}/artifacts?path=${path}`)
+}
+
+export function getFsFileUrl(path: string): string {
+  return withEngineAuth(`${getApiUrl()}/fs/file?path=${encodeURIComponent(path)}`)
+}
+
+/** Preview/open URL for an explorer row, whether it belongs to a project or a browsed folder. */
+export function getExplorerFileUrl(file: ProjectFileEntry): string {
+  return file.absolutePath
+    ? getFsFileUrl(file.absolutePath)
+    : getProjectArtifactUrl(file.projectId, file.relativePath)
+}
+
+export interface ChatWorkdir {
+  path: string
+  exists: boolean
+  home: string
+}
+
+/** The folder a Quick Chat works in; it may not exist before the chat's first turn. */
+export async function fetchChatWorkdir(chatId: string): Promise<ChatWorkdir | null> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/workdir`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (typeof data?.path !== 'string' || !data.path) return null
+    return { path: data.path, exists: data.exists === true, home: typeof data.home === 'string' ? data.home : '' }
+  } catch {
+    return null
+  }
+}
+
+export interface DirectoryListing {
+  path: string
+  /** Null at the top of what the engine lets the explorer browse (the user's home). */
+  parent: string | null
+  home: string
+  entries: ProjectFileInfo[]
+  truncated: boolean
+}
+
+export type FetchDirectoryResult =
+  | { ok: true; listing: DirectoryListing }
+  | { ok: false; status: number; error?: string }
+
+/** One level of a folder on the engine's machine. Entry paths are absolute. */
+export async function fetchDirectory(path: string): Promise<FetchDirectoryResult> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/fs/list?path=${encodeURIComponent(path)}`)
+    const data = await resp.json().catch(() => null)
+    if (!resp.ok) {
+      return { ok: false, status: resp.status, error: typeof data?.error === 'string' ? data.error : undefined }
+    }
+    return {
+      ok: true,
+      listing: {
+        path: typeof data?.path === 'string' ? data.path : path,
+        parent: typeof data?.parent === 'string' ? data.parent : null,
+        home: typeof data?.home === 'string' ? data.home : '',
+        entries: normalizeProjectFileRows(data?.entries),
+        truncated: data?.truncated === true,
+      },
+    }
+  } catch (err) {
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : undefined }
+  }
 }
 
 export function getArtifactDownloadUrl(url: string): string {

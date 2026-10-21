@@ -22,6 +22,7 @@ vi.mock('@/hooks/useWorkflowWebSocket', () => ({ useWorkflowWebSocket: vi.fn() }
 vi.mock('@/hooks/useUpdateCheck', () => ({ useUpdateCheck: vi.fn() }))
 vi.mock('@/hooks/useTurnSync', () => ({ useTurnSync: vi.fn() }))
 
+import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -57,33 +58,32 @@ describe('AppLayout project surfaces', () => {
     expect(screen.getByText('agent-panel')).toBeInTheDocument()
   })
 
-  it('opens a workspace file in the Quick Chat center from the workbench', async () => {
-    useProjectStore.setState({
-      appMode: 'normal',
-      tasks: [{
-        id: 'PRJ-A', label: 'Project One', title: '', status: 'pending',
-        experiments: [], knowledge: [], research: { references: [], notes: [] }, result: {}, startedAt: '',
-      }],
-      projectsLoaded: true,
+  it('opens a chat folder file in the Quick Chat center from the workbench', async () => {
+    useProjectStore.setState({ appMode: 'normal', tasks: [], projectsLoaded: true })
+    useChatStore.setState({ activeChatId: 'chat-1' })
+    const folder = '/home/u/.mira/workspace/chats/chat-1'
+    vi.spyOn(api, 'fetchChatWorkdir').mockResolvedValue({ path: folder, exists: true, home: '/home/u' })
+    vi.spyOn(api, 'fetchDirectory').mockResolvedValue({
+      ok: true,
+      listing: {
+        path: folder,
+        parent: '/home/u/.mira/workspace/chats',
+        home: '/home/u',
+        truncated: false,
+        entries: [{ name: 'a.txt', path: `${folder}/a.txt`, size: 3, mtime: 1, is_dir: false }],
+      },
     })
-    vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([
-      { name: 'a.txt', path: 'data/a.txt', size: 3, mtime: 1, is_dir: false },
-    ])
     render(<AppLayout />)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
     const explorer = within(screen.getByPlaceholderText('Filter files…').closest('.flex-col') as HTMLElement)
-    fireEvent.click(await explorer.findByText('Project One'))
-    fireEvent.click(screen.getByText('data'))
-    fireEvent.click(screen.getByText('a.txt'))
-    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({
-      projectId: 'PRJ-A', relativePath: 'data/a.txt',
-    })
-    expect(screen.getByText('PRJ-A/data/a.txt')).toBeInTheDocument()
+    fireEvent.click(await explorer.findByText('a.txt'))
+    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({ absolutePath: `${folder}/a.txt` })
+    expect(screen.getByText(`${folder}/a.txt`)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Agent Chat/i }))
     expect(screen.getByText('agent-panel')).toBeInTheDocument()
-    expect(screen.getByText('PRJ-A/data/a.txt')).toBeInTheDocument()
+    expect(screen.getByText(`${folder}/a.txt`)).toBeInTheDocument()
   })
 
   it('can reopen the center after a new chat focuses the workbench', () => {

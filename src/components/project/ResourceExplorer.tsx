@@ -5,8 +5,8 @@ import {
   getArtifactDownloadUrl,
   uploadProjectFiles,
 } from '@/services/api'
-import { fetchAllProjectFiles, toProjectScopedEntries } from '@/services/projectFiles'
-import type { FileExplorerScope, ProjectFileEntry } from '@/types'
+import { toProjectScopedEntries } from '@/services/projectFiles'
+import type { ProjectFileEntry } from '@/types'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
@@ -14,6 +14,8 @@ import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 import { ArtifactPreview } from '@/components/artifacts'
 import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
+import { ChatFolderExplorer } from './ChatFolderExplorer'
+import { getFileIcon } from './fileIcons'
 
 interface FileTreeNode {
   name: string
@@ -24,24 +26,22 @@ interface FileTreeNode {
   children: Record<string, FileTreeNode>
 }
 
-function resolveScope(appMode: 'normal' | 'project'): FileExplorerScope {
-  return appMode === 'project' ? 'project' : 'all'
-}
-
+/** Project mode shows the selected project; Quick Chat browses the selected chat's folder. */
 export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
   const appMode = useProjectStore((s) => s.appMode)
+  return appMode === 'project'
+    ? <ProjectFileExplorer embedded={embedded} />
+    : <ChatFolderExplorer embedded={embedded} />
+}
+
+function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
   const selectedTaskId = useProjectStore((s) => s.selectedTaskId)
   const tasks = useProjectStore((s) => s.tasks)
   const projectsLoaded = useProjectStore((s) => s.projectsLoaded)
   const lang = useSettingsStore((s) => s.language)
   const pushSystemMessage = useUiStore((s) => s.pushSystemMessage)
-  const chatCenterPreviewFile = useUiStore((s) => s.chatCenterPreviewFile)
-  const setChatCenterPreviewFile = useUiStore((s) => s.setChatCenterPreviewFile)
 
-  const scope = resolveScope(appMode)
-  const isProjectMode = appMode === 'project'
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
-  const taskIdsKey = tasks.map((t) => t.id).join(',')
 
   const [files, setFiles] = useState<ProjectFileEntry[]>([])
   const [loading, setLoading] = useState(false)
@@ -57,9 +57,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
   const uploadInputId = useId()
   const dataInputId = `${uploadInputId}-data`
   const referencesInputId = `${uploadInputId}-references`
-  // Latest tasks without refetching every project whenever a task's status changes.
-  const tasksRef = useRef(tasks)
-  tasksRef.current = tasks
   // Only the newest request may update the list, so a slow response for the
   // previous project cannot overwrite the current one.
   const loadSeqRef = useRef(0)
@@ -67,12 +64,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
   const dataInputRef = useRef<HTMLInputElement>(null)
   const referencesInputRef = useRef<HTMLInputElement>(null)
 
-  // Uploads go to the project being viewed; Quick Chat browses every project.
-  const resolveUploadProjectId = useCallback((): string | null => {
-    return isProjectMode ? selectedTaskId : null
-  }, [isProjectMode, selectedTaskId])
-
-  const canUpload = Boolean(resolveUploadProjectId())
+  const canUpload = Boolean(selectedTaskId)
 
   const loadFiles = useCallback(async () => {
     const msgLang = useSettingsStore.getState().language
@@ -82,32 +74,26 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
     setLoadError(null)
     setTruncated(false)
     try {
-      if (scope === 'project') {
-        if (!selectedTaskId) {
-          setFiles([])
-          return
-        }
-        const result = await fetchProjectFilesResult(selectedTaskId)
-        if (!isCurrent()) return
-        if (!result.ok) {
-          setFiles([])
-          setLoadError(
-            result.status === 405
-              ? t('filesListNotSupported', msgLang)
-              : t('filesLoadFailed', msgLang, {
-                  status: result.status || '—',
-                  detail: result.error ?? '',
-                }),
-          )
-          return
-        }
-        setFiles(toProjectScopedEntries(selectedTaskId, result.files))
-        setTruncated(result.truncated)
+      if (!selectedTaskId) {
+        setFiles([])
         return
       }
-      const data = await fetchAllProjectFiles(tasksRef.current.map((t) => ({ id: t.id, label: t.label })))
+      const result = await fetchProjectFilesResult(selectedTaskId)
       if (!isCurrent()) return
-      setFiles(data)
+      if (!result.ok) {
+        setFiles([])
+        setLoadError(
+          result.status === 405
+            ? t('filesListNotSupported', msgLang)
+            : t('filesLoadFailed', msgLang, {
+                status: result.status || '—',
+                detail: result.error ?? '',
+              }),
+        )
+        return
+      }
+      setFiles(toProjectScopedEntries(selectedTaskId, result.files))
+      setTruncated(result.truncated)
     } catch (err) {
       if (!isCurrent()) return
       console.error('Failed to load files:', err)
@@ -116,23 +102,19 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
     } finally {
       if (isCurrent()) setLoading(false)
     }
-    // taskIdsKey stands in for tasks: refetch when projects are added or
-    // removed, not on every status update.
-  }, [scope, selectedTaskId, taskIdsKey])
+  }, [selectedTaskId])
 
   useEffect(() => {
     void loadFiles()
   }, [loadFiles, projectsLoaded])
 
-  // Clear the selection only when the browsed context changes, not on every reload.
+  // Clear the selection only when the browsed project changes, not on every reload.
   useEffect(() => {
     setSelectedFile(null)
     setPreviewFile(null)
-    setChatCenterPreviewFile(null)
-  }, [scope, selectedTaskId, setChatCenterPreviewFile])
+  }, [selectedTaskId])
 
-  const showProjectEmpty = scope === 'project' && !selectedTaskId
-  const showWorkspaceEmpty = scope === 'all' && tasks.length === 0 && projectsLoaded
+  const showProjectEmpty = !selectedTaskId
 
   const buildTree = (fileList: ProjectFileEntry[]): FileTreeNode => {
     const root: FileTreeNode = {
@@ -151,7 +133,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         const isLast = index === parts.length - 1
         if (!current.children[part]) {
           current.children[part] = {
-            name: scope === 'all' && index === 0 ? (file.projectLabel || part) : part,
+            name: part,
             path: parts.slice(0, index + 1).join('/'),
             isDir: isLast ? file.is_dir : true,
             size: isLast ? file.size : 0,
@@ -180,7 +162,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
     e.target.value = ''
     if (selectedFiles.length === 0) return
 
-    const pid = resolveUploadProjectId()
+    const pid = selectedTaskId
     if (!pid) {
       showUploadBlocked()
       return
@@ -242,7 +224,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
     }
 
     const entry: ProjectFileEntry | null = fileInfo ?? null
-    const activeFilePath = isProjectMode ? selectedFile?.path : chatCenterPreviewFile?.path
 
     return (
       <div key={node.path} className="select-none">
@@ -250,19 +231,15 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
           onClick={() => {
             if (node.isDir) toggleNode(node.path)
             else if (entry) {
-              if (isProjectMode) {
-                setSelectedFile(entry)
-                if (isPreviewableInline(detectArtifactKind(entry.relativePath))) {
-                  setPreviewFile(entry)
-                }
-              } else {
-                setChatCenterPreviewFile(entry)
+              setSelectedFile(entry)
+              if (isPreviewableInline(detectArtifactKind(entry.relativePath))) {
+                setPreviewFile(entry)
               }
             }
           }}
           className={cn(
             'group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors text-xs font-mono',
-            activeFilePath === node.path
+            selectedFile?.path === node.path
               ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-semibold'
               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]',
           )}
@@ -337,13 +314,6 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         </div>
       )
     }
-    if (showWorkspaceEmpty) {
-      return (
-        <p className="text-center py-8 text-xs text-[var(--color-text-muted)] px-4">
-          {t('noWorkspaceFiles', lang)}
-        </p>
-      )
-    }
     if (loadError) {
       return (
         <div className="text-center py-8 px-4 space-y-2">
@@ -377,18 +347,16 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
           </span>
         )}
         <div className="flex items-center gap-2 min-w-0">
-          {isProjectMode && (
-            <div
-              className="min-w-0 flex-[0_1_42%] px-2 py-1 text-[10px] font-mono truncate text-[var(--color-text-secondary)]"
-              title={selectedTask?.label || selectedTaskId || undefined}
-            >
-              {selectedTaskId
-                ? t('filesForProject', lang, {
-                    name: selectedTask?.label || selectedTaskId,
-                  })
-                : t('selectProjectToSeeFiles', lang)}
-            </div>
-          )}
+          <div
+            className="min-w-0 flex-[0_1_42%] px-2 py-1 text-[10px] font-mono truncate text-[var(--color-text-secondary)]"
+            title={selectedTask?.label || selectedTaskId || undefined}
+          >
+            {selectedTaskId
+              ? t('filesForProject', lang, {
+                  name: selectedTask?.label || selectedTaskId,
+                })
+              : t('selectProjectToSeeFiles', lang)}
+          </div>
           <input
             type="text"
             placeholder={t('filesFilterPlaceholder', lang)}
@@ -396,7 +364,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
             onChange={(e) => setSearchQuery(e.target.value)}
             className="min-w-[96px] flex-1 px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
           />
-          <div className={cn('flex items-center shrink-0 gap-0.5', !isProjectMode && 'ml-auto')}>
+          <div className="flex items-center shrink-0 gap-0.5">
             {canUpload ? (
               <label
                 htmlFor={dataInputId}
@@ -476,7 +444,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
       />
 
       <div className="flex-1 overflow-y-auto p-2 min-h-0">
-        {showProjectEmpty || showWorkspaceEmpty ? (
+        {showProjectEmpty ? (
           emptyState()
         ) : loading && files.length === 0 ? (
           <div className="text-center py-8 text-xs text-[var(--color-text-muted)]">{t('loading', lang)}</div>
@@ -496,7 +464,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         <div className="p-2 border-t text-center text-xs text-[var(--color-text-muted)]">{t('loading', lang)}</div>
       )}
 
-      {isProjectMode && selectedFile && (
+      {selectedFile && (
         <div className="p-3 border-t border-[var(--color-border)] bg-[var(--color-bg-primary)] flex flex-col gap-2 shrink-0">
           <p className="text-[10px] font-mono text-[var(--color-text-muted)] truncate">{selectedFile.path}</p>
           <p className="text-xs font-semibold truncate">{selectedFile.name}</p>
@@ -526,7 +494,7 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-      {isProjectMode && previewFile && (
+      {previewFile && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60">
           <div className="relative w-full max-w-4xl h-[85vh] flex flex-col rounded-xl border bg-[var(--color-bg-primary)] overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
@@ -574,41 +542,4 @@ export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
       )}
     </div>
   )
-}
-
-function getFileIcon(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase()
-  switch (ext) {
-    case 'py':
-    case 'sh':
-    case 'js':
-    case 'ts':
-    case 'tsx':
-    case 'jsx':
-      return '📄'
-    case 'json':
-      return '⚙️'
-    case 'csv':
-    case 'tsv':
-      return '📊'
-    case 'pdf':
-      return '📕'
-    case 'zip':
-    case 'gz':
-    case 'tar':
-      return '📦'
-    case 'png':
-    case 'jpg':
-    case 'jpeg':
-    case 'gif':
-    case 'webp':
-      return '🖼️'
-    case 'md':
-      return '📝'
-    case 'log':
-    case 'txt':
-      return '🗒️'
-    default:
-      return '📄'
-  }
 }

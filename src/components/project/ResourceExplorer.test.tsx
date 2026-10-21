@@ -48,27 +48,6 @@ describe('ResourceExplorer file identity', () => {
     expect(screen.queryByText('🗑')).not.toBeInTheDocument()
   })
 
-  it('keeps same-named project files separate and routes the selected project', async () => {
-    useProjectStore.setState({
-      appMode: 'normal',
-      tasks: [{ id: 'PRJ-A', label: 'same' }, { id: 'PRJ-B', label: 'same' }] as ReturnType<typeof useProjectStore.getState>['tasks'],
-    })
-    vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([
-      { name: 'a.csv', path: 'data/a.csv', size: 1, mtime: 1, is_dir: false },
-    ])
-    render(<ResourceExplorer />)
-    const projects = await screen.findAllByText('same')
-    expect(projects).toHaveLength(2)
-    projects.forEach((project) => fireEvent.click(project))
-    screen.getAllByText('data').forEach((directory) => fireEvent.click(directory))
-    const files = screen.getAllByText('a.csv')
-    expect(files).toHaveLength(2)
-    fireEvent.click(files[1])
-    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({
-      projectId: 'PRJ-B', relativePath: 'data/a.csv', path: 'PRJ-B/data/a.csv',
-    })
-  })
-
   it('shows matches inside collapsed folders while filtering', async () => {
     vi.spyOn(api, 'fetchProjectFilesResult').mockResolvedValue({
       ok: true,
@@ -102,20 +81,6 @@ describe('ResourceExplorer file identity', () => {
     }))
     expect(screen.getByText('new.txt')).toBeInTheDocument()
     expect(screen.queryByText('old.txt')).not.toBeInTheDocument()
-  })
-
-  it('keeps the chat preview open when task statuses refresh', async () => {
-    const file = { name: 'a.csv', path: 'data/a.csv', size: 1, mtime: 1, is_dir: false }
-    const tasks = [{ id: 'PRJ-A', label: 'a' }] as ReturnType<typeof useProjectStore.getState>['tasks']
-    useProjectStore.setState({ appMode: 'normal', tasks })
-    const fetchFiles = vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([file])
-    render(<ResourceExplorer />)
-    await screen.findByText('a')
-    const preview = { ...file, projectId: 'PRJ-A', relativePath: 'data/a.csv' }
-    act(() => useUiStore.getState().setChatCenterPreviewFile(preview))
-    act(() => useProjectStore.setState({ tasks: tasks.map((task) => ({ ...task })) }))
-    expect(useUiStore.getState().chatCenterPreviewFile).toEqual(preview)
-    expect(fetchFiles).toHaveBeenCalledTimes(1)
   })
 
   it('says when the engine truncated the listing', async () => {
