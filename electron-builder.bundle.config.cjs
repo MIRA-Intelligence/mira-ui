@@ -26,7 +26,6 @@ module.exports = {
     identity: null,
     target: [
       'dmg',
-      'zip',
     ],
     artifactName: '${productName}-bundle-${version}-${os}-${arch}.${ext}',
     category: 'public.app-category.developer-tools',
