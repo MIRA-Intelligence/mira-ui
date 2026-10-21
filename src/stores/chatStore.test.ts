@@ -110,6 +110,18 @@ describe('chatStore', () => {
     expect(JSON.parse(localStorage.getItem('mira.chats:batch')!)).toHaveLength(1)
   })
 
+  it('passes the delete-files choice to the engine for every chat', async () => {
+    useChatStore.setState({ workspaceKey: 'files', activeChatId: null, chats: [
+      { id: 'a', title: 'A', createdAt: 1, updatedAt: 1 },
+      { id: 'b', title: 'B', createdAt: 2, updatedAt: 2 },
+    ] })
+    await useChatStore.getState().deleteChats(['a', 'b'], { deleteFiles: true })
+    expect(vi.mocked(deleteOrganizationChat).mock.calls).toEqual([
+      ['a', { deleteFiles: true }],
+      ['b', { deleteFiles: true }],
+    ])
+  })
+
   it('does not optimistically erase chats while deletion is pending', async () => {
     const id = useChatStore.getState().createChat()
     let finish!: () => void

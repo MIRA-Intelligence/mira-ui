@@ -216,8 +216,13 @@ export async function updateOrganizationChat(
   return organizationRequest<RemoteChat>(`/chats/${encodeURIComponent(chatId)}`, jsonInit('PATCH', payload))
 }
 
-export async function deleteOrganizationChat(chatId: string): Promise<void> {
-  await organizationRequest(`/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
+/** Remove a chat from the list; `deleteFiles` also deletes its local folder (chats/<id>). */
+export async function deleteOrganizationChat(
+  chatId: string,
+  options: { deleteFiles?: boolean } = {},
+): Promise<void> {
+  const query = options.deleteFiles ? '?delete_files=1' : ''
+  await organizationRequest(`/chats/${encodeURIComponent(chatId)}${query}`, { method: 'DELETE' })
 }
 
 export class ProjectDirectoryExistsError extends Error {

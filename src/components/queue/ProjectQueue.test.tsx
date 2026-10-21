@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ProjectQueue } from './ProjectQueue'
@@ -58,7 +58,6 @@ describe('ProjectQueue mode switch', () => {
   it('Shift selects the visible range, supports Ctrl toggling, and confirms bulk deletion', async () => {
     seedBatchChats()
     const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['a', 'c'], failed: [] })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     render(<ProjectQueue />)
     fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
     fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
@@ -67,10 +66,26 @@ describe('ProjectQueue mode switch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
     expect(screen.getByText('2 selected')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    expect(screen.getByText('Remove 2 conversation(s) from the list?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(remove).not.toHaveBeenCalled()
-    confirm.mockReturnValue(true)
     fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
-    await waitFor(() => expect(remove).toHaveBeenCalledWith(['a', 'c']))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(['a', 'c'], { deleteFiles: false }))
+  })
+
+  it('deletes the local chat folders only when the user ticks the option', async () => {
+    seedBatchChats()
+    const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['b'], failed: [] })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Delete conversations' }))
+    fireEvent.click(dialog.getByRole('checkbox', { name: /Also delete local chat folders/ }))
+    expect(dialog.getByText(/permanently removes each chat's folder/)).toBeInTheDocument()
+    fireEvent.click(dialog.getByRole('button', { name: 'Delete with files' }))
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(['b'], { deleteFiles: true }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('moves selected chats sequentially and retains only failed selections for retry', async () => {
@@ -114,12 +129,12 @@ describe('ProjectQueue mode switch', () => {
     seedBatchChats()
     let finish!: (result: { deleted: string[]; failed: string[] }) => void
     const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     render(<ProjectQueue />)
     fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
     fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
     const button = screen.getByRole('button', { name: 'Delete selected conversations' })
     fireEvent.click(button)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
     expect(button).toBeDisabled()
     fireEvent.click(button)
     expect(remove).toHaveBeenCalledTimes(1)

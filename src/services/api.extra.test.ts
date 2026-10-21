@@ -5,6 +5,7 @@ import {
   attachChatContext,
   createRemoteProject,
   createWorkflowRun,
+  deleteOrganizationChat,
   deleteProject,
   deleteProjectFiles,
   fetchChatContextPreview,
@@ -359,6 +360,22 @@ describe('api service', () => {
     it('throws a useful message on failure', async () => {
       fetchMock.mockResolvedValueOnce(fail({ error: 'too big' }, 413))
       await expect(uploadProjectFiles('PRJ-1', [new File(['x'], 'a')])).rejects.toThrow('too big')
+    })
+  })
+
+  describe('deleteOrganizationChat', () => {
+    it('keeps the chat folder unless deleteFiles is set', async () => {
+      fetchMock.mockResolvedValueOnce(ok({ deleted: true, files_deleted: false }))
+      await deleteOrganizationChat('chat-1')
+      expect(lastUrl()).toMatch(/\/organization\/chats\/chat-1$/)
+
+      fetchMock.mockResolvedValueOnce(ok({ deleted: true, files_deleted: true }))
+      await deleteOrganizationChat('chat-1', { deleteFiles: true })
+      expect(lastUrl()).toMatch(/\/organization\/chats\/chat-1\?delete_files=1$/)
+    })
+    it('throws when the engine could not delete the folder', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ error: 'could not delete /w/chats/chat-1: busy' }, 500))
+      await expect(deleteOrganizationChat('chat-1', { deleteFiles: true })).rejects.toThrow('busy')
     })
   })
 

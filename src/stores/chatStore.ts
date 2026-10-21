@@ -74,7 +74,8 @@ interface ChatState {
   renameChat: (id: string, title: string) => void
   touchChat: (id: string, fallbackTitle?: string) => void
   deleteChat: (id: string) => void
-  deleteChats: (ids: string[]) => Promise<{ deleted: string[]; failed: string[] }>
+  /** `deleteFiles` also deletes each chat's local folder. */
+  deleteChats: (ids: string[], options?: { deleteFiles?: boolean }) => Promise<{ deleted: string[]; failed: string[] }>
   removeChat: (id: string) => void
 }
 
@@ -179,7 +180,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })
   },
 
-  deleteChats: async (ids) => {
+  deleteChats: async (ids, options = {}) => {
     const workspace = get().workspaceKey
     const targets = [...new Set(ids)].filter((id) => get().chats.some((chat) => chat.id === id))
     const deleted: string[] = []
@@ -190,7 +191,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         continue
       }
       try {
-        await deleteOrganizationChat(id)
+        await deleteOrganizationChat(id, options)
         deleted.push(id)
       } catch {
         failed.push(id)
