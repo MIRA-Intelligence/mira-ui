@@ -92,17 +92,6 @@ jobs:
           MIRA_FEISHU_MENTION_NAME: ${{ vars.MIRA_FEISHU_MENTION_NAME || 'MIRAI' }}
         run: npm run dist:bundle:mac
 
-      - name: Rename macOS bundle update manifests
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        run: |
-          if [ -f release-bundle/latest-mac.yml ]; then
-            mv release-bundle/latest-mac.yml release-bundle/latest-mac-bundle.yml
-          fi
-          if [ -f release-bundle/app-update.yml ]; then
-            mv release-bundle/app-update.yml release-bundle/app-update-bundle.yml
-          fi
-
       - name: Build Windows bundle artifacts
         if: matrix.os == 'windows-latest'
         env:
@@ -131,21 +120,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: miraui-release-bundle-macos
-          path: |
-            release-bundle/MIRA-bundle-*-mac-*.dmg
-            release-bundle/MIRA-bundle-*-mac-*.dmg.blockmap
-            release-bundle/MIRA-bundle-*-mac-*.zip
-            release-bundle/MIRA-bundle-*-mac-*.zip.blockmap
-            release-bundle/latest-mac-bundle.yml
-            release-bundle/app-update-bundle.yml
+          path: release-bundle/MIRA-bundle-*-mac-*.dmg
+          if-no-files-found: error
 
       - name: Upload Windows bundle release assets
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: miraui-release-bundle-windows
-          path: |
-            release-bundle/MIRA-bundle-*-win-*-setup.zip
+          path: release-bundle/MIRA-bundle-*-win-*-setup.zip
+          if-no-files-found: error
 
   publish-bundle-release:
     needs: build-bundle
@@ -165,10 +149,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
+          # One installer per platform: macOS .dmg, Windows setup .zip.
           files: |
             release-assets/MIRA-bundle-*.dmg
-            release-assets/MIRA-bundle-*.dmg.blockmap
-            release-assets/MIRA-bundle-*.zip
-            release-assets/MIRA-bundle-*.zip.blockmap
-            release-assets/latest-mac-bundle.yml
-            release-assets/app-update-bundle.yml
+            release-assets/MIRA-bundle-*-setup.zip

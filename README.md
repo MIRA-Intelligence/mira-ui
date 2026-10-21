@@ -307,5 +307,6 @@ If the Python launcher defaults to an x64 Python 3.11 on Windows ARM64, install 
 ### Desktop release artifacts
 - Primary release workflow: `.github/workflows/desktop-release.yml`
 - A single `v*` tag now publishes both `MIRA-standalone-*` and `MIRA-bundle-*` assets into the same GitHub Release
+- One installer per platform: macOS `MIRA-<kind>-<ver>-mac-<arch>.dmg`, Windows `MIRA-<kind>-<ver>-win-<arch>-setup.zip` (the NSIS setup `.exe`, zipped)
 - Manual bundle rebuild workflow: `.github/workflows/desktop-release-bundle.yml`
 - Generated installers are uploaded as workflow artifacts and also written to local `release/` or `release-bundle/` when run locally

@@ -40,8 +40,7 @@
       "icon": "build/icon.icns",
       "identity": null,
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ],
       "artifactName": "${productName}-standalone-${version}-${os}-${arch}.${ext}",
       "category": "public.app-category.developer-tools"
