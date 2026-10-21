@@ -26,6 +26,11 @@ interface FileTreeNode {
   children: Record<string, FileTreeNode>
 }
 
+function folderOf(relativePath: string): string {
+  const cut = relativePath.lastIndexOf('/')
+  return cut < 0 ? '' : relativePath.slice(0, cut)
+}
+
 /** Project mode shows the selected project; Quick Chat browses the selected chat's folder. */
 export function ResourceExplorer({ embedded = false }: { embedded?: boolean }) {
   const appMode = useProjectStore((s) => s.appMode)
@@ -48,6 +53,7 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
   const [selectedFile, setSelectedFile] = useState<ProjectFileEntry | null>(null)
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null)
   const [previewFile, setPreviewFile] = useState<ProjectFileEntry | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadHint, setUploadHint] = useState<string | null>(null)
@@ -55,16 +61,13 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
   const [truncated, setTruncated] = useState(false)
 
   const uploadInputId = useId()
-  const dataInputId = `${uploadInputId}-data`
-  const referencesInputId = `${uploadInputId}-references`
   // Only the newest request may update the list, so a slow response for the
   // previous project cannot overwrite the current one.
   const loadSeqRef = useRef(0)
 
-  const dataInputRef = useRef<HTMLInputElement>(null)
-  const referencesInputRef = useRef<HTMLInputElement>(null)
-
   const canUpload = Boolean(selectedTaskId)
+  // Uploads go to the selected folder, the selected file's folder, or the project root.
+  const uploadDir = selectedFolder ?? (selectedFile ? folderOf(selectedFile.relativePath) : '')
 
   const loadFiles = useCallback(async () => {
     const msgLang = useSettingsStore.getState().language
@@ -111,6 +114,7 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
   // Clear the selection only when the browsed project changes, not on every reload.
   useEffect(() => {
     setSelectedFile(null)
+    setSelectedFolder(null)
     setPreviewFile(null)
   }, [selectedTaskId])
 
@@ -154,10 +158,7 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
     pushSystemMessage(msg, { severity: 'warning', ttlMs: 6000 })
   }
 
-  const handleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    target: 'data' | 'references',
-  ) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || [])
     e.target.value = ''
     if (selectedFiles.length === 0) return
@@ -171,8 +172,13 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
     setUploadHint(null)
     setIsUploading(true)
     try {
-      await uploadProjectFiles(pid, selectedFiles, target)
+      await uploadProjectFiles(pid, selectedFiles, uploadDir)
       pushSystemMessage(t('uploadedSuccessfully', lang), { severity: 'success' })
+      if (uploadDir) {
+        // Show what was just uploaded.
+        const parts = uploadDir.split('/')
+        setExpandedNodes((current) => new Set([...current, ...parts.map((_, i) => parts.slice(0, i + 1).join('/'))]))
+      }
       void loadFiles()
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('uploadFailed', lang)
@@ -229,8 +235,12 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
       <div key={node.path} className="select-none">
         <div
           onClick={() => {
-            if (node.isDir) toggleNode(node.path)
-            else if (entry) {
+            if (node.isDir) {
+              toggleNode(node.path)
+              setSelectedFolder(node.path)
+              setSelectedFile(null)
+            } else if (entry) {
+              setSelectedFolder(null)
               setSelectedFile(entry)
               if (isPreviewableInline(detectArtifactKind(entry.relativePath))) {
                 setPreviewFile(entry)
@@ -239,7 +249,7 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
           }}
           className={cn(
             'group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors text-xs font-mono',
-            selectedFile?.path === node.path
+            selectedFile?.path === node.path || (node.isDir && selectedFolder === node.path)
               ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-semibold'
               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]',
           )}
@@ -367,12 +377,12 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
           <div className="flex items-center shrink-0 gap-0.5">
             {canUpload ? (
               <label
-                htmlFor={dataInputId}
+                htmlFor={uploadInputId}
                 className={cn(
                   'p-1.5 rounded cursor-pointer hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]',
                   isUploading && 'pointer-events-none opacity-50',
                 )}
-                title={t('uploadDataTitle', lang)}
+                title={t('uploadFilesTo', lang, { folder: uploadDir || selectedTask?.label || selectedTaskId || '' })}
               >
                 ↑
               </label>
@@ -381,30 +391,9 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
                 type="button"
                 onClick={showUploadBlocked}
                 className="p-1.5 rounded opacity-40 text-[var(--color-text-muted)]"
-                title={t('uploadDataTitle', lang)}
+                title={t('uploadSelectProjectFirst', lang)}
               >
                 ↑
-              </button>
-            )}
-            {canUpload ? (
-              <label
-                htmlFor={referencesInputId}
-                className={cn(
-                  'p-1.5 rounded cursor-pointer hover:bg-[var(--color-bg-hover)] text-[var(--color-text-secondary)]',
-                  isUploading && 'pointer-events-none opacity-50',
-                )}
-                title={t('uploadReferencesTitle', lang)}
-              >
-                📎
-              </label>
-            ) : (
-              <button
-                type="button"
-                onClick={showUploadBlocked}
-                className="p-1.5 rounded opacity-40 text-[var(--color-text-muted)]"
-                title={t('uploadReferencesTitle', lang)}
-              >
-                📎
               </button>
             )}
             <button
@@ -427,23 +416,23 @@ function ProjectFileExplorer({ embedded }: { embedded: boolean }) {
       </div>
 
       <input
-        id={dataInputId}
-        ref={dataInputRef}
+        id={uploadInputId}
         type="file"
         multiple
         className="sr-only"
-        onChange={(e) => void handleFileChange(e, 'data')}
-      />
-      <input
-        id={referencesInputId}
-        ref={referencesInputRef}
-        type="file"
-        multiple
-        className="sr-only"
-        onChange={(e) => void handleFileChange(e, 'references')}
+        onChange={(e) => void handleFileChange(e)}
       />
 
-      <div className="flex-1 overflow-y-auto p-2 min-h-0">
+      <div
+        className="flex-1 overflow-y-auto p-2 min-h-0"
+        onClick={(e) => {
+          // Clicking empty space clears the selection, so uploads go to the project root.
+          if (e.target === e.currentTarget) {
+            setSelectedFolder(null)
+            setSelectedFile(null)
+          }
+        }}
+      >
         {showProjectEmpty ? (
           emptyState()
         ) : loading && files.length === 0 ? (

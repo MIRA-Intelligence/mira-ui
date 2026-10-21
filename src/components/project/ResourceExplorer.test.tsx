@@ -92,4 +92,53 @@ describe('ResourceExplorer file identity', () => {
     render(<ResourceExplorer />)
     expect(await screen.findByText(/too many files/)).toBeInTheDocument()
   })
+
+  describe('upload', () => {
+    beforeEach(() => {
+      vi.spyOn(api, 'fetchProjectFilesResult').mockResolvedValue({
+        ok: true,
+        truncated: false,
+        files: [
+          { name: 'a.csv', path: 'data/raw/a.csv', size: 1, mtime: 1, is_dir: false },
+          { name: 'notes.md', path: 'notes.md', size: 1, mtime: 1, is_dir: false },
+        ],
+      })
+    })
+
+    function upload(container: HTMLElement) {
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, { target: { files: [new File(['x'], 'b.csv')] } })
+    }
+
+    it('has one upload button and uploads to the project root by default', async () => {
+      const send = vi.spyOn(api, 'uploadProjectFiles').mockResolvedValue({ uploaded: [], extracted: [] })
+      const { container } = render(<ResourceExplorer />)
+      await screen.findByText('data')
+      expect(container.querySelectorAll('input[type="file"]')).toHaveLength(1)
+      expect(screen.queryByText('📎')).not.toBeInTheDocument()
+
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledWith('PRJ-A', expect.any(Array), ''))
+    })
+
+    it('uploads into the selected folder or the selected file\'s folder', async () => {
+      const send = vi.spyOn(api, 'uploadProjectFiles').mockResolvedValue({ uploaded: [], extracted: [] })
+      const { container } = render(<ResourceExplorer />)
+      fireEvent.click(await screen.findByText('data'))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), 'data'))
+
+      fireEvent.click(screen.getByText('raw'))
+      fireEvent.click(screen.getByText('a.csv'))
+      fireEvent.click(screen.getByRole('button', { name: 'Close preview' }))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+      expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), 'data/raw')
+
+      fireEvent.click(screen.getByText('notes.md'))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3))
+      expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), '')
+    })
+  })
 })

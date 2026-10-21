@@ -139,6 +139,80 @@ describe('ChatFolderExplorer', () => {
   })
 })
 
+describe('ChatFolderExplorer uploads', () => {
+  const chat = `${CHATS}/chat-1`
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    useSettingsStore.setState({ language: 'en', workspacePath: WORKSPACE })
+    useUiStore.setState({ chatCenterPreviewFile: null })
+    useChatStore.setState({ activeChatId: 'chat-1' })
+    vi.spyOn(api, 'fetchChatWorkdir').mockResolvedValue({ path: chat, exists: true, home: HOME })
+    mockFolders({
+      [chat]: dir(chat, CHATS, [['plots', true], ['run.py', false]]),
+      [`${chat}/plots`]: dir(`${chat}/plots`, chat, [['roc.png', false]]),
+    })
+  })
+
+  function upload(container: HTMLElement) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    fireEvent.change(input, { target: { files: [new File(['x'], 'scan.nii')] } })
+  }
+
+  it('has a single upload button that targets the folder shown by default', async () => {
+    const send = vi.spyOn(api, 'uploadToFolder').mockResolvedValue([])
+    const { container } = render(<ChatFolderExplorer />)
+    await screen.findByText('run.py')
+    expect(container.querySelectorAll('input[type="file"]')).toHaveLength(1)
+    expect(screen.getByLabelText('Upload files to ~/.mira/workspace/chats/chat-1')).toBeInTheDocument()
+
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(chat, expect.any(Array)))
+  })
+
+  it('uploads into the selected folder, or the folder of the selected file', async () => {
+    const send = vi.spyOn(api, 'uploadToFolder').mockResolvedValue([])
+    const { container } = render(<ChatFolderExplorer />)
+    fireEvent.click(await screen.findByText('plots'))
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenLastCalledWith(`${chat}/plots`, expect.any(Array)))
+
+    fireEvent.click(await screen.findByText('roc.png'))
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+    expect(send).toHaveBeenLastCalledWith(`${chat}/plots`, expect.any(Array))
+
+    fireEvent.click(screen.getByText('run.py'))
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3))
+    expect(send).toHaveBeenLastCalledWith(chat, expect.any(Array))
+  })
+
+  it('clicking empty space clears the selection', async () => {
+    const send = vi.spyOn(api, 'uploadToFolder').mockResolvedValue([])
+    const { container } = render(<ChatFolderExplorer />)
+    fireEvent.click(await screen.findByText('plots'))
+    fireEvent.click(screen.getByText('plots').closest('.overflow-y-auto') as HTMLElement)
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(chat, expect.any(Array)))
+  })
+
+  it("uploads into a new chat's folder before it exists and then lists it", async () => {
+    vi.mocked(api.fetchChatWorkdir).mockResolvedValue({ path: `${CHATS}/chat-9`, exists: false, home: HOME })
+    useChatStore.setState({ activeChatId: 'chat-9' })
+    const listing = vi.mocked(api.fetchDirectory)
+    const send = vi.spyOn(api, 'uploadToFolder').mockImplementation(async () => {
+      listing.mockResolvedValue({ ok: true, listing: dir(`${CHATS}/chat-9`, CHATS, [['scan.nii', false]]) })
+      return []
+    })
+    const { container } = render(<ChatFolderExplorer />)
+    await screen.findByText(/No files in this chat yet/)
+    upload(container)
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith(`${CHATS}/chat-9`, expect.any(Array)))
+    expect(await screen.findByText('scan.nii')).toBeInTheDocument()
+  })
+})
+
 describe('parentPath', () => {
   it.each([
     ['/home/u/ws/chats/chat-1', '/home/u/ws/chats'],

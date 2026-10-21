@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchChatWorkdir, fetchDirectory, type DirectoryListing } from '@/services/api'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { fetchChatWorkdir, fetchDirectory, uploadToFolder, type DirectoryListing } from '@/services/api'
 import type { ProjectFileEntry, ProjectFileInfo } from '@/types'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -41,6 +41,7 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
   const activeChatId = useChatStore((s) => s.activeChatId)
   const previewFile = useUiStore((s) => s.chatCenterPreviewFile)
   const setPreviewFile = useUiStore((s) => s.setChatCenterPreviewFile)
+  const pushSystemMessage = useUiStore((s) => s.pushSystemMessage)
 
   const [chatFolder, setChatFolder] = useState<string | null>(null)
   const [folder, setFolder] = useState<string | null>(null)
@@ -50,6 +51,9 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<LoadError | null>(null)
   const [filter, setFilter] = useState('')
+  const [selected, setSelected] = useState<{ path: string; isDir: boolean } | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const uploadInputId = useId()
   // Only the newest request may update the view, so a slow listing of the
   // previous folder cannot overwrite the current one.
   const loadSeq = useRef(0)
@@ -85,6 +89,7 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
     if (!keepExpanded) {
       setExpanded(new Set())
       setSubfolders({})
+      setSelected(null)
     }
     if (!folder) {
       setListing(null)
@@ -124,6 +129,31 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
     setExpanded(next)
   }
 
+  // Uploads go to the selected folder, the selected file's folder, or the folder shown.
+  const uploadDir = selected
+    ? (selected.isDir ? selected.path : parentPath(selected.path) ?? folder)
+    : folder
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0 || !uploadDir) return
+    setUploading(true)
+    try {
+      await uploadToFolder(uploadDir, files)
+      pushSystemMessage(t('uploadedSuccessfully', lang), { severity: 'success' })
+      if (uploadDir !== folder) {
+        setExpanded((current) => new Set([...current, uploadDir]))
+        void loadSubfolder(uploadDir)
+      }
+      refresh()
+    } catch (err: unknown) {
+      pushSystemMessage(err instanceof Error ? err.message : t('uploadFailed', lang), { severity: 'error' })
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const chatFolderMissing = loadError?.status === 404 && folder !== null && folder === chatFolder
   const upTarget = listing ? listing.parent : folder && loadError ? parentPath(folder) : null
   const home = listing?.home ?? ''
@@ -140,14 +170,18 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
     return (
       <div key={file.path} className="select-none">
         <div
-          onClick={() => (file.is_dir ? toggleFolder(file.path) : setPreviewFile(toEntry(file)))}
+          onClick={() => {
+            if (file.is_dir) toggleFolder(file.path)
+            else setPreviewFile(toEntry(file))
+            setSelected({ path: file.path, isDir: file.is_dir })
+          }}
           onDoubleClick={() => {
             if (file.is_dir) setFolder(file.path)
           }}
           title={file.is_dir ? t('filesOpenFolderHint', lang) : file.name}
           className={cn(
             'group flex items-center gap-1.5 px-2 py-1 rounded cursor-pointer transition-colors text-xs font-mono',
-            previewFile?.absolutePath === file.path
+            previewFile?.absolutePath === file.path || (file.is_dir && selected?.path === file.path)
               ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)] font-semibold'
               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]',
           )}
@@ -236,7 +270,7 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
             title={t('filesFolderUp', lang)}
             aria-label={t('filesFolderUp', lang)}
           >
-            ↑
+            ↰
           </button>
           {chatFolder && folder !== chatFolder && (
             <button
@@ -255,6 +289,15 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
           >
             {folder ? displayPath(folder, home) : ''}
           </span>
+          <label
+            htmlFor={uploadInputId}
+            className={cn(toolButton, 'cursor-pointer', (uploading || !uploadDir) && 'pointer-events-none opacity-40')}
+            title={t('uploadFilesTo', lang, { folder: uploadDir ? displayPath(uploadDir, home) : '' })}
+            aria-label={t('uploadFilesTo', lang, { folder: uploadDir ? displayPath(uploadDir, home) : '' })}
+          >
+            ↑
+          </label>
+          <input id={uploadInputId} type="file" multiple className="sr-only" onChange={(e) => void handleUpload(e)} />
           <button
             type="button"
             onClick={refresh}
@@ -274,7 +317,15 @@ export function ChatFolderExplorer({ embedded = false }: { embedded?: boolean })
           className="w-full px-2 py-1 text-xs rounded border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
         />
       </div>
-      <div className="flex-1 overflow-y-auto p-2 min-h-0">{body()}</div>
+      <div
+        className="flex-1 overflow-y-auto p-2 min-h-0"
+        onClick={(e) => {
+          // Clicking empty space clears the selection, so uploads go to the folder shown.
+          if (e.target === e.currentTarget) setSelected(null)
+        }}
+      >
+        {body()}
+      </div>
     </div>
   )
 }

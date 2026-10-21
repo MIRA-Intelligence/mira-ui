@@ -575,8 +575,6 @@ export interface UploadProjectFilesResult {
   extracted: ExtractedProjectFile[]
 }
 
-export type ProjectFileTarget = 'data' | 'references'
-
 export interface DataPathValidationResult {
   ok: boolean
   error?: string
@@ -586,25 +584,13 @@ export interface DataPathValidationResult {
   restrict_to_workspace?: boolean
 }
 
-export async function uploadProjectFiles(
-  sessionId: string,
-  files: File[],
-  target: ProjectFileTarget = 'data',
-): Promise<UploadProjectFilesResult> {
-  if (files.length === 0) return { uploaded: [], extracted: [] }
-
+async function postUploadForm(url: string, files: File[], failure: string): Promise<Record<string, unknown>> {
   const formData = new FormData()
   for (const file of files) {
     const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
     formData.append('files', file, relativePath || file.name)
   }
-
-  const sid = encodeURIComponent(sessionId)
-  const query = `target=${encodeURIComponent(target)}`
-  const resp = await fetch(`${getApiUrl()}/projects/${sid}/files?${query}`, {
-    method: 'POST',
-    body: formData,
-  })
+  const resp = await fetch(url, { method: 'POST', body: formData })
   if (!resp.ok) {
     let msg = ''
     try {
@@ -613,14 +599,39 @@ export async function uploadProjectFiles(
     } catch {
       msg = await resp.text()
     }
-    throw new Error(msg || `Failed to upload files for ${sessionId}`)
+    throw new Error(msg || failure)
   }
+  return resp.json()
+}
 
-  const data = await resp.json()
+/** Upload into a project folder; `dir` is relative to the project ('' is its root). */
+export async function uploadProjectFiles(
+  sessionId: string,
+  files: File[],
+  dir = '',
+): Promise<UploadProjectFilesResult> {
+  if (files.length === 0) return { uploaded: [], extracted: [] }
+  const sid = encodeURIComponent(sessionId)
+  const data = await postUploadForm(
+    `${getApiUrl()}/projects/${sid}/files?dir=${encodeURIComponent(dir)}`,
+    files,
+    `Failed to upload files for ${sessionId}`,
+  )
   return {
     uploaded: Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : [],
     extracted: Array.isArray(data?.extracted) ? data.extracted as ExtractedProjectFile[] : [],
   }
+}
+
+/** Upload into a folder browsed outside a project (Quick Chat); `dir` is absolute. Returns absolute paths. */
+export async function uploadToFolder(dir: string, files: File[]): Promise<UploadedProjectFile[]> {
+  if (files.length === 0) return []
+  const data = await postUploadForm(
+    `${getApiUrl()}/fs/upload?dir=${encodeURIComponent(dir)}`,
+    files,
+    `Failed to upload files to ${dir}`,
+  )
+  return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
 }
 
 export async function validateDataPath(path: string, purpose?: 'experiment_input'): Promise<DataPathValidationResult> {
