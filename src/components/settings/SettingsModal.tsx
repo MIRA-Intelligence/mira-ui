@@ -791,6 +791,24 @@ export function SettingsModal() {
             </div>
           </Section>
 
+          <Section title={t('onboardingProfileSection', curLang)}>
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-3">
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-[11px] text-[var(--color-text-muted)] leading-relaxed flex-1">
+                  {t('onboardingProfileSectionHint', curLang)}
+                </p>
+                <ActionButton
+                  onClick={() => {
+                    closeSettings()
+                    useUiStore.getState().openOnboarding()
+                  }}
+                >
+                  {t('onboardingEditProfile', curLang)}
+                </ActionButton>
+              </div>
+            </div>
+          </Section>
+
           <Section title={t('general', curLang)}>
             <Label text={t('theme', curLang)} />
             <div className="flex gap-2">

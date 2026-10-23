@@ -2,7 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [dev, main, release]
+    # `contrib` is the community landing branch: its CI judges every bot merge
+    # before the next one, and a red merge is reverted (mira-community#51/#52).
+    branches: [dev, main, release, contrib]
   # Run for PRs into any branch (e.g. feat/server-edition), matching the mira repo.
   pull_request:
   workflow_dispatch:
