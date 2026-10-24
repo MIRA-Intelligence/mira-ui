@@ -55,6 +55,133 @@ describe('ProjectQueue mode switch', () => {
       assignments: { chat: {}, project: {} } })
   }
 
+  it('opens a chat on plain click without showing bulk selection', () => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }))
+    expect(useChatStore.getState().activeChatId).toBe('b')
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it.each(['ctrlKey', 'metaKey'] as const)('uses %s to extend navigation into a non-contiguous selection', (modifier) => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { [modifier]: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
+    expect(useChatStore.getState().activeChatId).toBe('a')
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { [modifier]: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch A' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { [modifier]: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+  })
+
+  it.each(['ctrlKey', 'metaKey', 'shiftKey'] as const)('does not show bulk mode for a singleton %s selection', (modifier) => {
+    seedBatchChats()
+    useChatStore.setState({ activeChatId: null })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { [modifier]: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('clears the batch selection on plain navigation', () => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    expect(screen.getByText('3 selected')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }))
+    expect(useChatStore.getState().activeChatId).toBe('b')
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    for (const title of ['Batch A', 'Batch B', 'Batch C']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-pressed', 'false')
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { ctrlKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch A' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('preserves toggle membership after deselecting the active chat', () => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { ctrlKey: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { ctrlKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch A' })).toHaveAttribute('aria-pressed', 'false')
+    for (const title of ['Batch B', 'Batch C']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
+  it('uses the last clicked row as the Shift anchor after deselection', () => {
+    seedBatchChats()
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { ctrlKey: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    expect(screen.getByText('3 selected')).toBeInTheDocument()
+    for (const title of ['Batch A', 'Batch B', 'Batch C']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
+  it('extends a singleton toggle when no conversation is active', () => {
+    seedBatchChats()
+    useChatStore.setState({ activeChatId: null })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { ctrlKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch A' })).toHaveAttribute('aria-pressed', 'false')
+    expect(useChatStore.getState().activeChatId).toBeNull()
+  })
+
+  it.each(['ctrlKey', 'metaKey'] as const)('does not seed a hidden active chat with %s', (modifier) => {
+    seedBatchChats()
+    const { unmount } = render(<ProjectQueue />)
+    fireEvent.change(screen.getByPlaceholderText('Search folders and titles...'), { target: { value: 'Batch B' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { [modifier]: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    unmount()
+    seedBatchChats()
+    useOrganizationStore.setState({ assignments: { chat: { a: 'dest' }, project: {} } })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: /Destination/ }))
+    expect(screen.queryByRole('button', { name: 'Batch A' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { [modifier]: true })
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { [modifier]: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    for (const title of ['Batch B', 'Batch C']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
+  it('extends only the failed selection after a partially successful move', async () => {
+    seedBatchChats()
+    vi.spyOn(useOrganizationStore.getState(), 'moveItem').mockImplementation(async (_kind, id) => {
+      if (id === 'b') throw new Error('offline')
+    })
+    render(<ProjectQueue />)
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { shiftKey: true })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Move selected conversations' }), { target: { value: 'dest' } })
+    await waitFor(() => expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed'))
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Batch C' }), { ctrlKey: true })
+    expect(screen.getByText('2 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch A' })).toHaveAttribute('aria-pressed', 'false')
+    for (const title of ['Batch B', 'Batch C']) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-pressed', 'true')
+    }
+  })
+
   it('Shift selects the visible range, supports Ctrl toggling, and confirms bulk deletion', async () => {
     seedBatchChats()
     const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['a', 'c'], failed: [] })
@@ -79,7 +206,8 @@ describe('ProjectQueue mode switch', () => {
     const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['b'], failed: [] })
     render(<ProjectQueue />)
     fireEvent.click(screen.getByRole('button', { name: 'Batch B' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Batch B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     const dialog = within(screen.getByRole('dialog', { name: 'Delete conversations' }))
     fireEvent.click(dialog.getByRole('checkbox', { name: /Also delete local chat folders/ }))
     expect(dialog.getByText(/permanently removes each chat's folder/)).toBeInTheDocument()
@@ -97,10 +225,14 @@ describe('ProjectQueue mode switch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Batch C' }))
     fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { shiftKey: true })
     fireEvent.change(screen.getByRole('combobox', { name: 'Move selected conversations' }), { target: { value: 'dest' } })
-    await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument())
+    await waitFor(() => expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed'))
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
     expect(move.mock.calls.map((call) => call[1])).toEqual(['a', 'b', 'c'])
-    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'true')
-    expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed')
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Batch B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Destination' }))
+    await waitFor(() => expect(move).toHaveBeenCalledTimes(4))
+    expect(move.mock.calls[3]).toEqual(['chat', 'b', 'dest'])
   })
 
   it('clears a range when searching so hidden chats cannot be batch-deleted', () => {
@@ -111,7 +243,8 @@ describe('ProjectQueue mode switch', () => {
     fireEvent.change(screen.getByPlaceholderText('Search folders and titles...'), { target: { value: 'Batch B' } })
     expect(screen.queryByText('3 selected')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { shiftKey: true })
-    expect(screen.getByText('1 selected')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('excludes collapsed folders from Shift ranges', () => {

@@ -186,14 +186,20 @@ export function ProjectQueue() {
       selectionAnchor.current = from < 0 ? id : anchor
     } else if (event.metaKey || event.ctrlKey) {
       setSelectedChats((current) => {
-        const next = new Set(current)
+        // Retain singleton state for subsequent toggles (including with no
+        // active chat); plain navigation and view resets clear it. Bulk UI
+        // remains hidden until at least two conversations are selected.
+        // Extend normal navigation on the first modifier-click, but never
+        // implicitly include an active chat hidden by filtering/collapse.
+        const next = new Set(current.size > 0 ? current
+          : activeChatId && visibleChatIds.includes(activeChatId) ? [activeChatId] : [])
         if (next.has(id)) next.delete(id)
         else next.add(id)
         return next
       })
       selectionAnchor.current = id
     } else {
-      setSelectedChats(new Set([id]))
+      setSelectedChats(new Set())
       selectionAnchor.current = id
       selectChat(id)
     }
@@ -238,8 +244,9 @@ export function ProjectQueue() {
       setBulkBusy(false)
     }
   }
+  const isBulkSelection = selectedChats.size > 1
   const chatProps = (id: string) => ({
-    bulkSelected: selectedChats.has(id), disabled: bulkBusy, onSelect: handleSelectChat,
+    bulkSelected: isBulkSelection && selectedChats.has(id), disabled: bulkBusy, onSelect: handleSelectChat,
     onDelete: () => confirmChatDelete(batchTargets(id)),
     onMove: (_id: string, folderId: string | null) => { void runChatBatch(batchTargets(id), 'move', folderId) },
   })
@@ -363,7 +370,7 @@ export function ProjectQueue() {
       {showChats && (
         <div className="border-b border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-muted)]">
           <p>{lang === 'zh' ? 'Shift + 点击连选 · Ctrl / ⌘ + 点击多选' : 'Shift-click for range · Ctrl / ⌘-click to toggle'}</p>
-          {selectedChats.size > 0 && <div className="mt-2 flex flex-wrap items-center gap-2" aria-label={lang === 'zh' ? '会话批量操作' : 'Conversation bulk actions'}>
+          {isBulkSelection && <div className="mt-2 flex flex-wrap items-center gap-2" aria-label={lang === 'zh' ? '会话批量操作' : 'Conversation bulk actions'}>
             <span>{lang === 'zh' ? `已选 ${selectedChats.size} 个` : `${selectedChats.size} selected`}</span>
             <button type="button" disabled={bulkBusy} onClick={() => { setSelectedChats(new Set()); selectionAnchor.current = null }}>
               {lang === 'zh' ? '取消选择' : 'Clear selection'}
