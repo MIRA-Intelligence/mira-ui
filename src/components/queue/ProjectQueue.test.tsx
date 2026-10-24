@@ -74,12 +74,14 @@ describe('ProjectQueue mode switch', () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith(['a', 'c'], { deleteFiles: false }))
   })
 
+  // Spec: ordinary clicks navigate without entering bulk mode; use the row menu.
   it('deletes the local chat folders only when the user ticks the option', async () => {
     seedBatchChats()
     const remove = vi.spyOn(useChatStore.getState(), 'deleteChats').mockResolvedValue({ deleted: ['b'], failed: [] })
     render(<ProjectQueue />)
     fireEvent.click(screen.getByRole('button', { name: 'Batch B' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected conversations' }))
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Batch B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
     const dialog = within(screen.getByRole('dialog', { name: 'Delete conversations' }))
     fireEvent.click(dialog.getByRole('checkbox', { name: /Also delete local chat folders/ }))
     expect(dialog.getByText(/permanently removes each chat's folder/)).toBeInTheDocument()
@@ -88,6 +90,7 @@ describe('ProjectQueue mode switch', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  // Spec: leave bulk mode when selection drops to one; retain single-row retry.
   it('moves selected chats sequentially and retains only failed selections for retry', async () => {
     seedBatchChats()
     const move = vi.spyOn(useOrganizationStore.getState(), 'moveItem').mockImplementation(async (_kind, id) => {
@@ -97,12 +100,17 @@ describe('ProjectQueue mode switch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Batch C' }))
     fireEvent.click(screen.getByRole('button', { name: 'Batch A' }), { shiftKey: true })
     fireEvent.change(screen.getByRole('combobox', { name: 'Move selected conversations' }), { target: { value: 'dest' } })
-    await waitFor(() => expect(screen.getByText('1 selected')).toBeInTheDocument())
+    await waitFor(() => expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed'))
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
     expect(move.mock.calls.map((call) => call[1])).toEqual(['a', 'b', 'c'])
-    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'true')
-    expect(useUiStore.getState().systemMessages.at(-1)?.text).toContain('1 failed')
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'Batch B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Destination' }))
+    await waitFor(() => expect(move).toHaveBeenCalledTimes(4))
+    expect(move.mock.calls[3]).toEqual(['chat', 'b', 'dest'])
   })
 
+  // Spec: even modifier selections need at least two rows to show bulk mode.
   it('clears a range when searching so hidden chats cannot be batch-deleted', () => {
     seedBatchChats()
     render(<ProjectQueue />)
@@ -111,7 +119,8 @@ describe('ProjectQueue mode switch', () => {
     fireEvent.change(screen.getByPlaceholderText('Search folders and titles...'), { target: { value: 'Batch B' } })
     expect(screen.queryByText('3 selected')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { shiftKey: true })
-    expect(screen.getByText('1 selected')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Batch B' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('excludes collapsed folders from Shift ranges', () => {
