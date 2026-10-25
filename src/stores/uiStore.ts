@@ -89,6 +89,14 @@ interface UiState {
   sidebarCollapsed: boolean
   /** Quick-chat center pane (home / file preview) collapsed to foreground the agent workbench. */
   chatCenterCollapsed: boolean
+  /**
+   * When true the center pane follows the chat: open (as a home page) until the
+   * chat has a message, then collapsed. A manual toggle or a file preview turns
+   * this off until the next chat is opened; chatCenterCollapsed then applies.
+   */
+  chatCenterAuto: boolean
+  /** Bumped when files are added to a chat folder outside the explorer, so it re-lists. */
+  chatFilesRevision: number
   agentPanelCollapsed: boolean
   sidebarWidth: number
   agentPanelWidth: number
@@ -118,8 +126,9 @@ interface UiState {
   setSidebarWidth: (px: number) => void
   toggleChatCenter: () => void
   setChatCenterCollapsed: (v: boolean) => void
-  /** Collapse quick-chat home and expand the agent workbench (chat mode). */
+  /** Show the agent workbench and let the home pane follow the chat (chat mode). */
   focusQuickChatWorkbench: () => void
+  bumpChatFiles: () => void
   toggleAgentPanel: () => void
   setAgentPanelCollapsed: (v: boolean) => void
   setAgentPanelWidth: (px: number) => void
@@ -156,6 +165,8 @@ function nextSystemMessageId(): string {
 export const useUiStore = create<UiState>((set) => ({
   sidebarCollapsed: false,
   chatCenterCollapsed: false,
+  chatCenterAuto: true,
+  chatFilesRevision: 0,
   agentPanelCollapsed: false,
   sidebarWidth: loadWidth(SIDEBAR_WIDTH_KEY, SIDEBAR_WIDTH),
   agentPanelWidth: loadWidth(AGENT_PANEL_WIDTH_KEY, AGENT_PANEL_WIDTH),
@@ -174,12 +185,12 @@ export const useUiStore = create<UiState>((set) => ({
   systemMessages: [],
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
-  toggleChatCenter: () => set((s) => ({ chatCenterCollapsed: !s.chatCenterCollapsed })),
-  setChatCenterCollapsed: (v) => set({ chatCenterCollapsed: v }),
+  toggleChatCenter: () => set((s) => ({ chatCenterAuto: false, chatCenterCollapsed: !s.chatCenterCollapsed })),
+  setChatCenterCollapsed: (v) => set({ chatCenterAuto: false, chatCenterCollapsed: v }),
   focusQuickChatWorkbench: () => {
     saveWorkbenchTab('agent')
     set({
-      chatCenterCollapsed: true,
+      chatCenterAuto: true,
       agentPanelCollapsed: false,
       workbenchTab: 'agent',
       chatCenterPreviewFile: null,
@@ -209,8 +220,9 @@ export const useUiStore = create<UiState>((set) => ({
   setChatCenterPreviewFile: (file) =>
     set({
       chatCenterPreviewFile: file,
-      ...(file ? { chatCenterCollapsed: false } : {}),
+      ...(file ? { chatCenterAuto: false, chatCenterCollapsed: false } : {}),
     }),
+  bumpChatFiles: () => set((s) => ({ chatFilesRevision: s.chatFilesRevision + 1 })),
   setAgentDraftPrompt: (text) => set({ agentDraftPrompt: text }),
   openPromotion: (chatId, moduleType) => set({ promotion: { chatId, moduleType } }),
   closePromotion: () => set({ promotion: null }),

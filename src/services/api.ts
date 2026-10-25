@@ -12,6 +12,7 @@ import type {
   SkillPluginTargetType,
   TaskPlanContract,
   TaskPlan,
+  ProjectFileEntry,
   ProjectFileInfo,
 } from '@/types'
 
@@ -215,8 +216,13 @@ export async function updateOrganizationChat(
   return organizationRequest<RemoteChat>(`/chats/${encodeURIComponent(chatId)}`, jsonInit('PATCH', payload))
 }
 
-export async function deleteOrganizationChat(chatId: string): Promise<void> {
-  await organizationRequest(`/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
+/** Remove a chat from the list; `deleteFiles` also deletes its local folder (chats/<id>). */
+export async function deleteOrganizationChat(
+  chatId: string,
+  options: { deleteFiles?: boolean } = {},
+): Promise<void> {
+  const query = options.deleteFiles ? '?delete_files=1' : ''
+  await organizationRequest(`/chats/${encodeURIComponent(chatId)}${query}`, { method: 'DELETE' })
 }
 
 export class ProjectDirectoryExistsError extends Error {
@@ -574,8 +580,6 @@ export interface UploadProjectFilesResult {
   extracted: ExtractedProjectFile[]
 }
 
-export type ProjectFileTarget = 'data' | 'references'
-
 export interface DataPathValidationResult {
   ok: boolean
   error?: string
@@ -585,25 +589,13 @@ export interface DataPathValidationResult {
   restrict_to_workspace?: boolean
 }
 
-export async function uploadProjectFiles(
-  sessionId: string,
-  files: File[],
-  target: ProjectFileTarget = 'data',
-): Promise<UploadProjectFilesResult> {
-  if (files.length === 0) return { uploaded: [], extracted: [] }
-
+async function postUploadForm(url: string, files: File[], failure: string): Promise<Record<string, unknown>> {
   const formData = new FormData()
   for (const file of files) {
     const relativePath = typeof file.webkitRelativePath === 'string' ? file.webkitRelativePath : ''
     formData.append('files', file, relativePath || file.name)
   }
-
-  const sid = encodeURIComponent(sessionId)
-  const query = `target=${encodeURIComponent(target)}`
-  const resp = await fetch(`${getApiUrl()}/projects/${sid}/files?${query}`, {
-    method: 'POST',
-    body: formData,
-  })
+  const resp = await fetch(url, { method: 'POST', body: formData })
   if (!resp.ok) {
     let msg = ''
     try {
@@ -612,14 +604,39 @@ export async function uploadProjectFiles(
     } catch {
       msg = await resp.text()
     }
-    throw new Error(msg || `Failed to upload files for ${sessionId}`)
+    throw new Error(msg || failure)
   }
+  return resp.json()
+}
 
-  const data = await resp.json()
+/** Upload into a project folder; `dir` is relative to the project ('' is its root). */
+export async function uploadProjectFiles(
+  sessionId: string,
+  files: File[],
+  dir = '',
+): Promise<UploadProjectFilesResult> {
+  if (files.length === 0) return { uploaded: [], extracted: [] }
+  const sid = encodeURIComponent(sessionId)
+  const data = await postUploadForm(
+    `${getApiUrl()}/projects/${sid}/files?dir=${encodeURIComponent(dir)}`,
+    files,
+    `Failed to upload files for ${sessionId}`,
+  )
   return {
     uploaded: Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : [],
     extracted: Array.isArray(data?.extracted) ? data.extracted as ExtractedProjectFile[] : [],
   }
+}
+
+/** Upload into a folder browsed outside a project (Quick Chat); `dir` is absolute. Returns absolute paths. */
+export async function uploadToFolder(dir: string, files: File[]): Promise<UploadedProjectFile[]> {
+  if (files.length === 0) return []
+  const data = await postUploadForm(
+    `${getApiUrl()}/fs/upload?dir=${encodeURIComponent(dir)}`,
+    files,
+    `Failed to upload files to ${dir}`,
+  )
+  return Array.isArray(data?.uploaded) ? data.uploaded as UploadedProjectFile[] : []
 }
 
 export async function validateDataPath(path: string, purpose?: 'experiment_input'): Promise<DataPathValidationResult> {
@@ -653,6 +670,72 @@ export function getProjectArtifactUrl(sessionId: string, artifactPath: string): 
   const sid = encodeURIComponent(sessionId)
   const path = encodeURIComponent(artifactPath)
   return withEngineAuth(`${getApiUrl()}/projects/${sid}/artifacts?path=${path}`)
+}
+
+export function getFsFileUrl(path: string): string {
+  return withEngineAuth(`${getApiUrl()}/fs/file?path=${encodeURIComponent(path)}`)
+}
+
+/** Preview/open URL for an explorer row, whether it belongs to a project or a browsed folder. */
+export function getExplorerFileUrl(file: ProjectFileEntry): string {
+  return file.absolutePath
+    ? getFsFileUrl(file.absolutePath)
+    : getProjectArtifactUrl(file.projectId, file.relativePath)
+}
+
+export interface ChatWorkdir {
+  path: string
+  exists: boolean
+  home: string
+}
+
+/** The folder a Quick Chat works in; it may not exist before the chat's first turn. */
+export async function fetchChatWorkdir(chatId: string): Promise<ChatWorkdir | null> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/chats/${encodeURIComponent(chatId)}/workdir`)
+    if (!resp.ok) return null
+    const data = await resp.json()
+    if (typeof data?.path !== 'string' || !data.path) return null
+    return { path: data.path, exists: data.exists === true, home: typeof data.home === 'string' ? data.home : '' }
+  } catch {
+    return null
+  }
+}
+
+export interface DirectoryListing {
+  path: string
+  /** Null at the top of what the engine lets the explorer browse (the user's home). */
+  parent: string | null
+  home: string
+  entries: ProjectFileInfo[]
+  truncated: boolean
+}
+
+export type FetchDirectoryResult =
+  | { ok: true; listing: DirectoryListing }
+  | { ok: false; status: number; error?: string }
+
+/** One level of a folder on the engine's machine. Entry paths are absolute. */
+export async function fetchDirectory(path: string): Promise<FetchDirectoryResult> {
+  try {
+    const resp = await fetch(`${getApiUrl()}/fs/list?path=${encodeURIComponent(path)}`)
+    const data = await resp.json().catch(() => null)
+    if (!resp.ok) {
+      return { ok: false, status: resp.status, error: typeof data?.error === 'string' ? data.error : undefined }
+    }
+    return {
+      ok: true,
+      listing: {
+        path: typeof data?.path === 'string' ? data.path : path,
+        parent: typeof data?.parent === 'string' ? data.parent : null,
+        home: typeof data?.home === 'string' ? data.home : '',
+        entries: normalizeProjectFileRows(data?.entries),
+        truncated: data?.truncated === true,
+      },
+    }
+  } catch (err) {
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : undefined }
+  }
 }
 
 export function getArtifactDownloadUrl(url: string): string {

@@ -30,6 +30,7 @@ import { useWorkflowWebSocket } from '@/hooks/useWorkflowWebSocket'
 import { cn } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { t } from '@/i18n'
+import { useActiveChatStarted } from '@/hooks/useActiveChatStarted'
 
 function ChevronLeft({ className }: { className?: string }) {
   return (
@@ -142,7 +143,8 @@ export function AppLayout() {
   const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed)
   const setAgentPanelCollapsed = useUiStore((s) => s.setAgentPanelCollapsed)
   const chatCenterCollapsed = useUiStore((s) => s.chatCenterCollapsed)
-  const toggleChatCenter = useUiStore((s) => s.toggleChatCenter)
+  const chatCenterAuto = useUiStore((s) => s.chatCenterAuto)
+  const chatStarted = useActiveChatStarted()
   const setChatCenterCollapsed = useUiStore((s) => s.setChatCenterCollapsed)
   const promotion = useUiStore((s) => s.promotion)
   const closePromotion = useUiStore((s) => s.closePromotion)
@@ -154,7 +156,8 @@ export function AppLayout() {
   // workbench. Collapsing the center gives the conversation the available space.
   const isChat = appMode === 'normal'
   const isProjectOverview = !isChat && activeStage === 'modules'
-  const centerCollapsed = isChat && chatCenterCollapsed
+  // The home pane is the start page of a new chat and steps aside once it has begun.
+  const centerCollapsed = isChat && (chatCenterAuto ? chatStarted : chatCenterCollapsed)
   const workbenchWidth = !isChat && agentPanelCollapsed ? 0 : centerCollapsed ? undefined : agentPanelWidth
   // Suppress width transitions while actively dragging a splitter so the panel
   // tracks the cursor 1:1 instead of easing behind it.
@@ -228,7 +231,7 @@ export function AppLayout() {
         {/* Quick Chat: click collapses the home pane, drag resizes the workbench. */}
         {isChat && (
           <SplitterToggle
-            onToggle={toggleChatCenter}
+            onToggle={() => setChatCenterCollapsed(!centerCollapsed)}
             onStart={() => {
               setChatCenterCollapsed(false)
               setResizing(true)
@@ -238,7 +241,7 @@ export function AppLayout() {
             className="border-l border-[var(--color-border)]"
             ariaLabel={t('toggleChatCenter', lang)}
           >
-            {chatCenterCollapsed ? <ChevronRight /> : <ChevronLeft />}
+            {centerCollapsed ? <ChevronRight /> : <ChevronLeft />}
           </SplitterToggle>
         )}
 

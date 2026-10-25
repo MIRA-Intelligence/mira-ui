@@ -5,6 +5,7 @@ import {
   attachChatContext,
   createRemoteProject,
   createWorkflowRun,
+  deleteOrganizationChat,
   deleteProject,
   deleteProjectFiles,
   fetchChatContextPreview,
@@ -26,6 +27,7 @@ import {
   updateProjectDisplayName,
   updateProjectRuntimePreferences,
   uploadProjectFiles,
+  uploadToFolder,
   validateDataPath,
 } from './api'
 import type { FeedbackPayload } from './api'
@@ -345,13 +347,48 @@ describe('api service', () => {
     it('posts form data and maps the response', async () => {
       fetchMock.mockResolvedValueOnce(ok({ uploaded: [{ name: 'a', path: 'p', size: 1 }], extracted: [] }))
       const file = new File(['x'], 'a.txt')
-      const res = await uploadProjectFiles('PRJ-1', [file], 'references')
+      const res = await uploadProjectFiles('PRJ-1', [file], 'results/run 1')
       expect(res.uploaded).toHaveLength(1)
-      expect(lastUrl()).toContain('target=references')
+      expect(lastUrl()).toContain('/projects/PRJ-1/files?dir=results%2Frun%201')
+    })
+    it('uploads to the project root by default', async () => {
+      fetchMock.mockResolvedValueOnce(ok({ uploaded: [], extracted: [] }))
+      await uploadProjectFiles('PRJ-1', [new File(['x'], 'a.txt')])
+      expect(lastUrl()).toContain('/projects/PRJ-1/files?dir=')
+      expect(lastUrl()).not.toContain('target=')
     })
     it('throws a useful message on failure', async () => {
       fetchMock.mockResolvedValueOnce(fail({ error: 'too big' }, 413))
       await expect(uploadProjectFiles('PRJ-1', [new File(['x'], 'a')])).rejects.toThrow('too big')
+    })
+  })
+
+  describe('deleteOrganizationChat', () => {
+    it('keeps the chat folder unless deleteFiles is set', async () => {
+      fetchMock.mockResolvedValueOnce(ok({ deleted: true, files_deleted: false }))
+      await deleteOrganizationChat('chat-1')
+      expect(lastUrl()).toMatch(/\/organization\/chats\/chat-1$/)
+
+      fetchMock.mockResolvedValueOnce(ok({ deleted: true, files_deleted: true }))
+      await deleteOrganizationChat('chat-1', { deleteFiles: true })
+      expect(lastUrl()).toMatch(/\/organization\/chats\/chat-1\?delete_files=1$/)
+    })
+    it('throws when the engine could not delete the folder', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ error: 'could not delete /w/chats/chat-1: busy' }, 500))
+      await expect(deleteOrganizationChat('chat-1', { deleteFiles: true })).rejects.toThrow('busy')
+    })
+  })
+
+  describe('uploadToFolder', () => {
+    it('posts to the fs upload endpoint with the absolute folder', async () => {
+      fetchMock.mockResolvedValueOnce(ok({ uploaded: [{ name: 'a.txt', path: '/h/ws/chats/c1/a.txt', size: 1 }] }))
+      const res = await uploadToFolder('/h/ws/chats/c1', [new File(['x'], 'a.txt')])
+      expect(res).toEqual([{ name: 'a.txt', path: '/h/ws/chats/c1/a.txt', size: 1 }])
+      expect(lastUrl()).toContain('/fs/upload?dir=%2Fh%2Fws%2Fchats%2Fc1')
+    })
+    it('throws the engine error', async () => {
+      fetchMock.mockResolvedValueOnce(fail({ error: 'path is outside the browsable folders' }, 403))
+      await expect(uploadToFolder('/etc', [new File(['x'], 'a')])).rejects.toThrow('outside')
     })
   })
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('./TopBar', () => ({ TopBar: () => <div>top-bar</div> }))
@@ -22,6 +22,7 @@ vi.mock('@/hooks/useWorkflowWebSocket', () => ({ useWorkflowWebSocket: vi.fn() }
 vi.mock('@/hooks/useUpdateCheck', () => ({ useUpdateCheck: vi.fn() }))
 vi.mock('@/hooks/useTurnSync', () => ({ useTurnSync: vi.fn() }))
 
+import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -57,44 +58,89 @@ describe('AppLayout project surfaces', () => {
     expect(screen.getByText('agent-panel')).toBeInTheDocument()
   })
 
-  it('opens a workspace file in the Quick Chat center from the workbench', async () => {
-    useProjectStore.setState({
-      appMode: 'normal',
-      tasks: [{
-        id: 'PRJ-A', label: 'Project One', title: '', status: 'pending',
-        experiments: [], knowledge: [], research: { references: [], notes: [] }, result: {}, startedAt: '',
-      }],
-      projectsLoaded: true,
+  it('opens a chat folder file in the Quick Chat center from the workbench', async () => {
+    useProjectStore.setState({ appMode: 'normal', tasks: [], projectsLoaded: true })
+    useChatStore.setState({ activeChatId: 'chat-1' })
+    const folder = '/home/u/.mira/workspace/chats/chat-1'
+    vi.spyOn(api, 'fetchChatWorkdir').mockResolvedValue({ path: folder, exists: true, home: '/home/u' })
+    vi.spyOn(api, 'fetchDirectory').mockResolvedValue({
+      ok: true,
+      listing: {
+        path: folder,
+        parent: '/home/u/.mira/workspace/chats',
+        home: '/home/u',
+        truncated: false,
+        entries: [{ name: 'a.txt', path: `${folder}/a.txt`, size: 3, mtime: 1, is_dir: false }],
+      },
     })
-    vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([
-      { name: 'a.txt', path: 'data/a.txt', size: 3, mtime: 1, is_dir: false },
-    ])
     render(<AppLayout />)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Files' }))
     const explorer = within(screen.getByPlaceholderText('Filter files…').closest('.flex-col') as HTMLElement)
-    fireEvent.click(await explorer.findByText('Project One'))
-    fireEvent.click(screen.getByText('data'))
-    fireEvent.click(screen.getByText('a.txt'))
-    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({
-      projectId: 'PRJ-A', relativePath: 'data/a.txt',
-    })
-    expect(screen.getByText('PRJ-A/data/a.txt')).toBeInTheDocument()
+    fireEvent.click(await explorer.findByText('a.txt'))
+    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({ absolutePath: `${folder}/a.txt` })
+    expect(screen.getByText(`${folder}/a.txt`)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Agent Chat/i }))
     expect(screen.getByText('agent-panel')).toBeInTheDocument()
-    expect(screen.getByText('PRJ-A/data/a.txt')).toBeInTheDocument()
+    expect(screen.getByText(`${folder}/a.txt`)).toBeInTheDocument()
   })
 
-  it('can reopen the center after a new chat focuses the workbench', () => {
-    useProjectStore.setState({ appMode: 'normal', tasks: [] })
-    useUiStore.getState().focusQuickChatWorkbench()
-    render(<AppLayout />)
-    const toggle = screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
-    expect(useUiStore.getState().chatCenterCollapsed).toBe(true)
-    expect(screen.getByText('agent-panel')).toBeInTheDocument()
-    fireEvent.click(toggle)
-    expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
+  describe('Quick Chat home page', () => {
+    const homeVisible = () => !screen.getByText('Quick chat').closest('[hidden]')
+    const toggle = () => screen.getByRole('separator', { name: 'Toggle quick chat home panel' })
+
+    beforeEach(() => {
+      vi.spyOn(api, 'fetchChatWorkdir').mockResolvedValue(null)
+      useProjectStore.setState({ appMode: 'normal', tasks: [] })
+      useChatStore.setState({ activeChatId: null, chats: [] })
+      useUiStore.setState({ chatCenterAuto: true, chatCenterCollapsed: false })
+    })
+
+    it('shows the home page with no chat selected and for a new chat', () => {
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(true)
+
+      act(() => { useChatStore.getState().createChat() })
+      expect(homeVisible()).toBe(true)
+      expect(screen.getByText('agent-panel')).toBeInTheDocument()
+    })
+
+    it('steps aside once the chat has its first message', () => {
+      const id = useChatStore.getState().createChat()
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(true)
+      act(() => useChatStore.getState().touchChat(id, 'Summarise this scan'))
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('stays collapsed when opening a chat that has begun', () => {
+      useChatStore.setState({ chats: [{ id: 'old', title: 'Earlier question', createdAt: 1, updatedAt: 1 }] })
+      act(() => useChatStore.getState().selectChat('old'))
+      render(<AppLayout />)
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('follows a manual toggle until another chat is opened', () => {
+      useChatStore.setState({ chats: [
+        { id: 'old', title: 'Earlier question', createdAt: 1, updatedAt: 1 },
+        { id: 'other', title: 'Another', createdAt: 1, updatedAt: 2 },
+      ] })
+      act(() => useChatStore.getState().selectChat('old'))
+      render(<AppLayout />)
+      fireEvent.click(toggle())
+      expect(homeVisible()).toBe(true)
+
+      act(() => useChatStore.getState().selectChat('other'))
+      expect(homeVisible()).toBe(false)
+    })
+
+    it('can be collapsed by hand on a new chat', () => {
+      act(() => { useChatStore.getState().createChat() })
+      render(<AppLayout />)
+      fireEvent.click(toggle())
+      expect(homeVisible()).toBe(false)
+    })
   })
 
   it('resizes the Quick Chat workbench by dragging the splitter', () => {

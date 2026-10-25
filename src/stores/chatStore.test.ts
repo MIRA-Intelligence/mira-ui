@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useChatStore } from './chatStore'
 import { useProjectStore } from './projectStore'
+import { useUiStore } from './uiStore'
 import { installLocalStorage } from '@/test/localStorage'
 import { deleteOrganizationChat } from '@/services/api'
 
@@ -88,12 +89,14 @@ describe('chatStore', () => {
     expect(useChatStore.getState().activeChatId).toBe(first)
   })
 
-  it('deleteChat switches to project mode when no chats remain', () => {
+  it('deleteChat stays in Quick Chat on its home page when no chats remain', () => {
     useChatStore.getState().loadForWorkspace('ws7')
     const only = useChatStore.getState().createChat()
+    useUiStore.setState({ chatCenterAuto: false })
     useChatStore.getState().deleteChat(only)
     expect(useChatStore.getState().activeChatId).toBeNull()
-    expect(useProjectStore.getState().appMode).toBe('project')
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    expect(useUiStore.getState().chatCenterAuto).toBe(true)
   })
 
   it('bulk deletion keeps failed chats and removes only server-confirmed entries', async () => {
@@ -108,6 +111,18 @@ describe('chatStore', () => {
     expect(useChatStore.getState().chats.map((chat) => chat.id)).toEqual(['b'])
     expect(useChatStore.getState().activeChatId).toBe('b')
     expect(JSON.parse(localStorage.getItem('mira.chats:batch')!)).toHaveLength(1)
+  })
+
+  it('passes the delete-files choice to the engine for every chat', async () => {
+    useChatStore.setState({ workspaceKey: 'files', activeChatId: null, chats: [
+      { id: 'a', title: 'A', createdAt: 1, updatedAt: 1 },
+      { id: 'b', title: 'B', createdAt: 2, updatedAt: 2 },
+    ] })
+    await useChatStore.getState().deleteChats(['a', 'b'], { deleteFiles: true })
+    expect(vi.mocked(deleteOrganizationChat).mock.calls).toEqual([
+      ['a', { deleteFiles: true }],
+      ['b', { deleteFiles: true }],
+    ])
   })
 
   it('does not optimistically erase chats while deletion is pending', async () => {

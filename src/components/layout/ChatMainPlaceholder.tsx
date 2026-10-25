@@ -1,9 +1,16 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import miraLogo from '@/assets/mira-logo.png'
 import { ArtifactPreview } from '@/components/artifacts'
 import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { detectArtifactKind, isPreviewableInline } from '@/components/artifacts/detectKind'
-import { getArtifactDownloadUrl, getProjectArtifactUrl } from '@/services/api'
+import {
+  fetchChatWorkdir,
+  fetchDirectory,
+  getArtifactDownloadUrl,
+  getExplorerFileUrl,
+  uploadToFolder,
+} from '@/services/api'
+import type { ProjectFileInfo } from '@/types'
 import { useChatStore } from '@/stores/chatStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -12,6 +19,8 @@ import { t } from '@/i18n'
 import { cn } from '@/lib/utils'
 
 const RECENT_PROJECT_LIMIT = 5
+const RECENT_CHAT_LIMIT = 5
+const CHAT_FILE_LIMIT = 5
 
 const PROMPT_KEYS = [
   'chatHomePromptResearch',
@@ -40,14 +49,73 @@ export function ChatMainPlaceholder() {
   const setAgentDraftPrompt = useUiStore((s) => s.setAgentDraftPrompt)
   const focusQuickChatWorkbench = useUiStore((s) => s.focusQuickChatWorkbench)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const pushSystemMessage = useUiStore((s) => s.pushSystemMessage)
+  const chatFilesRevision = useUiStore((s) => s.chatFilesRevision)
+  const bumpChatFiles = useUiStore((s) => s.bumpChatFiles)
   const tasks = useProjectStore((s) => s.tasks)
   const selectTask = useProjectStore((s) => s.selectTask)
   const createChat = useChatStore((s) => s.createChat)
+  const selectChat = useChatStore((s) => s.selectChat)
+  const chats = useChatStore((s) => s.chats)
+  const activeChatId = useChatStore((s) => s.activeChatId)
+  const [chatFiles, setChatFiles] = useState<ProjectFileInfo[]>([])
+  const [uploading, setUploading] = useState(false)
+  const uploadInputId = useId()
 
   const recentProjects = useMemo(
     () => tasks.slice(0, RECENT_PROJECT_LIMIT),
     [tasks],
   )
+  // Chats that have begun, so there is something to go back to.
+  const recentChats = useMemo(
+    () => chats
+      .filter((chat) => chat.id !== activeChatId && chat.title)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, RECENT_CHAT_LIMIT),
+    [chats, activeChatId],
+  )
+
+  // The newest files in this chat's folder (e.g. uploaded before the first message).
+  useEffect(() => {
+    let cancelled = false
+    setChatFiles([])
+    if (!activeChatId) return
+    void (async () => {
+      const workdir = await fetchChatWorkdir(activeChatId)
+      if (cancelled || !workdir?.exists) return
+      const result = await fetchDirectory(workdir.path)
+      if (cancelled || !result.ok) return
+      setChatFiles(result.listing.entries
+        .filter((entry) => !entry.is_dir)
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(0, CHAT_FILE_LIMIT))
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [activeChatId, chatFilesRevision])
+
+  // Upload into this chat's folder (starting a chat if needed), then suggest analysing it.
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length === 0) return
+    const chatId = useChatStore.getState().activeChatId ?? createChat()
+    setUploading(true)
+    try {
+      const workdir = await fetchChatWorkdir(chatId)
+      if (!workdir) throw new Error(t('uploadFailed', lang))
+      const uploaded = await uploadToFolder(workdir.path, files)
+      bumpChatFiles()
+      pushSystemMessage(t('uploadedSuccessfully', lang), { severity: 'success' })
+      const names = (uploaded.length ? uploaded : files).map((file) => file.name).join(', ')
+      setAgentDraftPrompt(t('chatHomeAnalyzeUploaded', lang, { names }))
+    } catch (err: unknown) {
+      pushSystemMessage(err instanceof Error ? err.message : t('uploadFailed', lang), { severity: 'error' })
+    } finally {
+      setUploading(false)
+    }
+  }
 
   const usePrompt = (key: (typeof PROMPT_KEYS)[number]) => {
     if (!useChatStore.getState().activeChatId) createChat()
@@ -70,7 +138,7 @@ export function ChatMainPlaceholder() {
           <button
             type="button"
             onClick={() => {
-              const url = getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)
+              const url = getExplorerFileUrl(previewFile)
               const link = document.createElement('a')
               link.href = getArtifactDownloadUrl(url)
               link.download = previewFile.name
@@ -95,7 +163,7 @@ export function ChatMainPlaceholder() {
         <div className="flex-1 overflow-auto p-4 min-h-0">
           <ArtifactPreview
             path={previewFile.relativePath}
-            url={getProjectArtifactUrl(previewFile.projectId, previewFile.relativePath)}
+            url={getExplorerFileUrl(previewFile)}
             enabled
             label={previewFile.name}
             bodyOnly={isPreviewableInline(detectArtifactKind(previewFile.relativePath))}
@@ -128,7 +196,43 @@ export function ChatMainPlaceholder() {
           <ActionButton onClick={() => setCreateProjectOpen(true)}>
             {t('createProject', lang)}
           </ActionButton>
+          <label
+            htmlFor={uploadInputId}
+            className={cn(actionButtonClass, 'cursor-pointer', uploading && 'pointer-events-none opacity-50')}
+          >
+            {t('chatHomeUploadData', lang)}
+          </label>
+          <input
+            id={uploadInputId}
+            type="file"
+            multiple
+            className="sr-only"
+            onChange={(e) => void handleUpload(e)}
+          />
         </div>
+
+        {chatFiles.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              {t('chatHomeChatFiles', lang)}
+            </h2>
+            <ul className="space-y-1.5">
+              {chatFiles.map((file) => (
+                <li key={file.path}>
+                  <button
+                    type="button"
+                    onClick={() => setChatCenterPreviewFile({
+                      ...file, projectId: '', relativePath: file.name, absolutePath: file.path,
+                    })}
+                    className="w-full text-left px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-xs font-mono truncate text-[var(--color-text-secondary)]"
+                  >
+                    {file.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="space-y-2">
           <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
@@ -147,6 +251,27 @@ export function ChatMainPlaceholder() {
             ))}
           </div>
         </section>
+
+        {recentChats.length > 0 && (
+          <section className="space-y-2">
+            <h2 className="text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              {t('chatHomeRecentChats', lang)}
+            </h2>
+            <ul className="space-y-1.5">
+              {recentChats.map((chat) => (
+                <li key={chat.id}>
+                  <button
+                    type="button"
+                    onClick={() => selectChat(chat.id)}
+                    className="w-full text-left px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors text-sm truncate text-[var(--color-text-primary)]"
+                  >
+                    {chat.title}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         {recentProjects.length > 0 && (
           <section className="space-y-2">
@@ -184,6 +309,12 @@ export function ChatMainPlaceholder() {
   )
 }
 
+const actionButtonClass = cn(
+  'px-4 py-2 rounded-lg text-sm font-medium',
+  'bg-[var(--color-accent)]/15 text-[var(--color-accent)]',
+  'hover:bg-[var(--color-accent)]/25 transition-colors',
+)
+
 function ActionButton({
   children,
   onClick,
@@ -195,11 +326,7 @@ function ActionButton({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        'px-4 py-2 rounded-lg text-sm font-medium',
-        'bg-[var(--color-accent)]/15 text-[var(--color-accent)]',
-        'hover:bg-[var(--color-accent)]/25 transition-colors',
-      )}
+      className={actionButtonClass}
     >
       {children}
     </button>

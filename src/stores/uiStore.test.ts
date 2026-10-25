@@ -134,8 +134,9 @@ describe('uiStore.quickChatLayout', () => {
     useUiStore.setState(initialState, true)
   })
 
-  it('focusQuickChatWorkbench collapses center and expands the agent workbench', () => {
+  it('focusQuickChatWorkbench lets the home pane follow the chat and expands the agent workbench', () => {
     useUiStore.setState({
+      chatCenterAuto: false,
       chatCenterCollapsed: false,
       agentPanelCollapsed: true,
       workbenchTab: 'files',
@@ -143,7 +144,7 @@ describe('uiStore.quickChatLayout', () => {
     })
     useUiStore.getState().focusQuickChatWorkbench()
     const s = useUiStore.getState()
-    expect(s.chatCenterCollapsed).toBe(true)
+    expect(s.chatCenterAuto).toBe(true)
     expect(s.agentPanelCollapsed).toBe(false)
     expect(s.workbenchTab).toBe('agent')
     expect(s.chatCenterPreviewFile).toBeNull()
@@ -161,5 +162,12 @@ describe('uiStore.quickChatLayout', () => {
       is_dir: false,
     })
     expect(useUiStore.getState().chatCenterCollapsed).toBe(false)
+    expect(useUiStore.getState().chatCenterAuto).toBe(false)
+  })
+
+  it('a manual collapse overrides the automatic home pane', () => {
+    useUiStore.setState({ chatCenterAuto: true })
+    useUiStore.getState().setChatCenterCollapsed(true)
+    expect(useUiStore.getState()).toMatchObject({ chatCenterAuto: false, chatCenterCollapsed: true })
   })
 })

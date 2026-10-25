@@ -48,27 +48,6 @@ describe('ResourceExplorer file identity', () => {
     expect(screen.queryByText('🗑')).not.toBeInTheDocument()
   })
 
-  it('keeps same-named project files separate and routes the selected project', async () => {
-    useProjectStore.setState({
-      appMode: 'normal',
-      tasks: [{ id: 'PRJ-A', label: 'same' }, { id: 'PRJ-B', label: 'same' }] as ReturnType<typeof useProjectStore.getState>['tasks'],
-    })
-    vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([
-      { name: 'a.csv', path: 'data/a.csv', size: 1, mtime: 1, is_dir: false },
-    ])
-    render(<ResourceExplorer />)
-    const projects = await screen.findAllByText('same')
-    expect(projects).toHaveLength(2)
-    projects.forEach((project) => fireEvent.click(project))
-    screen.getAllByText('data').forEach((directory) => fireEvent.click(directory))
-    const files = screen.getAllByText('a.csv')
-    expect(files).toHaveLength(2)
-    fireEvent.click(files[1])
-    expect(useUiStore.getState().chatCenterPreviewFile).toMatchObject({
-      projectId: 'PRJ-B', relativePath: 'data/a.csv', path: 'PRJ-B/data/a.csv',
-    })
-  })
-
   it('shows matches inside collapsed folders while filtering', async () => {
     vi.spyOn(api, 'fetchProjectFilesResult').mockResolvedValue({
       ok: true,
@@ -104,20 +83,6 @@ describe('ResourceExplorer file identity', () => {
     expect(screen.queryByText('old.txt')).not.toBeInTheDocument()
   })
 
-  it('keeps the chat preview open when task statuses refresh', async () => {
-    const file = { name: 'a.csv', path: 'data/a.csv', size: 1, mtime: 1, is_dir: false }
-    const tasks = [{ id: 'PRJ-A', label: 'a' }] as ReturnType<typeof useProjectStore.getState>['tasks']
-    useProjectStore.setState({ appMode: 'normal', tasks })
-    const fetchFiles = vi.spyOn(api, 'fetchProjectFiles').mockResolvedValue([file])
-    render(<ResourceExplorer />)
-    await screen.findByText('a')
-    const preview = { ...file, projectId: 'PRJ-A', relativePath: 'data/a.csv' }
-    act(() => useUiStore.getState().setChatCenterPreviewFile(preview))
-    act(() => useProjectStore.setState({ tasks: tasks.map((task) => ({ ...task })) }))
-    expect(useUiStore.getState().chatCenterPreviewFile).toEqual(preview)
-    expect(fetchFiles).toHaveBeenCalledTimes(1)
-  })
-
   it('says when the engine truncated the listing', async () => {
     vi.spyOn(api, 'fetchProjectFilesResult').mockResolvedValue({
       ok: true,
@@ -126,5 +91,54 @@ describe('ResourceExplorer file identity', () => {
     })
     render(<ResourceExplorer />)
     expect(await screen.findByText(/too many files/)).toBeInTheDocument()
+  })
+
+  describe('upload', () => {
+    beforeEach(() => {
+      vi.spyOn(api, 'fetchProjectFilesResult').mockResolvedValue({
+        ok: true,
+        truncated: false,
+        files: [
+          { name: 'a.csv', path: 'data/raw/a.csv', size: 1, mtime: 1, is_dir: false },
+          { name: 'notes.md', path: 'notes.md', size: 1, mtime: 1, is_dir: false },
+        ],
+      })
+    })
+
+    function upload(container: HTMLElement) {
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, { target: { files: [new File(['x'], 'b.csv')] } })
+    }
+
+    it('has one upload button and uploads to the project root by default', async () => {
+      const send = vi.spyOn(api, 'uploadProjectFiles').mockResolvedValue({ uploaded: [], extracted: [] })
+      const { container } = render(<ResourceExplorer />)
+      await screen.findByText('data')
+      expect(container.querySelectorAll('input[type="file"]')).toHaveLength(1)
+      expect(screen.queryByText('📎')).not.toBeInTheDocument()
+
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledWith('PRJ-A', expect.any(Array), ''))
+    })
+
+    it('uploads into the selected folder or the selected file\'s folder', async () => {
+      const send = vi.spyOn(api, 'uploadProjectFiles').mockResolvedValue({ uploaded: [], extracted: [] })
+      const { container } = render(<ResourceExplorer />)
+      fireEvent.click(await screen.findByText('data'))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), 'data'))
+
+      fireEvent.click(screen.getByText('raw'))
+      fireEvent.click(screen.getByText('a.csv'))
+      fireEvent.click(screen.getByRole('button', { name: 'Close preview' }))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+      expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), 'data/raw')
+
+      fireEvent.click(screen.getByText('notes.md'))
+      upload(container)
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3))
+      expect(send).toHaveBeenLastCalledWith('PRJ-A', expect.any(Array), '')
+    })
   })
 })

@@ -87,7 +87,7 @@ describe('uploadProjectFiles', () => {
       configurable: true,
     })
 
-    await uploadProjectFiles('PRJ-0001', [file], 'data')
+    await uploadProjectFiles('PRJ-0001', [file])
 
     expect(captured).not.toBeNull()
     const formData = captured as unknown as FormData
