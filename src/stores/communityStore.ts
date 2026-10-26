@@ -73,6 +73,13 @@ const IDLE_PAIRING: PairingState = {
   error: null,
 }
 
+/**
+ * The reserved chat the agent reports its community work in; null until the
+ * user has joined, and on an engine that has no such chat.
+ */
+export const selectCommunityChatId = (s: CommunityState): string | null =>
+  s.status?.logged_in && s.status.chat_id ? s.status.chat_id : null
+
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
 function stopPolling() {

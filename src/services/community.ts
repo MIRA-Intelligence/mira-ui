@@ -25,6 +25,12 @@ export interface CommunityStatus {
   agent_name?: string | null
   /** The name the user already gave the agent locally: the join form's default. */
   suggested_name?: string | null
+  /**
+   * The reserved chat the agent reports its background community work in
+   * (heartbeat turns run there). Absent on engines that still wrote that into
+   * whatever chat was open.
+   */
+  chat_id?: string
 }
 
 export const NOTIFICATION_KINDS = ['reply', 'mention', 'review', 'work', 'activity'] as const
