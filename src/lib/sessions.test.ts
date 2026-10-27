@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  COMMUNITY_CHAT_SESSION_ID,
   NORMAL_CHAT_SESSION_ID,
   isChatSessionId,
   isProjectSessionId,
+  isReservedChatId,
   newChatSessionId,
   newProjectSessionId,
 } from './sessions'
@@ -22,6 +24,13 @@ describe('isChatSessionId', () => {
   it('matches chat ids and the legacy normal id', () => {
     expect(isChatSessionId('chat-abc')).toBe(true)
     expect(isChatSessionId(NORMAL_CHAT_SESSION_ID)).toBe(true)
+  })
+
+  it('treats the reserved community chat as a chat, and only it as reserved', () => {
+    expect(isChatSessionId(COMMUNITY_CHAT_SESSION_ID)).toBe(true)
+    expect(isReservedChatId(COMMUNITY_CHAT_SESSION_ID)).toBe(true)
+    expect(isReservedChatId('chat-abc')).toBe(false)
+    expect(isReservedChatId(null)).toBe(false)
   })
 
   it('rejects project ids and nullish values', () => {

@@ -52,6 +52,20 @@ describe('chatStore', () => {
     expect(useChatStore.getState().chats[0].title).toBe('Hi')
   })
 
+  it('replaceFromRemote keeps the reserved community chat open although the engine index never lists it', () => {
+    useChatStore.getState().loadForWorkspace('ws2b')
+    useChatStore.setState({ activeChatId: 'community' })
+    useChatStore.getState().replaceFromRemote([
+      { id: 'chat-x', title: 'Hi', created_at: '2026-10-26T00:00:00Z', updated_at: '2026-10-26T00:00:00Z' },
+    ])
+    expect(useChatStore.getState().activeChatId).toBe('community')
+    expect(useChatStore.getState().chats.map((chat) => chat.id)).toEqual(['chat-x'])
+    // A chat of the user's own that the engine no longer lists is dropped as before.
+    useChatStore.setState({ activeChatId: 'chat-gone' })
+    useChatStore.getState().replaceFromRemote([])
+    expect(useChatStore.getState().activeChatId).toBeNull()
+  })
+
   it('renameChat trims, caps length and ignores empty titles', () => {
     useChatStore.getState().loadForWorkspace('ws3')
     const id = useChatStore.getState().createChat()

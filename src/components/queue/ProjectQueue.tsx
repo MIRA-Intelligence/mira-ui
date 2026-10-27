@@ -9,11 +9,14 @@ import type { Stats } from '@/types'
 import { QueueItem } from './QueueItem'
 import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
 import { ChatItem } from './ChatItem'
+import { CommunityChatItem } from './CommunityChatItem'
 import { DeleteChatsDialog } from './DeleteChatsDialog'
 import { FolderRow } from './FolderRow'
 import { cn } from '@/lib/utils'
 import { t } from '@/i18n'
 import { useOrganizationStore, type OrganizationKind } from '@/stores/organizationStore'
+import { selectCommunityChatId, useCommunityStore } from '@/stores/communityStore'
+import { useCommunityChatUnread } from '@/stores/communityChatStore'
 
 const ORGANIZATION_DRAG_TYPE = 'application/x-mira-organization-item'
 const UNCATEGORIZED_ID = '__uncategorized__'
@@ -51,6 +54,10 @@ export function ProjectQueue() {
   const { chats, activeChatId, workspaceKey, createChat, selectChat, renameChat, deleteChats } = useChatStore(useShallow((s) => ({ chats: s.chats, activeChatId: s.activeChatId, workspaceKey: s.workspaceKey, createChat: s.createChat, selectChat: s.selectChat, renameChat: s.renameChat, deleteChats: s.deleteChats })))
   const { folders, assignments, loaded: organizationLoaded, createFolder, renameFolder, deleteFolder, moveItem } = useOrganizationStore()
   const isChatActive = appMode === 'normal'
+  // The reserved chat the agent reports its community work in: pinned above
+  // the user's own chats once they have joined; never in a folder or a batch.
+  const communityChatId = useCommunityStore(selectCommunityChatId)
+  const communityUnread = useCommunityChatUnread(communityChatId)
 
   // The rail tabs are the two primary app-mode entry points. Their visible
   // list follows the active surface rather than acting as a passive filter.
@@ -105,7 +112,7 @@ export function ProjectQueue() {
     if (bulkOperation.current) return
     setTab('chats')
     const availableChatId = (
-      activeChatId && chats.some((chat) => chat.id === activeChatId)
+      activeChatId && (chats.some((chat) => chat.id === activeChatId) || activeChatId === communityChatId)
         ? activeChatId
         : chats[0]?.id
     )
@@ -197,6 +204,13 @@ export function ProjectQueue() {
       selectionAnchor.current = id
       selectChat(id)
     }
+  }
+
+  const handleSelectCommunityChat = () => {
+    if (bulkOperation.current || !communityChatId) return
+    setSelectedChats(new Set())
+    selectionAnchor.current = null
+    selectChat(communityChatId)
   }
 
   const batchTargets = (id?: string) => id && !selectedChats.has(id) ? [id] : [...selectedChats]
@@ -406,7 +420,18 @@ export function ProjectQueue() {
           </div>
         )}
         {showChats ? (
-          chats.length === 0 && !normalizedSearch ? (
+          <>
+          {communityChatId && (!normalizedSearch || itemMatches(t('communityTitle', lang))) && (
+            <div className={cn(chats.length > 0 && 'mb-1 border-b border-[var(--color-border)] pb-1')}>
+              <CommunityChatItem
+                isSelected={isChatActive && activeChatId === communityChatId}
+                unread={communityUnread}
+                disabled={bulkBusy}
+                onSelect={handleSelectCommunityChat}
+              />
+            </div>
+          )}
+          {chats.length === 0 && !normalizedSearch ? (
             <p className="px-3 py-4 text-[11px] text-center text-[var(--color-text-muted)]">
               {t('noConversationsYet', lang)}
             </p>
@@ -446,7 +471,8 @@ export function ProjectQueue() {
                 </div>
               )}
             </>
-          )
+          )}
+          </>
         ) : (
           <>
             {projectGroups.filter(({ folder, items }) => !normalizedSearch || items.length > 0 || folder.name.toLocaleLowerCase().includes(normalizedSearch)).map(({ folder, items }) => (

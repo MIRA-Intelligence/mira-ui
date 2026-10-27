@@ -26,6 +26,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useCommunityChat } from '@/hooks/useCommunityChat'
 import { useTurnSync } from '@/hooks/useTurnSync'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { useWorkflowWebSocket } from '@/hooks/useWorkflowWebSocket'
@@ -166,6 +167,7 @@ export function AppLayout() {
   const [resizing, setResizing] = useState(false)
   const flushPendingFeedback = useFeedbackStore((s) => s.flushPending)
   useWebSocket()
+  useCommunityChat()
   useWorkflowWebSocket()
   useTurnSync()
   useUpdateCheck()

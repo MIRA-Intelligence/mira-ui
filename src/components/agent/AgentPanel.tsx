@@ -7,6 +7,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useSettingsStore, type Language } from '@/stores/settingsStore'
 import { wsClient } from '@/services/websocket'
 import { fetchSessionHistory } from '@/services/api'
+import { isReservedChatId } from '@/lib/sessions'
 import { LogEntry } from './LogEntry'
 import { formatTime } from '@/lib/utils'
 import type { LogEntry as AgentLogEntry, TurnStopReason } from '@/types'
@@ -312,7 +313,7 @@ export function AgentPanelActions() {
           {experimentMode}
         </span>
       )}
-      {sessionId && isChat && (
+      {sessionId && isChat && !isReservedChatId(sessionId) && (
         <div
           className="relative ml-auto"
           onKeyDown={(event) => { if (event.key === 'Escape') setPromoteMenuOpen(false) }}
