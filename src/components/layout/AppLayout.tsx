@@ -14,6 +14,8 @@ import { ProvidersPage } from '@/components/providers/ProvidersPage'
 import { TeamUsagePage } from '@/components/team/TeamUsagePage'
 import { KnowledgePage } from '@/components/knowledge/KnowledgePage'
 import { CreateProjectDialog } from '@/components/project/CreateProjectDialog'
+import { CommunityModal } from '@/components/community/CommunityModal'
+import { OnboardingModal } from '@/components/onboarding/OnboardingModal'
 import { UpdateBanner } from '@/components/update/UpdateBanner'
 import { LocalEngineUpdateModal } from '@/components/engine/LocalEngineUpdateModal'
 import { SshPromptDialog } from '@/components/settings/SshPromptDialog'
@@ -24,6 +26,7 @@ import { useUiStore } from '@/stores/uiStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useFeedbackStore } from '@/stores/feedbackStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
+import { useCommunityChat } from '@/hooks/useCommunityChat'
 import { useTurnSync } from '@/hooks/useTurnSync'
 import { useUpdateCheck } from '@/hooks/useUpdateCheck'
 import { useWorkflowWebSocket } from '@/hooks/useWorkflowWebSocket'
@@ -164,6 +167,7 @@ export function AppLayout() {
   const [resizing, setResizing] = useState(false)
   const flushPendingFeedback = useFeedbackStore((s) => s.flushPending)
   useWebSocket()
+  useCommunityChat()
   useWorkflowWebSocket()
   useTurnSync()
   useUpdateCheck()
@@ -292,6 +296,8 @@ export function AppLayout() {
       <TeamUsagePage />
       <KnowledgePage />
       {promotion && <CreateProjectDialog key={promotion.chatId} promotion={promotion} onClose={closePromotion} />}
+      <CommunityModal />
+      <OnboardingModal />
       <FeedbackDialog />
     </div>
   )

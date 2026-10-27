@@ -113,6 +113,8 @@ interface UiState {
   // Team server administrators: everyone's usage and the token quotas.
   teamUsageOpen: boolean
   knowledgeOpen: boolean
+  communityOpen: boolean
+  onboardingOpen: boolean
   // Set by useUpdateCheck when the main process detects a newer GitHub
   // release. Cleared by "Skip this version" / "Later". Transient — never
   // persisted; main process is the source of truth on every boot.
@@ -148,6 +150,10 @@ interface UiState {
   closeTeamUsage: () => void
   openKnowledge: () => void
   closeKnowledge: () => void
+  openCommunity: () => void
+  closeCommunity: () => void
+  openOnboarding: () => void
+  closeOnboarding: () => void
   setAvailableUpdate: (info: UpdateInfo | null) => void
   dismissUpdateBanner: () => void
   resetUpdateBannerDismissed: () => void
@@ -180,6 +186,8 @@ export const useUiStore = create<UiState>((set) => ({
   providersOpen: false,
   teamUsageOpen: false,
   knowledgeOpen: false,
+  communityOpen: false,
+  onboardingOpen: false,
   availableUpdate: null,
   updateBannerDismissed: false,
   systemMessages: [],
@@ -236,6 +244,10 @@ export const useUiStore = create<UiState>((set) => ({
   closeTeamUsage: () => set({ teamUsageOpen: false }),
   openKnowledge: () => set({ knowledgeOpen: true }),
   closeKnowledge: () => set({ knowledgeOpen: false }),
+  openCommunity: () => set({ communityOpen: true }),
+  closeCommunity: () => set({ communityOpen: false }),
+  openOnboarding: () => set({ onboardingOpen: true }),
+  closeOnboarding: () => set({ onboardingOpen: false }),
   setAvailableUpdate: (info) => set({ availableUpdate: info, updateBannerDismissed: false }),
   dismissUpdateBanner: () => set({ updateBannerDismissed: true }),
   resetUpdateBannerDismissed: () => set({ updateBannerDismissed: false }),

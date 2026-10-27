@@ -7,12 +7,29 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useChatStore } from '@/stores/chatStore'
 import { useOrganizationStore } from '@/stores/organizationStore'
+import { useCommunityStore } from '@/stores/communityStore'
+import { useCommunityChatStore } from '@/stores/communityChatStore'
+import { useAgentStore } from '@/stores/agentStore'
+import type { CommunityStatus } from '@/services/community'
 
 const initialProjectState = useProjectStore.getState()
 const initialSettingsState = useSettingsStore.getState()
 const initialUiState = useUiStore.getState()
 const initialChatState = useChatStore.getState()
 const initialOrganizationState = useOrganizationStore.getState()
+const initialCommunityState = useCommunityStore.getState()
+
+const memberStatus = (): CommunityStatus => ({
+  enabled: true,
+  logged_in: true,
+  agent_id: 'agent-1',
+  api_base: 'http://x/community',
+  autonomy_mode: 'hybrid',
+  code_host: 'github',
+  domains: [],
+  pending_count: 0,
+  chat_id: 'community',
+})
 
 describe('ProjectQueue mode switch', () => {
   beforeEach(() => {
@@ -22,6 +39,9 @@ describe('ProjectQueue mode switch', () => {
     useUiStore.setState(initialUiState, true)
     useChatStore.setState(initialChatState, true)
     useOrganizationStore.setState(initialOrganizationState, true)
+    useCommunityStore.setState(initialCommunityState, true)
+    useCommunityChatStore.setState({ workspaceKey: 'test', lastSeenAt: 0 })
+    useAgentStore.setState({ logsByProject: {} })
     useChatStore.setState({ chats: [], activeChatId: null, workspaceKey: 'test' })
     useSettingsStore.setState({ language: 'en' })
   })
@@ -324,5 +344,48 @@ describe('ProjectQueue mode switch', () => {
     })
     expect(useUiStore.getState().promotion).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not pin the community chat before the user has joined', () => {
+    useProjectStore.setState({ appMode: 'normal' })
+    useCommunityStore.setState({ status: { ...memberStatus(), logged_in: false } })
+    render(<ProjectQueue />)
+    expect(screen.queryByTestId('community-chat')).not.toBeInTheDocument()
+  })
+
+  it('pins the community chat for a member, opens it on click, and keeps it out of folders, batches and menus', () => {
+    seedBatchChats()
+    useCommunityStore.setState({ status: memberStatus() })
+    render(<ProjectQueue />)
+
+    const row = screen.getByTestId('community-chat')
+    expect(row).toHaveTextContent('Mira Community')
+    // Not one of the user's chats: the index is untouched.
+    expect(useChatStore.getState().chats).toHaveLength(3)
+    // No context menu: it cannot be renamed, deleted or moved.
+    fireEvent.contextMenu(row)
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Batch B' }), { ctrlKey: true })
+    fireEvent.click(row)
+    expect(useChatStore.getState().activeChatId).toBe('community')
+    expect(useProjectStore.getState().appMode).toBe('normal')
+    // Opening it leaves no batch selection behind.
+    expect(screen.queryByLabelText('Conversation bulk actions')).not.toBeInTheDocument()
+  })
+
+  it('shows how many agent messages arrived in the community chat since the user last looked', () => {
+    useProjectStore.setState({ appMode: 'normal' })
+    useCommunityStore.setState({ status: memberStatus() })
+    useCommunityChatStore.setState({ workspaceKey: 'test', lastSeenAt: Date.parse('2026-10-26T10:00:00Z') })
+    useAgentStore.setState({ logsByProject: { community: [
+      { id: '1', timestamp: '2026-10-26T09:00:00Z', content: 'older', type: 'response' },
+      { id: '2', timestamp: '2026-10-26T11:00:00Z', content: 'new', type: 'response' },
+      { id: '3', timestamp: '2026-10-26T12:00:00Z', content: 'mine', type: 'response', metadata: { _user: true } },
+      { id: '4', timestamp: '2026-10-26T12:30:00Z', content: 'working', type: 'progress' },
+    ] } })
+    render(<ProjectQueue />)
+    expect(within(screen.getByTestId('community-chat')).getByTitle('1 new from your agent')).toHaveTextContent('1')
   })
 })

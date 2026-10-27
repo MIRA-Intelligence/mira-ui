@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { newChatSessionId } from '@/lib/sessions'
+import { isReservedChatId, newChatSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 import {
   deleteOrganizationChat,
@@ -100,7 +100,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }))
         .sort((a, b) => b.updatedAt - a.updatedAt)
       writeChats(state.workspaceKey, chats)
-      const activeChatId = state.activeChatId && chats.some((chat) => chat.id === state.activeChatId)
+      // The reserved community chat is never in the engine's index; keep it open.
+      const activeChatId = state.activeChatId
+        && (chats.some((chat) => chat.id === state.activeChatId) || isReservedChatId(state.activeChatId))
         ? state.activeChatId
         : null
       return { chats, activeChatId }

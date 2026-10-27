@@ -3,8 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { useChatStore } from '@/stores/chatStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTimer } from '@/hooks/useTimer'
+import { isReservedChatId } from '@/lib/sessions'
 import { t } from '@/i18n'
 import { FeedbackButton } from '@/components/feedback/FeedbackButton'
+import { CommunityButton } from '@/components/community/CommunityButton'
 import type { CSSProperties } from 'react'
 
 export function TopBar() {
@@ -20,7 +22,7 @@ export function TopBar() {
   const selected = tasks.find((t) => t.id === selectedTaskId)
   const activeChat = chats.find((c) => c.id === activeChatId)
   const title = appMode === 'normal'
-    ? (activeChat?.title || t('normalChatTitle', lang))
+    ? (isReservedChatId(activeChatId) ? t('communityTitle', lang) : activeChat?.title || t('normalChatTitle', lang))
     : (selected?.title?.trim() || selected?.label?.trim() || 'Mira')
 
   return (
@@ -36,6 +38,7 @@ export function TopBar() {
       </h1>
 
       <div className="flex items-center gap-3 min-w-[140px] justify-end">
+        <CommunityButton />
         <FeedbackButton />
         <div
           className="font-mono text-xl tracking-wider text-[var(--color-text-secondary)] tabular-nums"
