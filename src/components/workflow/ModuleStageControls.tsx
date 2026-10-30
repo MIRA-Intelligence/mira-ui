@@ -15,7 +15,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { PipelineStage, WorkflowModuleType, WorkflowRun } from '@/types'
-import { buildWorkflowCandidates, resolveWorkflowCandidate, scopedModuleRuns } from '@/lib/workflowCandidates'
+import { buildWorkflowCandidates, isDeliverableCandidate, resolveWorkflowCandidate, scopedModuleRuns } from '@/lib/workflowCandidates'
 import { WorkflowCandidateList } from './WorkflowCandidateList'
 import { ExperimentExecutionMode } from './ExperimentExecutionMode'
 import { ExperimentContractMode } from './ExperimentContractMode'
@@ -128,6 +128,7 @@ export function ModuleStageControls() {
   const moduleCandidates = useMemo(
     () => selectedRun && snapshot
       ? buildWorkflowCandidates(scopedRunsFor(selectedRun.module_type), selectedRun.module_type)
+        .filter(isDeliverableCandidate)
       : [],
     [scopedRunsFor, selectedRun, snapshot],
   )
@@ -164,6 +165,18 @@ export function ModuleStageControls() {
     && selectedRun.module_data.interaction
     && typeof selectedRun.module_data.interaction === 'object'
     && (selectedRun.module_data.interaction as { response?: unknown }).response == null)
+  // Say which upstream deliverable this branch continues from.
+  const upstreamSelection = selectedRun.module_data.upstream_selection as
+    { module_type?: unknown; label?: unknown } | undefined
+  const upstreamModule = typeof upstreamSelection?.module_type === 'string' && upstreamSelection.module_type in MODULE_META
+    ? MODULE_META[upstreamSelection.module_type as WorkflowModuleType]
+    : null
+  const derivedFrom = upstreamModule && typeof upstreamSelection?.label === 'string' && upstreamSelection.label
+    ? t('derivedFrom', lang, {
+        module: lang === 'zh' ? upstreamModule.zh : upstreamModule.en,
+        label: upstreamSelection.label,
+      })
+    : null
   const pendingInteractionTitle = interactionVisible
     ? String((selectedRun.module_data.interaction as { title?: unknown }).title ?? '')
     : ''
@@ -294,6 +307,11 @@ export function ModuleStageControls() {
             {t('interactionPendingInConversation', lang, { title: pendingInteractionTitle })}
           </div>
         )}
+        {derivedFrom && (
+          <div className="mb-2 truncate text-[11px] text-[var(--color-text-muted)]" title={derivedFrom}>
+            {derivedFrom}
+          </div>
+        )}
         {snapshot && moduleCandidates.length > 0 && (
           <div className={candidateListCollapsed ? (interactionVisible ? 'mb-2' : '') : 'mb-4'}>
             <div className={`flex flex-wrap items-center justify-between gap-3 ${candidateListCollapsed ? '' : 'mb-2'}`}>
@@ -350,7 +368,8 @@ export function ModuleStageControls() {
               <WorkflowCandidateList
                 projectId={projectId}
                 moduleType={selectedRun.module_type}
-                runs={snapshot.runs}
+                runs={scopedRunsFor(selectedRun.module_type)}
+                deliverablesOnly
                 compact
               />
             </div>

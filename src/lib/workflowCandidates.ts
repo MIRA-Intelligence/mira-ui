@@ -75,6 +75,14 @@ function runFallbackLabel(run: WorkflowRun): string {
     || run.label
 }
 
+/**
+ * A Run with nothing produced yet is still listed (as `kind: 'run'`) so it can
+ * be selected and its branch followed, but it is not a deliverable.
+ */
+export function isDeliverableCandidate(candidate: WorkflowCandidateItem): boolean {
+  return !(candidate.kind === 'run' && candidate.artifactIds.length === 0)
+}
+
 export function workflowExperimentUiId(runId: string, experimentId: string): string {
   return `workflow:${runId}:${experimentId}`
 }

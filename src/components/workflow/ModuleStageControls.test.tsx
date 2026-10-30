@@ -367,6 +367,56 @@ describe('ModuleStageControls', () => {
     expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe('experiment-dummy-a')
   })
 
+  it('lists only this branch\'s experiments as candidate outputs and names their source', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, title: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'completed', outputs: [],
+      module_data: {
+        parent_run_id: 'source-run',
+        upstream_selection: { module_type: 'initiation', run_id: 'source-run', item_id: direction, label: `Dummy ${direction.at(-1)?.toUpperCase()}` },
+        experiments: [{ id: 'Exp001', title, status: 'completed' }],
+      },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', 'Denoising'), experimentFor('dummy-b', 'Topology'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': 'experiment-dummy-a' },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(screen.getByRole('button', { name: 'Select candidate: Exp001 · Denoising' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Select candidate: Exp001 · Topology' })).not.toBeInTheDocument()
+    expect(screen.getByText('Derived from Initiation › Dummy A')).toBeInTheDocument()
+  })
+
+  it('does not list a Run that has produced nothing as a deliverable', () => {
+    const experiment = makeRun({
+      run_id: 'experiment-new', module_type: 'experiment', status: 'running', outputs: [],
+      module_data: {
+        intent: 'Continue with experiment using the selected upstream candidate “Dummy B”.',
+        parent_run_id: 'source-run',
+        upstream_selection: { module_type: 'initiation', run_id: 'source-run', item_id: 'dummy-b', label: 'Dummy B' },
+      },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': makeSnapshot(experiment) },
+      selectedRunByProject: { 'PRJ-1': experiment.run_id },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(screen.queryByText('Candidate outputs in this module')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Select candidate/ })).not.toBeInTheDocument()
+    expect(screen.getByText('Derived from Initiation › Dummy B')).toBeInTheDocument()
+  })
+
   it('does not reuse an answer for the next question', () => {
     const interaction = {
       interaction_id: 'question-1', interaction_type: 'clarify_requirements',
