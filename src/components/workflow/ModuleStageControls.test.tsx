@@ -321,6 +321,52 @@ describe('ModuleStageControls', () => {
     expect(wsClient.send).not.toHaveBeenCalled()
   })
 
+  it('opens the experiment Run of the selected direction, not the newest one', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, updatedAt: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'waiting_input', outputs: [],
+      updated_at: updatedAt,
+      module_data: { parent_run_id: 'source-run', upstream_selection: { run_id: 'source-run', item_id: direction } },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', '2026-07-31T00:02:00Z'), experimentFor('dummy-b', '2026-07-31T00:03:00Z'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': research.run_id },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe('experiment-dummy-a')
+  })
+
+  it('opens the experiment Run of the selected direction, not the newest one', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, updatedAt: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'waiting_input', outputs: [],
+      updated_at: updatedAt,
+      module_data: { parent_run_id: 'source-run', upstream_selection: { run_id: 'source-run', item_id: direction } },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', '2026-07-31T00:02:00Z'), experimentFor('dummy-b', '2026-07-31T00:03:00Z'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': research.run_id },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe('experiment-dummy-a')
+  })
+
   it('does not reuse an answer for the next question', () => {
     const interaction = {
       interaction_id: 'question-1', interaction_type: 'clarify_requirements',

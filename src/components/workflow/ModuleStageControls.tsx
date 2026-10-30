@@ -15,7 +15,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { PipelineStage, WorkflowModuleType, WorkflowRun } from '@/types'
-import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
+import { buildWorkflowCandidates, resolveWorkflowCandidate, scopedModuleRuns } from '@/lib/workflowCandidates'
 import { WorkflowCandidateList } from './WorkflowCandidateList'
 import { ExperimentExecutionMode } from './ExperimentExecutionMode'
 import { ExperimentContractMode } from './ExperimentContractMode'
@@ -94,9 +94,16 @@ export function ModuleStageControls() {
   ))
   const createRun = useWorkflowStore((state) => state.createRun)
   const selectRun = useWorkflowStore((state) => state.selectRun)
+  // Only Runs on the selected upstream branch: Experiment shows the chosen
+  // direction's experiments, Result the chosen experiment's deliveries.
+  const scopedRunsFor = useMemo(() => (moduleType: WorkflowModuleType) => (
+    scopedModuleRuns(snapshot?.runs ?? [], moduleType, candidateSelections, selectedRunId).runs
+  ), [candidateSelections, selectedRunId, snapshot?.runs])
   const selectedRun = useMemo(
     () => {
-      const stageRuns = snapshot?.runs.filter((run) => MODULE_META[run.module_type].stage === activeStage) ?? []
+      const stageModules = (Object.keys(MODULE_META) as WorkflowModuleType[])
+        .filter((moduleType) => MODULE_META[moduleType].stage === activeStage)
+      const stageRuns = stageModules.flatMap(scopedRunsFor)
       const current = stageRuns.find((run) => run.run_id === selectedRunId)
       if (current) return current
       // A stage tab changes the surface, not the global Run selection. Restore
@@ -106,7 +113,7 @@ export function ModuleStageControls() {
       const latest = stageRuns.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       return latest.find((run) => run.status === 'waiting_input') ?? latest[0]
     },
-    [activeStage, candidateSelections, selectedRunId, snapshot?.runs],
+    [activeStage, candidateSelections, scopedRunsFor, selectedRunId],
   )
   useEffect(() => {
     if (projectId && selectedRun && selectedRun.run_id !== selectedRunId) {
@@ -120,9 +127,9 @@ export function ModuleStageControls() {
   }, [selectedRun?.run_id, selectedRun?.status, interactionId])
   const moduleCandidates = useMemo(
     () => selectedRun && snapshot
-      ? buildWorkflowCandidates(snapshot.runs, selectedRun.module_type)
+      ? buildWorkflowCandidates(scopedRunsFor(selectedRun.module_type), selectedRun.module_type)
       : [],
-    [selectedRun, snapshot],
+    [scopedRunsFor, selectedRun, snapshot],
   )
   const selectedCandidate = selectedRun
     ? resolveWorkflowCandidate(
