@@ -184,6 +184,29 @@ describe('ProjectQueue mode switch', () => {
     expect(screen.getByText('Glioma imaging')).toBeInTheDocument()
   })
 
+  it('shows only the folders that belong to the current list', () => {
+    useProjectStore.setState({ appMode: 'normal' })
+    useChatStore.setState({
+      workspaceKey: 'ws',
+      chats: [{ id: 'chat-1', title: 'Question', createdAt: 1, updatedAt: 1 }],
+      activeChatId: 'chat-1',
+    })
+    useOrganizationStore.setState({
+      folders: [
+        { id: 'folder-chat', name: 'Chat topic', kind: 'chat', created_at: 'x', updated_at: 'x' },
+        { id: 'folder-project', name: 'Project topic', kind: 'project', created_at: 'x', updated_at: 'x' },
+        { id: 'folder-legacy', name: 'Legacy topic', created_at: 'x', updated_at: 'x' },
+      ],
+      assignments: { chat: { 'chat-1': 'folder-chat' }, project: {} },
+    })
+
+    render(<ProjectQueue />)
+
+    expect(screen.getByText('Chat topic')).toBeInTheDocument()
+    expect(screen.getByText('Legacy topic')).toBeInTheDocument()
+    expect(screen.queryByText('Project topic')).not.toBeInTheDocument()
+  })
+
   it('moves a dragged chat into a folder', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
