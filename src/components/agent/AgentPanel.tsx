@@ -15,6 +15,7 @@ import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPl
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { KnowledgePicker } from '@/components/knowledge/KnowledgePicker'
 import { PIPELINE_STAGES } from '@/components/workflow/PipelineOverview'
+import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
 
 function createClientId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -62,10 +63,12 @@ function ChatComposer({
   lang,
   availableSkills,
   knowledgeScope,
+  placeholder,
   onSend,
   onStop,
 }: {
   sessionId: string | null
+  placeholder?: string
   knowledgeScope: 'project' | 'chat'
   isStreaming: boolean
   isStopping: boolean
@@ -229,7 +232,7 @@ function ChatComposer({
               }
             }}
             placeholder={sessionId
-              ? t(sendShortcut === 'enter' ? 'typeMessage' : 'typeMessageShiftEnter', lang)
+              ? placeholder ?? t(sendShortcut === 'enter' ? 'typeMessage' : 'typeMessageShiftEnter', lang)
               : t('selectProjectFirst', lang)}
             disabled={!sessionId || isStopping}
             rows={1}
@@ -447,15 +450,17 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   const conversationId = sessionId && !isChat && selectedWorkflowRunId
     ? `${sessionId}:run:${selectedWorkflowRunId}`
     : sessionId
+  // The engine continues a paused/failed Run, answers a pending interaction and
+  // reopens a completed Run for revision from a chat message; only a cancelled
+  // Run (or none) has nothing to talk to.
   const moduleConversationBlocked = !isChat && activeStage === 'modules' && !!workflowSnapshot && (
-    !selectedWorkflowRun
-    || selectedWorkflowRun.status === 'completed'
-    || selectedWorkflowRun.status === 'cancelled'
-    || selectedWorkflowRun.status === 'failed'
-    || selectedWorkflowRun.status === 'paused'
-    || selectedWorkflowRun.status === 'waiting_input'
+    !selectedWorkflowRun || selectedWorkflowRun.status === 'cancelled'
   )
   const composerSessionId = moduleConversationBlocked ? null : sessionId
+  const composerPlaceholder = isChat ? undefined
+    : selectedWorkflowRun?.status === 'completed' ? t('composerRevisePlaceholder', lang)
+      : selectedWorkflowRun?.status === 'waiting_input' ? t('composerAnswerPlaceholder', lang)
+        : undefined
 
   const logs = useAgentStore((s) => (conversationId ? s.logsByProject[conversationId] : undefined)) ?? EMPTY_LOGS
   // Streaming is tracked per session so a different session's activity never
@@ -613,6 +618,17 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
     const workflowRun = appMode === 'project'
       ? workflowState.snapshots[sessionId]?.runs.find((run) => run.run_id === workflowRunId)
       : undefined
+    // "Polish this one" needs to know which deliverable is selected.
+    const candidate = workflowRun && workflowState.snapshots[sessionId]
+      ? resolveWorkflowCandidate(
+          buildWorkflowCandidates(workflowState.snapshots[sessionId].runs, workflowRun.module_type),
+          workflowState.selectedCandidateByProject[sessionId]?.[workflowRun.module_type],
+          workflowRun.run_id,
+        )
+      : null
+    const workflowSelection = candidate && candidate.runId === workflowRun?.run_id
+      ? { workflow_selection: { run_id: candidate.runId, item_id: candidate.itemId, label: candidate.label, artifact_ids: candidate.artifactIds } }
+      : {}
     if (workflowRun?.status === 'created') {
       void workflowState.commandRun(sessionId, workflowRun.run_id, 'enqueue').then(() => {
         wsClient.send({
@@ -641,6 +657,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
         ...(workflowRun && {
           workflow_run_id: workflowRun.run_id,
           workflow_module_type: workflowRun.module_type,
+          ...workflowSelection,
         }),
       }),
     })
@@ -903,6 +920,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
         isStopping={isStopping}
         availableSkills={availableSkills}
         knowledgeScope={isChat ? 'chat' : 'project'}
+        placeholder={composerPlaceholder}
         lang={lang}
         onSend={handleSend}
         onStop={handleStop}

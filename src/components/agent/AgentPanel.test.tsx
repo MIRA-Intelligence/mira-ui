@@ -11,6 +11,7 @@ import { useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
+import type { WorkflowRun, WorkflowSnapshot } from '@/types'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
@@ -535,5 +536,94 @@ describe('AgentPanel knowledge bases', () => {
     fireEvent.change(textarea, { target: { value: 'hello' } })
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: false })
     expect(sentMessage(sendSpy)).not.toHaveProperty('selected_kb_ids')
+  })
+})
+
+describe('AgentPanel talking to a module Run', () => {
+  const makeRun = (status: WorkflowRun['status']): WorkflowRun => ({
+    schema_version: 1,
+    workflow_contract_version: 1,
+    run_id: 'run-init',
+    project_id: 'PRJ-0001',
+    module_type: 'initiation',
+    label: 'Literature review',
+    status,
+    revision: 3,
+    created_at: '2026-10-30T00:00:00Z',
+    updated_at: '2026-10-30T00:00:00Z',
+    inputs: [],
+    outputs: status === 'completed' ? ['artifact-report'] : [],
+    attempt: { number: 1 },
+    attempts: [],
+    conversation_key: 'ui:PRJ-0001:run:run-init',
+    last_project_sequence: 3,
+    last_run_sequence: 3,
+    module_data: {},
+  })
+  const snapshotOf = (run: WorkflowRun): WorkflowSnapshot => ({
+    workflow_contract_version: 1,
+    project_id: 'PRJ-0001',
+    project_sequence: 3,
+    workflow: {
+      contract_version: 1,
+      status: 'active',
+      revision: 3,
+      last_project_sequence: 3,
+      selected_run_id: run.run_id,
+      handoff_policy: { mode: 'manual', interrupt_grace_seconds: 10, rules: [] },
+    },
+    runs: [run],
+  })
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    useAgentStore.setState(initialAgentState, true)
+    useProjectStore.setState(initialProjectState, true)
+    useWorkflowStore.setState(initialWorkflowState, true)
+    useSettingsStore.setState({ language: 'en' })
+    useProjectStore.setState({ appMode: 'project', selectedTaskId: 'PRJ-0001', activeStage: 'modules', mode: 'manual', agentProfile: 'research' })
+    useAgentStore.setState({ connected: true })
+  })
+
+  it('sends a revision request for a completed Run with the selected deliverable', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    const run = makeRun('completed')
+    useWorkflowStore.setState({ snapshots: { 'PRJ-0001': snapshotOf(run) }, selectedRunByProject: { 'PRJ-0001': run.run_id } })
+    render(<AgentPanel />)
+
+    const textarea = screen.getByPlaceholderText('Ask for changes, e.g. polish the selected deliverable...')
+    expect(textarea).not.toBeDisabled()
+    fireEvent.change(textarea, { target: { value: 'Polish the summary' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
+
+    const sent = sendSpy.mock.calls.map((call) => call[0]).filter((p) => p?.type === 'message')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({
+      content: 'Polish the summary',
+      workflow_run_id: 'run-init',
+      workflow_selection: { run_id: 'run-init', artifact_ids: ['artifact-report'] },
+    })
+  })
+
+  it('lets the user reply in the chat while a confirmation is pending', () => {
+    const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
+    const run = makeRun('waiting_input')
+    useWorkflowStore.setState({ snapshots: { 'PRJ-0001': snapshotOf(run) }, selectedRunByProject: { 'PRJ-0001': run.run_id } })
+    render(<AgentPanel />)
+
+    const textarea = screen.getByPlaceholderText('Reply here, or use the form above...')
+    fireEvent.change(textarea, { target: { value: 'Why only PubMed?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' })
+
+    const sent = sendSpy.mock.calls.map((call) => call[0]).filter((p) => p?.type === 'message')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ content: 'Why only PubMed?', workflow_run_id: 'run-init' })
+  })
+
+  it('still blocks the composer for a cancelled Run', () => {
+    const run = makeRun('cancelled')
+    useWorkflowStore.setState({ snapshots: { 'PRJ-0001': snapshotOf(run) }, selectedRunByProject: { 'PRJ-0001': run.run_id } })
+    render(<AgentPanel />)
+    expect(screen.getByRole('textbox')).toBeDisabled()
   })
 })
