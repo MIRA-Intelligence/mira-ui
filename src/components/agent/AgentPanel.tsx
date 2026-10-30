@@ -15,6 +15,7 @@ import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPl
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { KnowledgePicker } from '@/components/knowledge/KnowledgePicker'
 import { PIPELINE_STAGES } from '@/components/workflow/PipelineOverview'
+import { WorkflowInteractionPanel } from '@/components/workflow/WorkflowInteractionPanel'
 import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
 
 function createClientId(prefix: string): string {
@@ -546,6 +547,13 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   // otherwise the reply streams in below the fold and looks stalled. Only
   // stick to the bottom when the user has not scrolled up to read.
   const tailLength = lastEntry?.content.length ?? 0
+  // A Run waiting for the user shows its form at the end of the conversation.
+  const pendingInteraction = !isChat && selectedWorkflowRun?.status === 'waiting_input'
+    ? selectedWorkflowRun.module_data.interaction as { interaction_id?: string; response?: unknown } | undefined
+    : undefined
+  const pendingInteractionId = pendingInteraction && pendingInteraction.response == null
+    ? pendingInteraction.interaction_id ?? null
+    : null
   const stickToBottom = useRef(true)
   const handleScroll = () => {
     const el = scrollRef.current
@@ -555,11 +563,11 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   useEffect(() => {
     // A new message or a session switch always re-anchors to the bottom.
     stickToBottom.current = true
-  }, [logs.length, conversationId])
+  }, [logs.length, conversationId, pendingInteractionId])
   useEffect(() => {
     const el = scrollRef.current
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
-  }, [logs.length, tailLength, showThinking, conversationId])
+  }, [logs.length, tailLength, showThinking, conversationId, pendingInteractionId])
 
   useEffect(() => {
     setCollapsedProgressGroups({})
@@ -879,6 +887,12 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
           return <LogEntry key={entry.id} entry={entry} />
         })}
 
+        {pendingInteractionId && selectedTaskId && selectedWorkflowRun && (
+          <div className="mx-4 my-2">
+            <WorkflowInteractionPanel projectId={selectedTaskId} run={selectedWorkflowRun} />
+          </div>
+        )}
+
         {!isStreaming && lastTurnEnd && (
           <TurnEndNotice
             reason={lastTurnEnd.stopReason}
@@ -902,7 +916,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
           </div>
         )}
 
-        {logs.length === 0 && !showThinking && (
+        {logs.length === 0 && !showThinking && !pendingInteractionId && (
           <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] gap-2">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-30">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

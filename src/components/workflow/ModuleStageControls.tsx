@@ -17,7 +17,6 @@ import { useWorkflowStore } from '@/stores/workflowStore'
 import type { PipelineStage, WorkflowModuleType, WorkflowRun } from '@/types'
 import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
 import { WorkflowCandidateList } from './WorkflowCandidateList'
-import { WorkflowInteractionPanel } from './WorkflowInteractionPanel'
 import { ExperimentExecutionMode } from './ExperimentExecutionMode'
 import { ExperimentContractMode } from './ExperimentContractMode'
 import { ExperimentInputPaths } from './ExperimentInputPaths'
@@ -152,10 +151,15 @@ export function ModuleStageControls() {
   ) return null
 
   const downstream = DOWNSTREAM_MODULES[selectedRun.module_type]
+  // The form itself lives in the conversation (AgentPanel), like any other
+  // question the agent asks; this column only points to it.
   const interactionVisible = Boolean(selectedRun.status === 'waiting_input'
     && selectedRun.module_data.interaction
     && typeof selectedRun.module_data.interaction === 'object'
     && (selectedRun.module_data.interaction as { response?: unknown }).response == null)
+  const pendingInteractionTitle = interactionVisible
+    ? String((selectedRun.module_data.interaction as { title?: unknown }).title ?? '')
+    : ''
   const mustSelectCandidate = moduleCandidates.length > 1 && !selectedCandidate
   const selectedExperimentIncomplete = selectedCandidate?.kind === 'experiment' && selectedCandidate.status !== 'completed'
 
@@ -276,15 +280,11 @@ export function ModuleStageControls() {
   }
 
   return (
-    <div ref={controlsRef} className={`${interactionVisible ? 'min-h-0 flex-[1_1_100%]' : 'max-h-[45vh] shrink-0'} overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-bg-primary)] px-6 ${candidateListCollapsed ? 'py-2' : 'py-4'}`}>
+    <div ref={controlsRef} className={`max-h-[45vh] shrink-0 overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-bg-primary)] px-6 ${candidateListCollapsed ? 'py-2' : 'py-4'}`}>
       <div className="mx-auto max-w-2xl">
         {interactionVisible && (
-          <div className="mb-4">
-            <WorkflowInteractionPanel
-              key={String((selectedRun.module_data.interaction as { interaction_id?: unknown }).interaction_id ?? selectedRun.run_id)}
-              projectId={projectId}
-              run={selectedRun}
-            />
+          <div role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-[var(--color-text-primary)]">
+            {t('interactionPendingInConversation', lang, { title: pendingInteractionTitle })}
           </div>
         )}
         {snapshot && moduleCandidates.length > 0 && (

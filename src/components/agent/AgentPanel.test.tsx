@@ -620,6 +620,30 @@ describe('AgentPanel talking to a module Run', () => {
     expect(sent[0]).toMatchObject({ content: 'Why only PubMed?', workflow_run_id: 'run-init' })
   })
 
+  it('shows the pending interaction form inside the conversation', () => {
+    const run = {
+      ...makeRun('waiting_input'),
+      module_data: {
+        confirmation_policy: { mode: 'required' },
+        interaction: {
+          interaction_id: 'brief-1',
+          interaction_type: 'approve_delivery_brief',
+          title: 'Confirm the Exp001 report brief',
+          prompt: 'Audience, format and outline.',
+          choices: [{ id: 'approve', value: 'approve', label: 'Approve' }, { id: 'revise', value: 'revise', label: 'Revise' }],
+          response_schema: { type: 'object', required: ['selection'] },
+          allow_freeform: true,
+        },
+      },
+    }
+    useWorkflowStore.setState({ snapshots: { 'PRJ-0001': snapshotOf(run) }, selectedRunByProject: { 'PRJ-0001': run.run_id } })
+    render(<AgentPanel />)
+
+    expect(screen.getByText('Confirm the Exp001 report brief')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    expect(screen.queryByText('Send a message to start')).not.toBeInTheDocument()
+  })
+
   it('still blocks the composer for a cancelled Run', () => {
     const run = makeRun('cancelled')
     useWorkflowStore.setState({ snapshots: { 'PRJ-0001': snapshotOf(run) }, selectedRunByProject: { 'PRJ-0001': run.run_id } })
