@@ -1,4 +1,6 @@
+import { scopedModuleRuns } from '@/lib/workflowCandidates'
 import { useProjectStore } from '@/stores/projectStore'
+import { useWorkflowStore } from '@/stores/workflowStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useSettingsStore } from '@/stores/settingsStore'
 import type { Experiment } from '@/types'
@@ -82,6 +84,9 @@ export function ExperimentTimeline() {
   const { tasks, selectedTaskId, selectedExpId, selectExperiment } = useProjectStore(useShallow((s) => ({ tasks: s.tasks, selectedTaskId: s.selectedTaskId, selectedExpId: s.selectedExpId, selectExperiment: s.selectExperiment })))
   const lang = useSettingsStore((s) => s.language)
   const task = tasks.find((t) => t.id === selectedTaskId)
+  const snapshot = useWorkflowStore((s) => (selectedTaskId ? s.snapshots[selectedTaskId] : undefined))
+  const selections = useWorkflowStore((s) => (selectedTaskId ? s.selectedCandidateByProject[selectedTaskId] : undefined))
+  const selectedRunId = useWorkflowStore((s) => (selectedTaskId ? s.selectedRunByProject[selectedTaskId] : undefined))
 
   if (!task) {
     return (
@@ -91,7 +96,13 @@ export function ExperimentTimeline() {
     )
   }
 
-  const experiments = task.experiments
+  // Each research direction has its own experiment Run with its own Exp001…;
+  // list only the experiments of the direction being viewed.
+  const scope = snapshot ? scopedModuleRuns(snapshot.runs, 'experiment', selections, selectedRunId) : null
+  const scopedRunIds = scope ? new Set(scope.runs.map((run) => run.run_id)) : null
+  const experiments = scopedRunIds
+    ? task.experiments.filter((exp) => !exp.workflow_run_id || scopedRunIds.has(exp.workflow_run_id))
+    : task.experiments
 
   return (
     <div className="h-full flex flex-col">
@@ -103,6 +114,11 @@ export function ExperimentTimeline() {
         <span className="text-[10px] text-[var(--color-text-muted)] ml-1.5">
           {experiments.filter((e) => e.status === 'completed').length}/{experiments.length}
         </span>
+        {scope?.upstreamLabel && (
+          <span className="block truncate text-[10px] text-[var(--color-text-muted)]" title={scope.upstreamLabel}>
+            {t('experimentsForDirection', lang, { label: scope.upstreamLabel })}
+          </span>
+        )}
       </div>
 
       {/* Timeline */}

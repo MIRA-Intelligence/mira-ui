@@ -15,9 +15,8 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useUiStore } from '@/stores/uiStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { PipelineStage, WorkflowModuleType, WorkflowRun } from '@/types'
-import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
+import { buildWorkflowCandidates, isDeliverableCandidate, resolveWorkflowCandidate, scopedModuleRuns } from '@/lib/workflowCandidates'
 import { WorkflowCandidateList } from './WorkflowCandidateList'
-import { WorkflowInteractionPanel } from './WorkflowInteractionPanel'
 import { ExperimentExecutionMode } from './ExperimentExecutionMode'
 import { ExperimentContractMode } from './ExperimentContractMode'
 import { ExperimentInputPaths } from './ExperimentInputPaths'
@@ -95,9 +94,16 @@ export function ModuleStageControls() {
   ))
   const createRun = useWorkflowStore((state) => state.createRun)
   const selectRun = useWorkflowStore((state) => state.selectRun)
+  // Only Runs on the selected upstream branch: Experiment shows the chosen
+  // direction's experiments, Result the chosen experiment's deliveries.
+  const scopedRunsFor = useMemo(() => (moduleType: WorkflowModuleType) => (
+    scopedModuleRuns(snapshot?.runs ?? [], moduleType, candidateSelections, selectedRunId).runs
+  ), [candidateSelections, selectedRunId, snapshot?.runs])
   const selectedRun = useMemo(
     () => {
-      const stageRuns = snapshot?.runs.filter((run) => MODULE_META[run.module_type].stage === activeStage) ?? []
+      const stageModules = (Object.keys(MODULE_META) as WorkflowModuleType[])
+        .filter((moduleType) => MODULE_META[moduleType].stage === activeStage)
+      const stageRuns = stageModules.flatMap(scopedRunsFor)
       const current = stageRuns.find((run) => run.run_id === selectedRunId)
       if (current) return current
       // A stage tab changes the surface, not the global Run selection. Restore
@@ -107,7 +113,7 @@ export function ModuleStageControls() {
       const latest = stageRuns.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       return latest.find((run) => run.status === 'waiting_input') ?? latest[0]
     },
-    [activeStage, candidateSelections, selectedRunId, snapshot?.runs],
+    [activeStage, candidateSelections, scopedRunsFor, selectedRunId],
   )
   useEffect(() => {
     if (projectId && selectedRun && selectedRun.run_id !== selectedRunId) {
@@ -121,9 +127,10 @@ export function ModuleStageControls() {
   }, [selectedRun?.run_id, selectedRun?.status, interactionId])
   const moduleCandidates = useMemo(
     () => selectedRun && snapshot
-      ? buildWorkflowCandidates(snapshot.runs, selectedRun.module_type)
+      ? buildWorkflowCandidates(scopedRunsFor(selectedRun.module_type), selectedRun.module_type)
+        .filter(isDeliverableCandidate)
       : [],
-    [selectedRun, snapshot],
+    [scopedRunsFor, selectedRun, snapshot],
   )
   const selectedCandidate = selectedRun
     ? resolveWorkflowCandidate(
@@ -152,10 +159,27 @@ export function ModuleStageControls() {
   ) return null
 
   const downstream = DOWNSTREAM_MODULES[selectedRun.module_type]
+  // The form itself lives in the conversation (AgentPanel), like any other
+  // question the agent asks; this column only points to it.
   const interactionVisible = Boolean(selectedRun.status === 'waiting_input'
     && selectedRun.module_data.interaction
     && typeof selectedRun.module_data.interaction === 'object'
     && (selectedRun.module_data.interaction as { response?: unknown }).response == null)
+  // Say which upstream deliverable this branch continues from.
+  const upstreamSelection = selectedRun.module_data.upstream_selection as
+    { module_type?: unknown; label?: unknown } | undefined
+  const upstreamModule = typeof upstreamSelection?.module_type === 'string' && upstreamSelection.module_type in MODULE_META
+    ? MODULE_META[upstreamSelection.module_type as WorkflowModuleType]
+    : null
+  const derivedFrom = upstreamModule && typeof upstreamSelection?.label === 'string' && upstreamSelection.label
+    ? t('derivedFrom', lang, {
+        module: lang === 'zh' ? upstreamModule.zh : upstreamModule.en,
+        label: upstreamSelection.label,
+      })
+    : null
+  const pendingInteractionTitle = interactionVisible
+    ? String((selectedRun.module_data.interaction as { title?: unknown }).title ?? '')
+    : ''
   const mustSelectCandidate = moduleCandidates.length > 1 && !selectedCandidate
   const selectedExperimentIncomplete = selectedCandidate?.kind === 'experiment' && selectedCandidate.status !== 'completed'
 
@@ -276,15 +300,16 @@ export function ModuleStageControls() {
   }
 
   return (
-    <div ref={controlsRef} className={`${interactionVisible ? 'min-h-0 flex-[1_1_100%]' : 'max-h-[45vh] shrink-0'} overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-bg-primary)] px-6 ${candidateListCollapsed ? 'py-2' : 'py-4'}`}>
+    <div ref={controlsRef} className={`max-h-[45vh] shrink-0 overflow-y-auto border-b border-[var(--color-border)] bg-[var(--color-bg-primary)] px-6 ${candidateListCollapsed ? 'py-2' : 'py-4'}`}>
       <div className="mx-auto max-w-2xl">
         {interactionVisible && (
-          <div className="mb-4">
-            <WorkflowInteractionPanel
-              key={String((selectedRun.module_data.interaction as { interaction_id?: unknown }).interaction_id ?? selectedRun.run_id)}
-              projectId={projectId}
-              run={selectedRun}
-            />
+          <div role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-[var(--color-text-primary)]">
+            {t('interactionPendingInConversation', lang, { title: pendingInteractionTitle })}
+          </div>
+        )}
+        {derivedFrom && (
+          <div className="mb-2 truncate text-[11px] text-[var(--color-text-muted)]" title={derivedFrom}>
+            {derivedFrom}
           </div>
         )}
         {snapshot && moduleCandidates.length > 0 && (
@@ -343,7 +368,8 @@ export function ModuleStageControls() {
               <WorkflowCandidateList
                 projectId={projectId}
                 moduleType={selectedRun.module_type}
-                runs={snapshot.runs}
+                runs={scopedRunsFor(selectedRun.module_type)}
+                deliverablesOnly
                 compact
               />
             </div>

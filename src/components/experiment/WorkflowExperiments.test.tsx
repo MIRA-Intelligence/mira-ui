@@ -94,3 +94,53 @@ it('keeps the timeline, candidate cards and detail on the same experiment', asyn
   fireEvent.click(screen.getByRole('button', { name: 'Select candidate: Exp002 · Control' }))
   expect(screen.getByRole('button', { name: 'Continue to Delivery →' })).toBeDisabled()
 })
+
+it('lists only the experiments of the selected research direction', async () => {
+  const research = { run_id: 'research', project_id: 'project', module_type: 'initiation', status: 'completed',
+    label: 'Initiation 1', outputs: [], inputs: [], updated_at: '2026-10-10',
+    module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' }, { id: 'dummy-c', title: 'Dummy C' },
+    ] } },
+  } as unknown as WorkflowRun
+  const experimentRun = (direction: string, title: string) => ({
+    run_id: `run-${direction}`, project_id: 'project', module_type: 'experiment', status: 'waiting_input',
+    label: `Experiment ${direction}`, outputs: [], inputs: [], updated_at: '2026-10-10',
+    module_data: {
+      parent_run_id: 'research',
+      upstream_selection: { run_id: 'research', item_id: direction, label: direction },
+      experiments: [{ id: 'Exp001', title, status: 'pending' }],
+    },
+  } as unknown as WorkflowRun)
+  const runs = [
+    research,
+    experimentRun('dummy-a', 'Denoising mechanism'),
+    experimentRun('dummy-b', 'Topology control'),
+    experimentRun('dummy-c', 'Radiomics stability'),
+  ]
+  useWorkflowStore.setState({
+    snapshots: { project: {
+      workflow_contract_version: 1, project_id: 'project', project_sequence: 1, runs,
+      workflow: { contract_version: 1, status: 'active', revision: 1, last_project_sequence: 1,
+        handoff_policy: { mode: 'manual', interrupt_grace_seconds: 10, rules: [] } },
+    } },
+    selectedRunByProject: { project: 'research' },
+  })
+  vi.mocked(fetchPlan).mockResolvedValue({ experiments: runs.slice(1).map((run) => ({
+    ...(run.module_data.experiments as Array<Record<string, unknown>>)[0],
+    id: `workflow:${run.run_id}:Exp001`, experiment_id: 'Exp001', workflow_run_id: run.run_id, workflow_run_label: run.label,
+  })) } as unknown as TaskPlan)
+  await act(() => useProjectStore.getState().refreshPlan('project'))
+  act(() => useWorkflowStore.getState().selectCandidate('project', 'initiation', { runId: 'research', itemId: 'dummy-b' }))
+
+  render(<ExperimentTimeline />)
+
+  expect(screen.getByText('Topology control')).toBeVisible()
+  expect(screen.queryByText('Denoising mechanism')).not.toBeInTheDocument()
+  expect(screen.queryByText('Radiomics stability')).not.toBeInTheDocument()
+  expect(screen.getByText('0/1')).toBeVisible()
+  expect(screen.getByText('Direction: Dummy B')).toBeVisible()
+
+  act(() => useWorkflowStore.getState().selectCandidate('project', 'initiation', { runId: 'research', itemId: 'dummy-c' }))
+  expect(screen.getByText('Radiomics stability')).toBeVisible()
+  expect(screen.queryByText('Topology control')).not.toBeInTheDocument()
+})
