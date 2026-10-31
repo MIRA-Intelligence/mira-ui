@@ -161,6 +161,44 @@ function psLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
+// Windows PowerShell 5.1 reads a BOM-less .ps1 as the ANSI code page (GBK on
+// zh-CN), which turns a non-ASCII user name in --home/--config into mojibake.
+export const POWERSHELL_UTF8_BOM = '\ufeff'
+
+export function buildElevatedScript(
+  executablePath: string,
+  args: string[],
+  stdoutPath: string,
+  stderrPath: string,
+): string {
+  const argumentList = args.map(psLiteral).join(', ')
+  const lines = [
+    "$ErrorActionPreference = 'Continue'",
+    // The engine writes UTF-8; without this PowerShell decodes it as the OEM code page.
+    'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch {}',
+    `$stdoutPath = ${psLiteral(stdoutPath)}`,
+    `$stderrPath = ${psLiteral(stderrPath)}`,
+    'try {',
+    `  & ${psLiteral(executablePath)} @(${argumentList}) 1> $stdoutPath 2> $stderrPath`,
+    '  if ($null -ne $LASTEXITCODE) { $exitCode = [int]$LASTEXITCODE } else { $exitCode = 0 }',
+    '} catch {',
+    '  $_ | Out-File -FilePath $stderrPath -Encoding UTF8 -Append',
+    '  $exitCode = 1',
+    '}',
+    'exit $exitCode',
+  ]
+  return POWERSHELL_UTF8_BOM + lines.join('\r\n')
+}
+
+// PowerShell 5.1 `>` redirection writes UTF-16LE with a BOM; Out-File -Encoding UTF8 writes UTF-8.
+export function decodeCapturedOutput(buffer: Buffer): string {
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return buffer.subarray(2).toString('utf16le')
+  }
+  const text = buffer.toString('utf8')
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
 function defaultState(): EngineBootstrapState {
   return {
     phase: 'idle',
@@ -566,25 +604,12 @@ export class LocalEngineManager {
       lastCommand: command,
     })
 
-    const argumentList = args.map(psLiteral).join(', ')
     const tempPrefix = path.join(tmpdir(), `mira-engine-elevated-${randomUUID()}`)
     const scriptPath = `${tempPrefix}.ps1`
     const stdoutPath = `${tempPrefix}.out`
     const stderrPath = `${tempPrefix}.err`
-    const elevatedScript = [
-      "$ErrorActionPreference = 'Continue'",
-      `$stdoutPath = ${psLiteral(stdoutPath)}`,
-      `$stderrPath = ${psLiteral(stderrPath)}`,
-      'try {',
-      `  & ${psLiteral(executablePath)} @(${argumentList}) 1> $stdoutPath 2> $stderrPath`,
-      '  if ($null -ne $LASTEXITCODE) { $exitCode = [int]$LASTEXITCODE } else { $exitCode = 0 }',
-      '} catch {',
-      '  $_ | Out-File -FilePath $stderrPath -Encoding UTF8 -Append',
-      '  $exitCode = 1',
-      '}',
-      'exit $exitCode',
-    ].join('\r\n')
-    await writeFile(scriptPath, elevatedScript, 'utf8')
+    const elevatedScript = buildElevatedScript(executablePath, args, stdoutPath, stderrPath)
+    await writeFile(scriptPath, elevatedScript, 'utf8') // BOM is part of the script text
     const script = [
       `$process = Start-Process -FilePath 'powershell.exe'`,
       `-ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ${psLiteral(scriptPath)})`,
@@ -616,7 +641,7 @@ export class LocalEngineManager {
 
       const readCapture = async (target: string): Promise<string> => {
         try {
-          return (await readFile(target, 'utf8')).trim()
+          return decodeCapturedOutput(await readFile(target)).trim()
         } catch {
           return ''
         }
