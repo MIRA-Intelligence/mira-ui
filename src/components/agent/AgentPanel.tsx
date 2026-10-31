@@ -90,6 +90,12 @@ function ChatComposer({
     setSkillPickerOpen(false)
   }, [sessionId])
 
+  // Skills can be installed outside this panel (MIRA Hub via the agent, the
+  // settings modal, a copied folder), so re-read the list whenever it opens.
+  useEffect(() => {
+    if (skillPickerOpen) void useSkillPluginsStore.getState().refresh(GLOBAL_SKILLS_SESSION_ID)
+  }, [skillPickerOpen])
+
   useEffect(() => {
     if (appMode !== 'normal' || !sessionId || draftPrompt === null) return
     setInput(draftPrompt)

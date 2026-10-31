@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 import {
   fetchSkillPlugins,
+  fetchSkillPluginsOrThrow,
   installSkillPluginFromDirectory,
   installSkillPluginFromZip,
   setSkillPluginState,
@@ -28,6 +29,8 @@ interface SkillPluginsState {
   setInstallPath: (path: string) => void
   clearError: () => void
   load: (sessionId: string) => Promise<void>
+  /** Re-fetch quietly: no loading flag, and a failure keeps the current list. */
+  refresh: (sessionId: string) => Promise<void>
   installFromDirectory: (sessionId: string) => Promise<void>
   installFromZip: (sessionId: string, file: File) => Promise<void>
   toggle: (
@@ -39,6 +42,9 @@ interface SkillPluginsState {
   ) => Promise<void>
   uninstall: (sessionId: string, pluginId: string) => Promise<void>
 }
+
+// One refresh in flight per session id; callers that race share it.
+const refreshing = new Map<string, Promise<void>>()
 
 function parseError(err: unknown): string {
   if (err instanceof Error) return err.message
@@ -63,6 +69,18 @@ export const useSkillPluginsStore = create<SkillPluginsState>((set, get) => ({
     } catch (err) {
       set({ loading: false, error: parseError(err) })
     }
+  },
+
+  refresh: (sessionId) => {
+    const pending = refreshing.get(sessionId)
+    if (pending) return pending
+    const run = Promise.resolve()
+      .then(() => fetchSkillPluginsOrThrow(sessionId))
+      .then((plugins) => set({ plugins }))
+      .catch(() => undefined)
+      .finally(() => refreshing.delete(sessionId))
+    refreshing.set(sessionId, run)
+    return run
   },
 
   installFromDirectory: async (sessionId) => {

@@ -182,6 +182,7 @@ describe('AgentPanel keyboard behavior', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     useSkillPluginsStore.setState({
       load: vi.fn(async () => {}),
+      refresh: vi.fn(async () => {}),
       plugins: [{
         id: 'custom',
         name: 'Custom',
@@ -213,6 +214,36 @@ describe('AgentPanel keyboard behavior', () => {
       selected_skill_ids: ['mrstation'],
       turn_id: expect.any(String),
     }))
+  })
+
+  it('re-reads the Skill list when the picker opens, so a just-installed Skill is searchable', async () => {
+    const installed = {
+      id: 'hub-pdf',
+      name: 'PDF',
+      version: '1',
+      description: '',
+      install_path: '/skills/hub-pdf',
+      source: { type: 'zip', path: '/tmp/pdf.zip' },
+      enabled: { global: true, project: null, effective: true },
+      groups: [],
+      skills: [{
+        id: 'pdf',
+        name: 'pdf',
+        path: '/skills/hub-pdf/SKILL.md',
+        group_ids: [],
+        enabled: { global: true, project: null, effective: true },
+      }],
+    }
+    const refresh = vi.fn(async () => { useSkillPluginsStore.setState({ plugins: [installed] }) })
+    useSkillPluginsStore.setState({ load: vi.fn(async () => {}), refresh, plugins: [] })
+    render(<AgentPanel />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Skill' }))
+    })
+
+    expect(refresh).toHaveBeenCalledWith('__global__')
+    expect(screen.getByRole('button', { name: '$pdf' })).toBeInTheDocument()
   })
 
   it('shows the current tool call in the working indicator while streaming', () => {

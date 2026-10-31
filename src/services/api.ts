@@ -744,12 +744,17 @@ export function getArtifactDownloadUrl(url: string): string {
   return downloadUrl.toString()
 }
 
+// Throws instead of answering [], so a background refresh can keep the list it has.
+export async function fetchSkillPluginsOrThrow(sessionId: string): Promise<SkillPlugin[]> {
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins`)
+  if (!resp.ok) throw new Error(`Failed to load skill plugins (${resp.status})`)
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+}
+
 export async function fetchSkillPlugins(sessionId: string): Promise<SkillPlugin[]> {
   try {
-    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins`)
-    if (!resp.ok) return []
-    const data = await resp.json()
-    return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+    return await fetchSkillPluginsOrThrow(sessionId)
   } catch {
     return []
   }

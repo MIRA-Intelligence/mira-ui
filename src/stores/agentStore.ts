@@ -3,6 +3,7 @@ import type { ActiveTurn, LogEntry, TurnEnd, TurnStopReason, WsResponse } from '
 import { isChatSessionId, isProjectSessionId } from '@/lib/sessions'
 import { useProjectStore } from '@/stores/projectStore'
 import { useSkillHistoryStore } from '@/stores/skillHistoryStore'
+import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPluginsStore'
 import { useTokenUsageStore } from '@/stores/tokenUsageStore'
 
 export interface SessionUsage {
@@ -364,6 +365,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       })
       stopPlanPolling(resolveProjectRefreshId(msg, sessionId))
+      // The turn may have installed a skill (hub_install); keep the composer's list current.
+      void useSkillPluginsStore.getState().refresh(GLOBAL_SKILLS_SESSION_ID)
       return
     }
 
