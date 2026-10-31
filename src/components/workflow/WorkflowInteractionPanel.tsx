@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import { isWorkflowCandidateInteraction } from '@/lib/workflowCandidates'
@@ -8,6 +8,9 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { WorkflowInteraction, WorkflowRun } from '@/types'
+
+// Auto-mode experiments approve their confirmation gate unless the user steps in.
+const AUTO_APPROVE_SECONDS = 10
 
 export function WorkflowInteractionPanel({
   projectId,
@@ -39,6 +42,27 @@ function InteractionForm({
   const [freeform, setFreeform] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [autoApprove, setAutoApprove] = useState(true)
+  const [secondsLeft, setSecondsLeft] = useState(AUTO_APPROVE_SECONDS)
+  const autoApprovable = Boolean(
+    run.module_type === 'experiment'
+    && run.module_data.experiment_execution_mode !== 'manual'
+    && interaction?.interaction_type.startsWith('approve_')
+    && interaction.choices.some((choice) => (choice.value ?? choice.id) === 'approve'),
+  )
+  const counting = autoApprovable && autoApprove && !pending
+  useEffect(() => {
+    if (!counting) return
+    if (secondsLeft <= 0) {
+      setAutoApprove(false)
+      submit(buildResponse('approve'))
+      return
+    }
+    const timer = window.setTimeout(() => setSecondsLeft((left) => left - 1), 1000)
+    return () => window.clearTimeout(timer)
+    // submit is rebuilt every render; the countdown only depends on the clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [counting, secondsLeft])
   if (!interaction) return null
 
   const choiceValue = (choice: Record<string, unknown>) => (
@@ -56,9 +80,8 @@ function InteractionForm({
     (choice) => String(choiceValue(choice)) === selectedItemId,
   )
   const revising = selectedChoice !== undefined && String(choiceValue(selectedChoice)) === 'revise'
-  const buildResponse = () => {
+  const buildResponse = (value: unknown = selectedChoice ? choiceValue(selectedChoice) : freeform.trim()) => {
     const schema = interaction.response_schema
-    const value = selectedChoice ? choiceValue(selectedChoice) : freeform.trim()
     if (schema.type !== 'object') return value
     const required = Array.isArray(schema.required)
       ? schema.required.filter((item): item is string => typeof item === 'string')
@@ -74,6 +97,45 @@ function InteractionForm({
     ) response.notes = freeform.trim()
     return response
   }
+  function submit(response: unknown) {
+    if (!interaction) return
+    setPending(true)
+    setError(null)
+    void commandRun(projectId, run.run_id, 'submit_interaction', {
+      interaction_id: interaction.interaction_id,
+      response,
+    }).then(() => {
+      if (!wsClient.connected) return
+      const conversationId = `${projectId}:run:${run.run_id}`
+      const continuation = lang === 'zh'
+        ? `继续执行。结构化交互 ${interaction.interaction_id} 的回答已保存。`
+        : `Continue execution. The response to structured interaction ${interaction.interaction_id} is saved.`
+      useAgentStore.getState().addLog(conversationId, {
+        id: `interaction-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        content: `${interaction.title}: ${JSON.stringify(response)}`,
+        type: 'response',
+        metadata: { _user: true, _structured_interaction: true },
+      })
+      useAgentStore.getState().markSessionPending(conversationId)
+      const projectState = useProjectStore.getState()
+      wsClient.send({
+        type: 'message',
+        content: continuation,
+        session_id: projectId,
+        user_id: 'ui_user',
+        loop_mode: 'project',
+        stream: useSettingsStore.getState().streamResponses,
+        mode: projectState.mode,
+        agent_profile: projectState.agentProfile,
+        workflow_run_id: run.run_id,
+        workflow_module_type: run.module_type,
+      })
+    }).catch((reason) => {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    }).finally(() => setPending(false))
+  }
+
   const canSubmit = (
     selectedChoice !== undefined || (!confirmationInteraction && interaction.allow_freeform && freeform.trim().length > 0)
   ) && (!revising || freeform.trim().length > 0)
@@ -110,6 +172,7 @@ function InteractionForm({
                 aria-pressed={active}
                 disabled={pending}
                 onClick={() => {
+                  setAutoApprove(false)
                   if (candidateInteraction) {
                     selectCandidate(projectId, run.module_type, {
                       runId: run.run_id,
@@ -141,54 +204,36 @@ function InteractionForm({
           disabled={pending}
           maxLength={4000}
           aria-label={lang === 'zh' ? '补充说明或自定义回答' : 'Notes or custom answer'}
-          onChange={(event) => setFreeform(event.target.value)}
+          onChange={(event) => {
+            setAutoApprove(false)
+            setFreeform(event.target.value)
+          }}
           placeholder={revising
             ? (lang === 'zh' ? '请说明需要 AI 修改的内容' : 'Describe what the AI should revise')
             : (lang === 'zh' ? '补充说明或直接输入你的决定' : 'Add notes or enter your decision')}
           className="mt-3 min-h-20 w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
         />
       )}
+      {counting && (
+        <div role="status" className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+          <span>
+            {lang === 'zh'
+              ? `自动模式：${secondsLeft} 秒后自动批准并继续`
+              : `Auto mode: approving and continuing in ${secondsLeft}s`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setAutoApprove(false)}
+            className="shrink-0 rounded-md border border-[var(--color-border)] px-2 py-1 text-[11px] hover:bg-[var(--color-bg-hover)]"
+          >
+            {lang === 'zh' ? '取消自动批准' : 'Cancel auto-approve'}
+          </button>
+        </div>
+      )}
       <button
         type="button"
         disabled={!canSubmit || pending}
-        onClick={() => {
-          const response = buildResponse()
-          setPending(true)
-          setError(null)
-          void commandRun(projectId, run.run_id, 'submit_interaction', {
-            interaction_id: interaction.interaction_id,
-            response,
-          }).then(() => {
-            if (!wsClient.connected) return
-            const conversationId = `${projectId}:run:${run.run_id}`
-            const continuation = lang === 'zh'
-              ? `继续执行。结构化交互 ${interaction.interaction_id} 的回答已保存。`
-              : `Continue execution. The response to structured interaction ${interaction.interaction_id} is saved.`
-            useAgentStore.getState().addLog(conversationId, {
-              id: `interaction-${Date.now()}`,
-              timestamp: new Date().toISOString(),
-              content: `${interaction.title}: ${JSON.stringify(response)}`,
-              type: 'response',
-              metadata: { _user: true, _structured_interaction: true },
-            })
-            useAgentStore.getState().markSessionPending(conversationId)
-            const projectState = useProjectStore.getState()
-            wsClient.send({
-              type: 'message',
-              content: continuation,
-              session_id: projectId,
-              user_id: 'ui_user',
-              loop_mode: 'project',
-              stream: useSettingsStore.getState().streamResponses,
-              mode: projectState.mode,
-              agent_profile: projectState.agentProfile,
-              workflow_run_id: run.run_id,
-              workflow_module_type: run.module_type,
-            })
-          }).catch((reason) => {
-            setError(reason instanceof Error ? reason.message : String(reason))
-          }).finally(() => setPending(false))
-        }}
+        onClick={() => submit(buildResponse())}
         className="mt-3 rounded-md bg-[var(--color-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
       >
         {pending

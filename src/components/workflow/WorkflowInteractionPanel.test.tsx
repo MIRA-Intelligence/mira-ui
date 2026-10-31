@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/websocket', () => ({ wsClient: { connected: true, send: vi.fn() } }))
 
@@ -99,5 +99,82 @@ describe('WorkflowInteractionPanel', () => {
     expect(screen.getByRole('textbox')).toHaveValue('Overview only')
     expect(screen.getByRole('button', { name: 'Confirm and continue' })).toBeEnabled()
     expect(wsClient.send).not.toHaveBeenCalled()
+  })
+
+  describe('auto-approve countdown', () => {
+    const approval = { interaction_type: 'approve_experiment_plan', choices: [
+      { id: 'approve', label: 'Approve', value: 'approve' }, { id: 'revise', label: 'Revise', value: 'revise' },
+    ] }
+    function experimentRun(mode?: 'auto' | 'manual', overrides: Partial<WorkflowInteraction> = approval): WorkflowRun {
+      const run = makeRun('gate', overrides)
+      return {
+        ...run,
+        module_type: 'experiment',
+        module_data: { ...run.module_data, ...(mode ? { experiment_execution_mode: mode } : {}) },
+      }
+    }
+    const tick = async (ms: number) => {
+      for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
+        await act(async () => { vi.advanceTimersByTime(1000) })
+      }
+    }
+
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('approves an auto-mode experiment gate after a visible 10s countdown', async () => {
+      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
+      expect(screen.getByRole('status')).toHaveTextContent('approving and continuing in 10s')
+      await tick(3000)
+      expect(screen.getByRole('status')).toHaveTextContent('in 7s')
+      expect(command).not.toHaveBeenCalled()
+      await tick(7000)
+      expect(command).toHaveBeenCalledWith('project', 'run', 'submit_interaction', {
+        interaction_id: 'gate', response: { selection: 'approve' },
+      })
+      expect(command).toHaveBeenCalledTimes(1)
+    })
+
+    it('treats a Run without a recorded mode as auto, like the engine does', () => {
+      render(<WorkflowInteractionPanel projectId="project" run={experimentRun()} />)
+      expect(screen.getByRole('status')).toHaveTextContent('10s')
+    })
+
+    it('never times out in manual mode', async () => {
+      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('manual')} />)
+      expect(screen.queryByRole('status')).toBeNull()
+      await tick(15000)
+      expect(command).not.toHaveBeenCalled()
+    })
+
+    it('stops when the user picks a choice, types notes or cancels', async () => {
+      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Revise' }))
+      expect(screen.queryByRole('status')).toBeNull()
+      unmount()
+
+      const typed = render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
+      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'wait' } })
+      expect(screen.queryByRole('status')).toBeNull()
+      typed.unmount()
+
+      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel auto-approve' }))
+      expect(screen.queryByRole('status')).toBeNull()
+      await tick(15000)
+      expect(command).not.toHaveBeenCalled()
+    })
+
+    it('leaves other stages and non-confirmation questions alone', async () => {
+      const initiation = { ...experimentRun('auto'), module_type: 'initiation' as const }
+      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={initiation} />)
+      expect(screen.queryByRole('status')).toBeNull()
+      unmount()
+
+      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto', {})} />)
+      expect(screen.queryByRole('status')).toBeNull()
+      await tick(15000)
+      expect(command).not.toHaveBeenCalled()
+    })
   })
 })
