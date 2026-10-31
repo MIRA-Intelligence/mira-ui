@@ -135,6 +135,8 @@ export interface RemoteProject {
 export interface OrganizationFolder {
   id: string
   name: string
+  /** Which sidebar list the folder belongs to; null/absent = legacy folder not yet used. */
+  kind?: 'chat' | 'project' | null
   created_at: string
   updated_at: string
 }
@@ -186,8 +188,8 @@ export async function importOrganizationChats(chats: RemoteChat[]): Promise<Remo
   return result.chats
 }
 
-export async function createOrganizationFolder(name: string): Promise<OrganizationFolder> {
-  return organizationRequest<OrganizationFolder>('/folders', jsonInit('POST', { name }))
+export async function createOrganizationFolder(name: string, kind: 'chat' | 'project'): Promise<OrganizationFolder> {
+  return organizationRequest<OrganizationFolder>('/folders', jsonInit('POST', { name, kind }))
 }
 
 export async function renameOrganizationFolder(folderId: string, name: string): Promise<OrganizationFolder> {
