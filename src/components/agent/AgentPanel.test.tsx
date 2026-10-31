@@ -93,6 +93,25 @@ describe('AgentPanel keyboard behavior', () => {
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
   })
 
+  it('shows the engine picking the recommended option live, in the UI language', () => {
+    useSettingsStore.setState({ language: 'zh' })
+    act(() => useAgentStore.getState().handleWsMessage({
+      type: 'response',
+      session_id: 'PRJ-0001',
+      content: 'No answer within 10s, so the recommended option "Small pilot" was selected for "Which cohort?". Continue execution.',
+      metadata: {
+        _user: true,
+        _auto_decided: { label: 'Small pilot', title: 'Which cohort?', selection: 'small', seconds: 10 },
+      },
+    }))
+    render(<AgentPanel />)
+
+    expect(screen.getByText('10 秒内未作答，已自动选择推荐选项「Small pilot」（Which cohort?）并继续。')).toBeInTheDocument()
+    expect(screen.queryByText(/No answer within/)).not.toBeInTheDocument()
+    expect(screen.getByText('AUTO')).toBeInTheDocument()
+    expect(screen.queryByTitle('重发')).not.toBeInTheDocument()
+  })
+
   it('sends on Enter and keeps Shift+Enter for newline by default', () => {
     const sendSpy = vi.spyOn(wsClient, 'send').mockImplementation(() => {})
     render(<AgentPanel />)

@@ -53,6 +53,20 @@ function deriveWorkflowActivityLabel(activity: string | undefined): string | nul
   return condenseActivity(normalized, 80)
 }
 
+// The engine answered a form with its recommended choice (auto mode timeout).
+function autoDecidedNotice(entry: AgentLogEntry, lang: Language): string | null {
+  const notice = entry.metadata?._auto_decided
+  if (!notice || typeof notice !== 'object') return null
+  const { label, title, seconds } = notice as { label?: unknown; title?: unknown; seconds?: unknown }
+  if (typeof label !== 'string') return null
+  const wait = typeof seconds === 'number' ? seconds : 10
+  const form = typeof title === 'string' && title ? title : null
+  if (lang === 'zh') {
+    return `${wait} 秒内未作答，已自动选择推荐选项「${label}」${form ? `（${form}）` : ''}并继续。`
+  }
+  return `No answer within ${wait}s, so the recommended option "${label}" was selected${form ? ` for "${form}"` : ''}.`
+}
+
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
@@ -832,7 +846,8 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
 
           const entry = item.entry
           const isUser = !!entry.metadata?._user
-          const isAutoMsg = !!entry.metadata?._auto
+          const autoNotice = isUser ? autoDecidedNotice(entry, lang) : null
+          const isAutoMsg = !!entry.metadata?._auto || autoNotice !== null
           const requiresSkillFallback = entry.metadata?._skill_fallback_required === true
           if (isUser) {
             return (
@@ -845,9 +860,9 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
                   {isAutoMsg && (
                     <span className="text-[10px] font-semibold text-[var(--color-success)] uppercase mr-1.5 not-italic">AUTO</span>
                   )}
-                  {entry.content}
+                  {autoNotice ?? entry.content}
                 </div>
-                <div className="flex justify-end mt-1 mr-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                {autoNotice === null && <div className="flex justify-end mt-1 mr-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
                   <button
                     onClick={() => handleResend(entry.content)}
                     title={t('resend', lang)}
@@ -858,7 +873,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                     </svg>
                   </button>
-                </div>
+                </div>}
               </div>
             )
           }
