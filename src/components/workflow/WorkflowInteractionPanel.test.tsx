@@ -101,80 +101,63 @@ describe('WorkflowInteractionPanel', () => {
     expect(wsClient.send).not.toHaveBeenCalled()
   })
 
-  describe('auto-approve countdown', () => {
-    const approval = { interaction_type: 'approve_experiment_plan', choices: [
-      { id: 'approve', label: 'Approve', value: 'approve' }, { id: 'revise', label: 'Revise', value: 'revise' },
-    ] }
-    function experimentRun(mode?: 'auto' | 'manual', overrides: Partial<WorkflowInteraction> = approval): WorkflowRun {
-      const run = makeRun('gate', overrides)
-      return {
-        ...run,
-        module_type: 'experiment',
-        module_data: { ...run.module_data, ...(mode ? { experiment_execution_mode: mode } : {}) },
-      }
+  describe('engine auto-decide countdown', () => {
+    const NOW = Date.parse('2026-10-31T10:00:00Z')
+    const choices = [
+      { id: 'small', label: 'Small pilot', value: 'small', recommended: true },
+      { id: 'full', label: 'Full cohort', value: 'full' },
+    ]
+    function autoRun(autoDecide?: WorkflowInteraction['auto_decide']): WorkflowRun {
+      const run = makeRun('gate', { choices, ...(autoDecide ? { auto_decide: autoDecide } : {}) })
+      return { ...run, module_type: 'experiment' }
     }
+    const deadline = (seconds: number) => new Date(NOW + seconds * 1000).toISOString()
     const tick = async (ms: number) => {
-      for (let elapsed = 0; elapsed < ms; elapsed += 1000) {
-        await act(async () => { vi.advanceTimersByTime(1000) })
-      }
+      await act(async () => { vi.advanceTimersByTime(ms) })
     }
 
-    beforeEach(() => { vi.useFakeTimers() })
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(NOW)
+    })
     afterEach(() => { vi.useRealTimers() })
 
-    it('approves an auto-mode experiment gate after a visible 10s countdown', async () => {
-      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
-      expect(screen.getByRole('status')).toHaveTextContent('approving and continuing in 10s')
+    it('counts down to the engine deadline and never submits by itself', async () => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({ selection: 'small', label: 'Small pilot', deadline_at: deadline(10) })} />)
+      expect(screen.getByRole('status')).toHaveTextContent('"Small pilot" and continuing in 10s')
       await tick(3000)
       expect(screen.getByRole('status')).toHaveTextContent('in 7s')
+      await tick(8000)
+      expect(screen.getByRole('status')).toHaveTextContent('choosing the recommended option…')
       expect(command).not.toHaveBeenCalled()
-      await tick(7000)
-      expect(command).toHaveBeenCalledWith('project', 'run', 'submit_interaction', {
-        interaction_id: 'gate', response: { selection: 'approve' },
-      })
+    })
+
+    it('marks the recommended choice', () => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun()} />)
+      expect(screen.getByRole('button', { name: /Small pilot/ })).toHaveTextContent('Recommended')
+      expect(screen.getByRole('button', { name: /Full cohort/ })).not.toHaveTextContent('Recommended')
+    })
+
+    it('shows no countdown without an engine deadline or after it was cancelled', () => {
+      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={autoRun()} />)
+      expect(screen.queryByRole('status')).toBeNull()
+      unmount()
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({
+        selection: 'small', deadline_at: deadline(10), cancelled_at: deadline(-1),
+      })} />)
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it.each([
+      ['picking a choice', () => fireEvent.click(screen.getByRole('button', { name: /Full cohort/ }))],
+      ['typing notes', () => fireEvent.change(screen.getByRole('textbox'), { target: { value: 'wait' } })],
+      ['cancelling', () => fireEvent.click(screen.getByRole('button', { name: 'Cancel auto-select' }))],
+    ])('tells the engine when the user takes over by %s', (_name, act) => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({ selection: 'small', deadline_at: deadline(10) })} />)
+      act()
+      expect(screen.queryByRole('status')).toBeNull()
       expect(command).toHaveBeenCalledTimes(1)
-    })
-
-    it('treats a Run without a recorded mode as auto, like the engine does', () => {
-      render(<WorkflowInteractionPanel projectId="project" run={experimentRun()} />)
-      expect(screen.getByRole('status')).toHaveTextContent('10s')
-    })
-
-    it('never times out in manual mode', async () => {
-      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('manual')} />)
-      expect(screen.queryByRole('status')).toBeNull()
-      await tick(15000)
-      expect(command).not.toHaveBeenCalled()
-    })
-
-    it('stops when the user picks a choice, types notes or cancels', async () => {
-      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
-      fireEvent.click(screen.getByRole('button', { name: 'Revise' }))
-      expect(screen.queryByRole('status')).toBeNull()
-      unmount()
-
-      const typed = render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
-      fireEvent.change(screen.getByRole('textbox'), { target: { value: 'wait' } })
-      expect(screen.queryByRole('status')).toBeNull()
-      typed.unmount()
-
-      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto')} />)
-      fireEvent.click(screen.getByRole('button', { name: 'Cancel auto-approve' }))
-      expect(screen.queryByRole('status')).toBeNull()
-      await tick(15000)
-      expect(command).not.toHaveBeenCalled()
-    })
-
-    it('leaves other stages and non-confirmation questions alone', async () => {
-      const initiation = { ...experimentRun('auto'), module_type: 'initiation' as const }
-      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={initiation} />)
-      expect(screen.queryByRole('status')).toBeNull()
-      unmount()
-
-      render(<WorkflowInteractionPanel projectId="project" run={experimentRun('auto', {})} />)
-      expect(screen.queryByRole('status')).toBeNull()
-      await tick(15000)
-      expect(command).not.toHaveBeenCalled()
+      expect(command).toHaveBeenCalledWith('project', 'run', 'cancel_auto_decision', { interaction_id: 'gate' })
     })
   })
 })

@@ -251,6 +251,15 @@ export interface WorkflowInteraction {
   allow_freeform: boolean
   response?: unknown
   resolved_at?: string
+  /** Auto-mode experiments: the engine picks `selection` at `deadline_at` unless cancelled. */
+  auto_decide?: {
+    selection: string
+    label?: string
+    seconds?: number
+    deadline_at?: string
+    cancelled_at?: string
+  }
+  resolved_by?: 'auto'
 }
 
 export interface ProjectWorkflow {
