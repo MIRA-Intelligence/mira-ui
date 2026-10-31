@@ -15,6 +15,7 @@ import {
   fetchProjects,
   fetchSessionHistory,
   fetchSkillPlugins,
+  fetchSkillPluginsOrThrow,
   fetchStatus,
   fetchWorkflowArtifact,
   getProjectArtifactUrl,
@@ -428,6 +429,10 @@ describe('api service', () => {
       expect(await fetchSkillPlugins('s')).toHaveLength(1)
       fetchMock.mockResolvedValueOnce(fail('x'))
       expect(await fetchSkillPlugins('s')).toEqual([])
+    })
+    it('fetchSkillPluginsOrThrow throws on error', async () => {
+      fetchMock.mockResolvedValueOnce(fail('x'))
+      await expect(fetchSkillPluginsOrThrow('s')).rejects.toThrow()
     })
     it('installSkillPluginFromDirectory returns plugins and throws on error', async () => {
       fetchMock.mockResolvedValueOnce(ok({ plugins: [] }))
