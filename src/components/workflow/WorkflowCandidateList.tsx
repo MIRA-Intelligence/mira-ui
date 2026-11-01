@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import {
   buildWorkflowCandidates,
+  isDeliverableCandidate,
   resolveWorkflowCandidate,
   type WorkflowCandidateItem,
 } from '@/lib/workflowCandidates'
@@ -26,6 +27,7 @@ export function WorkflowCandidateList({
   compact = false,
   fill = false,
   emptyText,
+  deliverablesOnly = false,
   onSelect,
 }: {
   projectId: string
@@ -34,6 +36,8 @@ export function WorkflowCandidateList({
   compact?: boolean
   fill?: boolean
   emptyText?: string
+  /** Hide placeholders of Runs that have produced nothing yet. */
+  deliverablesOnly?: boolean
   onSelect?: (candidate: WorkflowCandidateItem) => void
 }) {
   const lang = useSettingsStore((state) => state.language)
@@ -42,7 +46,8 @@ export function WorkflowCandidateList({
   ))
   const selectedRunId = useWorkflowStore((state) => state.selectedRunByProject[projectId])
   const selectCandidate = useWorkflowStore((state) => state.selectCandidate)
-  const candidates = buildWorkflowCandidates(runs, moduleType)
+  const built = buildWorkflowCandidates(runs, moduleType)
+  const candidates = deliverablesOnly ? built.filter(isDeliverableCandidate) : built
   const selected = resolveWorkflowCandidate(candidates, selection, selectedRunId)
 
   if (candidates.length === 0) {

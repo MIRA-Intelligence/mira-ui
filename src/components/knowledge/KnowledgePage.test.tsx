@@ -77,6 +77,21 @@ describe('KnowledgePage', () => {
     expect(screen.getByText('1 docs · 9 chunks')).toBeInTheDocument()
   })
 
+  it('starts below the macOS title bar so the close button stays clickable', async () => {
+    window.electronAPI = { platform: 'darwin' } as typeof window.electronAPI
+    try {
+      render(<KnowledgePage />)
+      await screen.findByText('plan.pdf')
+      const close = screen.getAllByRole('button', { name: 'Cancel' })[0]
+      expect(close.closest('[data-drag-region]')).toHaveAttribute('data-drag-region', 'no-drag')
+      expect(screen.getByTestId('title-bar-strip')).toHaveAttribute('data-drag-region', 'drag')
+      fireEvent.click(close)
+      expect(useUiStore.getState().knowledgeOpen).toBe(false)
+    } finally {
+      window.electronAPI = undefined as unknown as typeof window.electronAPI
+    }
+  })
+
   it('adds a web page and uploads files', async () => {
     vi.mocked(addKnowledgeSource).mockResolvedValue([])
     vi.mocked(uploadKnowledgeFiles).mockResolvedValue([])

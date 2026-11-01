@@ -4,6 +4,7 @@ import type { WorkflowRun } from '@/types'
 import {
   buildWorkflowCandidates,
   resolveWorkflowCandidate,
+  scopedModuleRuns,
   workflowRunsForUpstreamCandidate,
 } from './workflowCandidates'
 
@@ -269,5 +270,46 @@ describe('workflowCandidates', () => {
 
     expect(workflowRunsForUpstreamCandidate(runs, 'experiment', directionA)).toEqual([legacyExperiment])
     expect(workflowRunsForUpstreamCandidate(runs, 'experiment', directionB)).toEqual([])
+  })
+})
+
+describe('scopedModuleRuns', () => {
+  // Like a real project: one research Run with three directions, each continued
+  // into its own experiment Run whose experiments all start at Exp001.
+  const research = makeRun({
+    run_id: 'research',
+    module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' },
+      { id: 'dummy-b', title: 'Dummy B' },
+      { id: 'dummy-c', title: 'Dummy C' },
+    ] } },
+  })
+  const experimentFor = (direction: string) => makeRun({
+    run_id: `experiment-${direction}`,
+    module_type: 'experiment',
+    outputs: [],
+    module_data: {
+      parent_run_id: 'research',
+      upstream_selection: { run_id: 'research', item_id: direction, label: `Label ${direction}` },
+      experiments: [{ id: 'Exp001', title: `Exp001 of ${direction}`, status: 'pending' }],
+    },
+  })
+  const runs = [research, experimentFor('dummy-a'), experimentFor('dummy-b'), experimentFor('dummy-c')]
+
+  it('keeps only the selected direction\'s experiment Runs', () => {
+    const scope = scopedModuleRuns(runs, 'experiment', { initiation: { runId: 'research', itemId: 'dummy-b' } })
+    expect(scope.runs.map((run) => run.run_id)).toEqual(['experiment-dummy-b'])
+    expect(scope.upstreamLabel).toBe('Dummy B')
+  })
+
+  it('falls back to the selected Run\'s own branch when no direction is chosen', () => {
+    const scope = scopedModuleRuns(runs, 'experiment', undefined, 'experiment-dummy-c')
+    expect(scope.runs.map((run) => run.run_id)).toEqual(['experiment-dummy-c'])
+    expect(scope.upstreamLabel).toBe('Label dummy-c')
+  })
+
+  it('shows every Run only when nothing identifies a branch', () => {
+    expect(scopedModuleRuns(runs, 'experiment', undefined, 'research').runs).toHaveLength(3)
+    expect(scopedModuleRuns(runs, 'initiation', undefined).runs).toEqual([research])
   })
 })

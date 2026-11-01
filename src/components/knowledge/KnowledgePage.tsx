@@ -11,6 +11,7 @@ import {
 } from '@/services/knowledge'
 import { t, type I18nKey } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { FullScreenPage } from '@/components/layout/FullScreenPage'
 
 type Lang = ReturnType<typeof useSettingsStore.getState>['language']
 type SourceTab = 'files' | 'url' | 'git' | 'dir'
@@ -72,7 +73,7 @@ export function KnowledgePage() {
   const detail = selected && selected !== NEW_KB ? details[selected] : undefined
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-[var(--color-bg-primary)]">
+    <FullScreenPage className="z-[100] bg-[var(--color-bg-primary)]">
       <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
         <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('knowledgeBases', lang)}</h2>
         <button
@@ -135,7 +136,7 @@ export function KnowledgePage() {
           )}
         </div>
       </div>
-    </div>
+    </FullScreenPage>
   )
 }
 

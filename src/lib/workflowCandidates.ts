@@ -75,6 +75,14 @@ function runFallbackLabel(run: WorkflowRun): string {
     || run.label
 }
 
+/**
+ * A Run with nothing produced yet is still listed (as `kind: 'run'`) so it can
+ * be selected and its branch followed, but it is not a deliverable.
+ */
+export function isDeliverableCandidate(candidate: WorkflowCandidateItem): boolean {
+  return !(candidate.kind === 'run' && candidate.artifactIds.length === 0)
+}
+
 export function workflowExperimentUiId(runId: string, experimentId: string): string {
   return `workflow:${runId}:${experimentId}`
 }
@@ -326,4 +334,49 @@ export function workflowRunsForUpstreamCandidate(
 
     return siblingCandidates.length === 1 || upstreamCandidate.selectedByRun
   })
+}
+
+const UPSTREAM_MODULE: Partial<Record<WorkflowModuleType, WorkflowModuleType>> = {
+  experiment: 'initiation',
+  delivery: 'experiment',
+}
+
+function branchKey(run: WorkflowRun): string {
+  const upstream = asRecord(run.module_data.upstream_selection)
+  return `${text(run.module_data.parent_run_id)}\u0000${text(upstream?.item_id)}`
+}
+
+/**
+ * The Runs of one module that belong to the branch the user is looking at:
+ * experiments of the selected research direction, deliveries of the selected
+ * experiment. Without an upstream choice (selections are not persisted), the
+ * selected Run's own branch decides; only with neither is every Run in scope.
+ */
+export function scopedModuleRuns(
+  runs: WorkflowRun[],
+  moduleType: WorkflowModuleType,
+  selections: Partial<Record<WorkflowModuleType, WorkflowCandidateSelection | null>> | undefined,
+  selectedRunId?: string | null,
+): { runs: WorkflowRun[]; upstreamLabel: string | null } {
+  const all = runs.filter((run) => run.module_type === moduleType)
+  const upstreamType = UPSTREAM_MODULE[moduleType]
+  if (!upstreamType) return { runs: all, upstreamLabel: null }
+  const upstreamRuns = upstreamType === 'experiment'
+    ? scopedModuleRuns(runs, upstreamType, selections, selectedRunId).runs
+    : runs
+  const upstream = resolveWorkflowCandidate(
+    buildWorkflowCandidates(upstreamRuns, upstreamType),
+    selections?.[upstreamType],
+    selectedRunId,
+  )
+  if (upstream) {
+    return { runs: workflowRunsForUpstreamCandidate(runs, moduleType, upstream), upstreamLabel: upstream.label }
+  }
+  const focused = all.find((run) => run.run_id === selectedRunId)
+  if (!focused) return { runs: all, upstreamLabel: null }
+  const key = branchKey(focused)
+  return {
+    runs: all.filter((run) => branchKey(run) === key),
+    upstreamLabel: text(asRecord(focused.module_data.upstream_selection)?.label) || null,
+  }
 }

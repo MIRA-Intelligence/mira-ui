@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAgentStore } from './agentStore'
 import { useProjectStore } from './projectStore'
+import { useSkillPluginsStore } from './skillPluginsStore'
 
 const initialAgentState = useAgentStore.getState()
 const initialProjectState = useProjectStore.getState()
@@ -476,6 +477,18 @@ describe('agentStore turn lifecycle', () => {
     const state = useAgentStore.getState()
     expect(state.streamingBySession['PRJ-1']).toBeUndefined()
     expect(state.lastTurnEndBySession['PRJ-1']).toEqual({ turnId: 't1', stopReason: 'max_iterations' })
+  })
+
+  it('re-reads the Skill list when a turn finishes, since the turn may have installed one', () => {
+    const refresh = vi.fn(async () => {})
+    const original = useSkillPluginsStore.getState().refresh
+    useSkillPluginsStore.setState({ refresh })
+    try {
+      send('turn_finished', { turn_id: 't1', stop_reason: 'completed' })
+      expect(refresh).toHaveBeenCalledWith('__global__')
+    } finally {
+      useSkillPluginsStore.setState({ refresh: original })
+    }
   })
 
   it('keys workflow-run turns by run and clears the notice when the next turn starts', () => {

@@ -139,17 +139,20 @@ export function ProjectQueue() {
     () => [...folders].sort((a, b) => a.name.localeCompare(b.name)),
     [folders],
   )
+  // Each list shows only its own folders; a legacy folder that never held anything shows in both.
+  const chatFolders = useMemo(() => sortedFolders.filter((folder) => !folder.kind || folder.kind === 'chat'), [sortedFolders])
+  const projectFolders = useMemo(() => sortedFolders.filter((folder) => !folder.kind || folder.kind === 'project'), [sortedFolders])
   const folderIds = useMemo(() => new Set(folders.map((folder) => folder.id)), [folders])
 
   const itemMatches = (title: string) => !normalizedSearch || title.toLocaleLowerCase().includes(normalizedSearch)
-  const chatGroups = sortedFolders.map((folder) => {
+  const chatGroups = chatFolders.map((folder) => {
     const all = chats
       .filter((chat) => assignments.chat[chat.id] === folder.id)
       .sort((a, b) => b.updatedAt - a.updatedAt)
     const items = folder.name.toLocaleLowerCase().includes(normalizedSearch) ? all : all.filter((chat) => itemMatches(chat.title))
     return { folder, items }
   })
-  const projectGroups = sortedFolders.map((folder) => {
+  const projectGroups = projectFolders.map((folder) => {
     const all = tasks
       .filter((task) => assignments.project[task.id] === folder.id)
       .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
@@ -253,7 +256,7 @@ export function ProjectQueue() {
     const name = folderDraft.trim()
     if (!name) return
     try {
-      await createFolder(name)
+      await createFolder(name, currentKind)
       setFolderDraft('')
       setCreatingFolder(false)
     } catch (error) {
@@ -374,7 +377,7 @@ export function ProjectQueue() {
               onChange={(event) => { if (event.target.value) void runChatBatch([...selectedChats], 'move', event.target.value === UNCATEGORIZED_ID ? null : event.target.value) }}>
               <option value="">{lang === 'zh' ? '移动到…' : 'Move to…'}</option>
               <option value={UNCATEGORIZED_ID}>{t('uncategorized', lang)}</option>
-              {sortedFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+              {chatFolders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
             </select>
             <button type="button" disabled={bulkBusy} className="text-red-400 disabled:opacity-50" onClick={() => confirmChatDelete([...selectedChats])}>
               {lang === 'zh' ? '删除所选会话' : 'Delete selected conversations'}
@@ -430,7 +433,7 @@ export function ProjectQueue() {
                   />
                   {(normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)) && items.map((chat) => (
                     <div key={chat.id} className="ml-3" {...dragProps('chat', chat.id)}>
-                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onRename={renameChat} folders={sortedFolders} currentFolderId={folder.id} {...chatProps(chat.id)} />
+                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onRename={renameChat} folders={chatFolders} currentFolderId={folder.id} {...chatProps(chat.id)} />
                     </div>
                   ))}
                 </div>
@@ -440,7 +443,7 @@ export function ProjectQueue() {
                   <FolderRow name={t('uncategorized', lang)} count={uncategorizedChats.length} virtual expanded={normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)} onToggle={() => toggleFolder(UNCATEGORIZED_ID)} onDropItem={(event) => handleDrop(event, null)} />
                   {(normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)) && uncategorizedChats.map((chat) => (
                     <div key={chat.id} className="ml-3" {...dragProps('chat', chat.id)}>
-                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onRename={renameChat} folders={sortedFolders} currentFolderId={null} {...chatProps(chat.id)} />
+                      <ChatItem chat={chat} isSelected={isChatActive && chat.id === activeChatId} onRename={renameChat} folders={chatFolders} currentFolderId={null} {...chatProps(chat.id)} />
                     </div>
                   ))}
                 </div>
@@ -467,7 +470,7 @@ export function ProjectQueue() {
                 />
                 {(normalizedSearch.length > 0 || !collapsedFolders.has(folder.id)) && items.map((task) => (
                   <div key={task.id} className="ml-3" {...dragProps('project', task.id)}>
-                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={sortedFolders} currentFolderId={folder.id} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
+                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={projectFolders} currentFolderId={folder.id} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
                   </div>
                 ))}
               </div>
@@ -477,7 +480,7 @@ export function ProjectQueue() {
                 <FolderRow name={t('uncategorized', lang)} count={uncategorizedProjects.length} virtual expanded={normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)} onToggle={() => toggleFolder(UNCATEGORIZED_ID)} onDropItem={(event) => handleDrop(event, null)} />
                 {(normalizedSearch.length > 0 || !collapsedFolders.has(UNCATEGORIZED_ID)) && uncategorizedProjects.map((task) => (
                   <div key={task.id} className="ml-3" {...dragProps('project', task.id)}>
-                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={sortedFolders} currentFolderId={null} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
+                    <QueueItem task={task} isSelected={!isChatActive && task.id === selectedTaskId} onSelect={handleSelectTask} onRename={renameTask} onDelete={handleDelete} onDuplicate={duplicateTask} folders={projectFolders} currentFolderId={null} onMove={(id, folderId) => { void handleMove('project', id, folderId) }} />
                   </div>
                 ))}
               </div>

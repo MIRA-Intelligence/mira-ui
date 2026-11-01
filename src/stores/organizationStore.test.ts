@@ -43,11 +43,12 @@ describe('organizationStore', () => {
   })
 
   it('creates a folder and moves an item optimistically', async () => {
-    const folder = { id: 'folder-2', name: 'Glioma', created_at: '2026-01-01', updated_at: '2026-01-01' }
+    const folder = { id: 'folder-2', name: 'Glioma', kind: 'project' as const, created_at: '2026-01-01', updated_at: '2026-01-01' }
     vi.mocked(createOrganizationFolder).mockResolvedValue(folder)
     vi.mocked(assignOrganizationFolder).mockResolvedValue()
 
-    await useOrganizationStore.getState().createFolder('Glioma')
+    await useOrganizationStore.getState().createFolder('Glioma', 'project')
+    expect(createOrganizationFolder).toHaveBeenCalledWith('Glioma', 'project')
     await useOrganizationStore.getState().moveItem('project', 'PRJ-1', 'folder-2')
 
     expect(useOrganizationStore.getState().folders).toContainEqual(folder)

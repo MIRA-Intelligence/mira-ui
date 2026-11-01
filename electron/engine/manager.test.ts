@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-import { LocalEngineManager } from './manager'
+import { LocalEngineManager, POWERSHELL_UTF8_BOM, buildElevatedScript, decodeCapturedOutput } from './manager'
 
 function mockProcessPlatform(platform: NodeJS.Platform): () => void {
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -637,4 +637,31 @@ describe('LocalEngineManager', () => {
     }
   })
 
+})
+
+describe('elevated PowerShell script encoding', () => {
+  const home = 'C:\\Users\\张三'
+
+  it('starts with a UTF-8 BOM so PowerShell 5.1 does not read it as GBK', () => {
+    const script = buildElevatedScript(
+      'C:\\Program Files\\Mira\\mira-engine.exe',
+      ['install-service', '--home', home, '--config', `${home}\\.mira\\config.json`],
+      'C:\\Temp\\a.out',
+      'C:\\Temp\\a.err',
+    )
+    const bytes = Buffer.from(script, 'utf8')
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
+    expect(script.startsWith(POWERSHELL_UTF8_BOM)).toBe(true)
+    expect(script).toContain(`'${home}'`)
+    // Decoding the on-disk bytes as UTF-8 (BOM stripped) must give back the same path.
+    expect(bytes.subarray(3).toString('utf8')).toContain(`'${home}'`)
+  })
+
+  it('decodes UTF-8, UTF-8 BOM and UTF-16LE captures', () => {
+    expect(decodeCapturedOutput(Buffer.from(`${'\ufeff'}配置 C:\\Users\\张三`, 'utf8'))).toBe('配置 C:\\Users\\张三')
+    expect(decodeCapturedOutput(Buffer.from('plain', 'utf8'))).toBe('plain')
+    expect(
+      decodeCapturedOutput(Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('C:\\Users\\张三', 'utf16le')])),
+    ).toBe('C:\\Users\\张三')
+  })
 })

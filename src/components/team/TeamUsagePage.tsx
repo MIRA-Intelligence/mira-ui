@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { t, type I18nKey } from '@/i18n'
 import { isAdmin } from '@/lib/teamServerProtocol'
 import { cn } from '@/lib/utils'
+import { FullScreenPage } from '@/components/layout/FullScreenPage'
 import {
   downloadUsageCsv,
   fetchQuotas,
@@ -83,7 +84,6 @@ export function TeamUsagePage() {
   const origin = useTeamServerStore((s) => s.origin)
   const user = useTeamServerStore((s) => s.user)
   const admin = isAdmin(user)
-  const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
 
   const [range, setRange] = useState<{ from: string; to: string } | null>(null)
   const [monthStart, setMonthStart] = useState<string | null>(null)
@@ -202,7 +202,7 @@ export function TeamUsagePage() {
     Boolean(period && range && period.from === range.from && range.to <= period.to)
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-[var(--color-bg-primary)]">
+    <FullScreenPage className="z-[100] bg-[var(--color-bg-primary)]">
       {feedback && (
         <div className="pointer-events-none absolute left-1/2 top-20 z-[120] -translate-x-1/2 px-4">
           <button
@@ -219,12 +219,7 @@ export function TeamUsagePage() {
           </button>
         </div>
       )}
-      {/* Covers the TopBar, an Electron drag region on macOS: opt out so the buttons work. */}
-      <div
-        data-drag-region="no-drag"
-        className={cn('flex items-center justify-between gap-4 py-4 pr-6 border-b border-[var(--color-border)] shrink-0',
-          isMacDesktop ? 'pl-24' : 'pl-6')}
-      >
+      <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--color-border)] shrink-0">
         <div className="min-w-0">
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('teamUsageTitle', lang)}</h2>
           <p className="text-[11px] text-[var(--color-text-muted)]">{t('teamUsageSubtitle', lang)}</p>
@@ -408,7 +403,7 @@ export function TeamUsagePage() {
           )}
         </div>
       </div>
-    </div>
+    </FullScreenPage>
   )
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { FullScreenPage } from '@/components/layout/FullScreenPage'
 
 interface ImageLightboxProps {
   src: string
@@ -194,11 +195,11 @@ export function ImageLightbox({
   if (typeof document === 'undefined') return null
 
   const overlay = (
-    <div
+    <FullScreenPage
       role="dialog"
       aria-modal="true"
       aria-label={alt}
-      className="fixed inset-0 z-[1000] flex flex-col bg-black/85 backdrop-blur-sm"
+      className="z-[1000] bg-black/85 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}
@@ -258,7 +259,7 @@ export function ImageLightbox({
       <div className="px-4 py-1.5 text-[10px] text-white/50 text-center select-none">
         Scroll / pinch to zoom · drag to pan · double-click to toggle 1:1 · Esc to close
       </div>
-    </div>
+    </FullScreenPage>
   )
 
   return createPortal(overlay, document.body)

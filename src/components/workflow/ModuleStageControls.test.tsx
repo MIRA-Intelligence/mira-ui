@@ -33,6 +33,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { ProjectTask, WorkflowRun, WorkflowSnapshot } from '@/types'
 import { ModuleStageControls } from './ModuleStageControls'
+import { WorkflowInteractionPanel } from './WorkflowInteractionPanel'
 
 const task: ProjectTask = {
   id: 'PRJ-1',
@@ -294,7 +295,7 @@ describe('ModuleStageControls', () => {
 
   it.each([
     ['initiation', 'research'], ['planning', 'plan'], ['experiment', 'experiment'], ['delivery', 'result'],
-  ] as const)('shows the pending %s form after switching from another stage', (moduleType, stage) => {
+  ] as const)('points to the pending %s form in the conversation after switching stages', (moduleType, stage) => {
     const otherRun = makeRun({ run_id: 'other-run', module_type: moduleType === 'initiation' ? 'experiment' : 'initiation' })
     const run = makeRun({
       run_id: 'pending-run', module_type: moduleType, status: 'waiting_input', outputs: [],
@@ -311,20 +312,112 @@ describe('ModuleStageControls', () => {
       selectedRunByProject: { 'PRJ-1': otherRun.run_id },
     })
 
-    const { container } = render(<ModuleStageControls />)
-    expect(screen.getByText('Confirm available data')).toBeVisible()
+    render(<ModuleStageControls />)
+    // Selecting the waiting Run makes the conversation show its form.
     expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe(run.run_id)
-    expect(container.firstChild).not.toHaveClass('max-h-[45vh]')
-    expect(screen.getByText('Confirm available data').compareDocumentPosition(
-      screen.getByText('Candidate outputs in this module'),
-    ) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Collapse candidate outputs' }))
-    expect(screen.getByText('Confirm available data')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your answer: Confirm available data')
+    expect(screen.queryByRole('button', { name: 'Existing data' })).not.toBeInTheDocument()
     expect(createWorkflowRun).not.toHaveBeenCalled()
     expect(wsClient.send).not.toHaveBeenCalled()
   })
 
-  it('brings repeated questions back into view without reusing an answer', () => {
+  it('opens the experiment Run of the selected direction, not the newest one', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, updatedAt: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'waiting_input', outputs: [],
+      updated_at: updatedAt,
+      module_data: { parent_run_id: 'source-run', upstream_selection: { run_id: 'source-run', item_id: direction } },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', '2026-07-31T00:02:00Z'), experimentFor('dummy-b', '2026-07-31T00:03:00Z'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': research.run_id },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe('experiment-dummy-a')
+  })
+
+  it('opens the experiment Run of the selected direction, not the newest one', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, updatedAt: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'waiting_input', outputs: [],
+      updated_at: updatedAt,
+      module_data: { parent_run_id: 'source-run', upstream_selection: { run_id: 'source-run', item_id: direction } },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', '2026-07-31T00:02:00Z'), experimentFor('dummy-b', '2026-07-31T00:03:00Z'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': research.run_id },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(useWorkflowStore.getState().selectedRunByProject['PRJ-1']).toBe('experiment-dummy-a')
+  })
+
+  it('lists only this branch\'s experiments as candidate outputs and names their source', () => {
+    const research = makeRun({ module_data: { research_result: { directions: [
+      { id: 'dummy-a', title: 'Dummy A' }, { id: 'dummy-b', title: 'Dummy B' },
+    ] } } })
+    const experimentFor = (direction: string, title: string) => makeRun({
+      run_id: `experiment-${direction}`, module_type: 'experiment', status: 'completed', outputs: [],
+      module_data: {
+        parent_run_id: 'source-run',
+        upstream_selection: { module_type: 'initiation', run_id: 'source-run', item_id: direction, label: `Dummy ${direction.at(-1)?.toUpperCase()}` },
+        experiments: [{ id: 'Exp001', title, status: 'completed' }],
+      },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': { ...makeSnapshot(research), runs: [
+        research, experimentFor('dummy-a', 'Denoising'), experimentFor('dummy-b', 'Topology'),
+      ] } },
+      selectedRunByProject: { 'PRJ-1': 'experiment-dummy-a' },
+      selectedCandidateByProject: { 'PRJ-1': { initiation: { runId: 'source-run', itemId: 'dummy-a' } } },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(screen.getByRole('button', { name: 'Select candidate: Exp001 · Denoising' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Select candidate: Exp001 · Topology' })).not.toBeInTheDocument()
+    expect(screen.getByText('Derived from Initiation › Dummy A')).toBeInTheDocument()
+  })
+
+  it('does not list a Run that has produced nothing as a deliverable', () => {
+    const experiment = makeRun({
+      run_id: 'experiment-new', module_type: 'experiment', status: 'running', outputs: [],
+      module_data: {
+        intent: 'Continue with experiment using the selected upstream candidate “Dummy B”.',
+        parent_run_id: 'source-run',
+        upstream_selection: { module_type: 'initiation', run_id: 'source-run', item_id: 'dummy-b', label: 'Dummy B' },
+      },
+    })
+    useProjectStore.setState({ activeStage: 'experiment' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': makeSnapshot(experiment) },
+      selectedRunByProject: { 'PRJ-1': experiment.run_id },
+    })
+
+    render(<ModuleStageControls />)
+
+    expect(screen.queryByText('Candidate outputs in this module')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Select candidate/ })).not.toBeInTheDocument()
+    expect(screen.getByText('Derived from Initiation › Dummy B')).toBeInTheDocument()
+  })
+
+  it('does not reuse an answer for the next question', () => {
     const interaction = {
       interaction_id: 'question-1', interaction_type: 'clarify_requirements',
       title: 'First question', prompt: 'Choose data',
@@ -336,22 +429,19 @@ describe('ModuleStageControls', () => {
       snapshots: { 'PRJ-1': makeSnapshot(run) },
       selectedRunByProject: { 'PRJ-1': run.run_id },
     })
-    const { container } = render(<ModuleStageControls />)
+    const { rerender } = render(<WorkflowInteractionPanel projectId="PRJ-1" run={run} />)
     fireEvent.click(screen.getByRole('button', { name: 'Existing data' }))
-    const controls = container.firstChild as HTMLDivElement
-    controls.scrollTop = 300
-    act(() => useWorkflowStore.setState({ snapshots: { 'PRJ-1': makeSnapshot({
+    rerender(<WorkflowInteractionPanel projectId="PRJ-1" run={{
       ...run, revision: 3, module_data: { interaction: {
         ...interaction, interaction_id: 'question-2', title: 'Second question', interaction_type: 'resolve_conflict',
       } },
-    }) } }))
-    expect(controls.scrollTop).toBe(0)
+    }} />)
     expect(screen.getByText('Second question')).toBeVisible()
     expect(screen.getByRole('button', { name: 'Existing data' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Confirm and continue' })).toBeDisabled()
   })
 
-  it('renders and submits structured interaction directly in the module center column', async () => {
+  it('submits a structured interaction and continues the Run', async () => {
     const run = makeRun({
       status: 'waiting_input',
       module_data: {
@@ -381,7 +471,7 @@ describe('ModuleStageControls', () => {
     vi.mocked(fetchWorkflowSnapshot).mockResolvedValue(snapshot)
     vi.mocked(commandWorkflowRun).mockResolvedValue({} as never)
 
-    render(<ModuleStageControls />)
+    render(<WorkflowInteractionPanel projectId="PRJ-1" run={run} />)
     fireEvent.click(screen.getByRole('button', { name: 'Direction B' }))
     expect(useWorkflowStore.getState().selectedCandidateByProject['PRJ-1']?.initiation).toEqual({
       runId: 'source-run',
@@ -442,7 +532,7 @@ describe('ModuleStageControls', () => {
     vi.mocked(fetchWorkflowSnapshot).mockResolvedValue(snapshot)
     vi.mocked(commandWorkflowRun).mockResolvedValue({} as never)
 
-    render(<ModuleStageControls />)
+    render(<WorkflowInteractionPanel projectId="PRJ-1" run={run} />)
 
     expect(screen.getByText('AI execution confirmation')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }))

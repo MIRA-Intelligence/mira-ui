@@ -18,6 +18,7 @@ import {
 import { t } from '@/i18n'
 import type { I18nKey } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { FullScreenPage } from '@/components/layout/FullScreenPage'
 import { ProviderIcon } from './ProviderIcon'
 import { providerDescription, providerDocsUrl, providerNotice } from './catalog'
 
@@ -188,7 +189,6 @@ function buildActive(payload: RuntimeConfigPayload): ActiveDraft {
 export function ProvidersPage() {
   const providersOpen = useUiStore((s) => s.providersOpen)
   const closeProviders = useUiStore((s) => s.closeProviders)
-  const isMacDesktop = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin'
   const lang = useSettingsStore((s) => s.language)
   const apiUrl = useSettingsStore((s) => s.apiUrl)
   const setRuntimeConfig = useSettingsStore((s) => s.setRuntimeConfig)
@@ -615,7 +615,7 @@ export function ProvidersPage() {
     drafts[provider]?.models ?? payload?.providers[provider]?.models ?? []
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-[var(--color-bg-primary)]">
+    <FullScreenPage className="z-[100] bg-[var(--color-bg-primary)]">
       {/* Prominent, centered feedback toast so test/fetch/save results are
           obvious instead of hidden in the corner. */}
       {feedback && (
@@ -635,17 +635,7 @@ export function ProvidersPage() {
           </button>
         </div>
       )}
-      {/* This overlay covers the TopBar, which is an Electron drag region on
-          macOS. Drag regions swallow clicks regardless of z-index, so the
-          header must opt out or Save / Close are unclickable. On macOS the
-          hiddenInset traffic lights also sit over the top-left corner. */}
-      <div
-        data-drag-region="no-drag"
-        className={cn(
-          'flex items-center justify-between py-4 pr-6 border-b border-[var(--color-border)] shrink-0',
-          isMacDesktop ? 'pl-24' : 'pl-6',
-        )}
-      >
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <h2 className="text-base font-semibold text-[var(--color-text-primary)]">{t('providersTitle', lang)}</h2>
           {payload?.scope === 'team' && (
@@ -1142,7 +1132,7 @@ export function ProvidersPage() {
           )}
         </div>
       </div>
-    </div>
+    </FullScreenPage>
   )
 }
 

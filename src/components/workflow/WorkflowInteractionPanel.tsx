@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import { isWorkflowCandidateInteraction } from '@/lib/workflowCandidates'
@@ -8,6 +8,13 @@ import { useProjectStore } from '@/stores/projectStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useWorkflowStore } from '@/stores/workflowStore'
 import type { WorkflowInteraction, WorkflowRun } from '@/types'
+
+// The engine owns the countdown (interaction.auto_decide); the form only shows it
+// and tells the engine when the user takes over.
+function secondsUntil(deadline: string | undefined): number {
+  const at = deadline ? Date.parse(deadline) : NaN
+  return Number.isNaN(at) ? 0 : Math.max(0, Math.ceil((at - Date.now()) / 1000))
+}
 
 export function WorkflowInteractionPanel({
   projectId,
@@ -39,6 +46,26 @@ function InteractionForm({
   const [freeform, setFreeform] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const autoDecide = interaction?.auto_decide
+  const [heldByUser, setHeldByUser] = useState(false)
+  const counting = Boolean(autoDecide?.deadline_at && !autoDecide.cancelled_at && !heldByUser)
+  const [secondsLeft, setSecondsLeft] = useState(() => secondsUntil(autoDecide?.deadline_at))
+  useEffect(() => {
+    if (!counting) return
+    const tick = () => setSecondsLeft(secondsUntil(autoDecide?.deadline_at))
+    tick()
+    const timer = window.setInterval(tick, 250)
+    return () => window.clearInterval(timer)
+  }, [counting, autoDecide?.deadline_at])
+  const takeOver = () => {
+    if (!counting || !interaction) return
+    setHeldByUser(true)
+    void commandRun(projectId, run.run_id, 'cancel_auto_decision', {
+      interaction_id: interaction.interaction_id,
+    }).catch(() => {
+      // Too late: the engine already answered, and the snapshot will show it.
+    })
+  }
   if (!interaction) return null
 
   const choiceValue = (choice: Record<string, unknown>) => (
@@ -110,6 +137,7 @@ function InteractionForm({
                 aria-pressed={active}
                 disabled={pending}
                 onClick={() => {
+                  takeOver()
                   if (candidateInteraction) {
                     selectCandidate(projectId, run.module_type, {
                       runId: run.run_id,
@@ -126,7 +154,14 @@ function InteractionForm({
                     : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]',
                 )}
               >
-                <span className="block">{choiceLabel(choice)}</span>
+                <span className="block">
+                  {choiceLabel(choice)}
+                  {choice.recommended === true && (
+                    <span className="ml-2 rounded-full border border-[var(--color-accent)]/40 px-1.5 py-px text-[10px] font-medium text-[var(--color-accent)]">
+                      {lang === 'zh' ? '推荐' : 'Recommended'}
+                    </span>
+                  )}
+                </span>
                 {typeof choice.description === 'string' && choice.description && (
                   <span className="mt-1 block text-[11px] font-normal opacity-80">{choice.description}</span>
                 )}
@@ -141,12 +176,33 @@ function InteractionForm({
           disabled={pending}
           maxLength={4000}
           aria-label={lang === 'zh' ? '补充说明或自定义回答' : 'Notes or custom answer'}
-          onChange={(event) => setFreeform(event.target.value)}
+          onChange={(event) => {
+            takeOver()
+            setFreeform(event.target.value)
+          }}
           placeholder={revising
             ? (lang === 'zh' ? '请说明需要 AI 修改的内容' : 'Describe what the AI should revise')
             : (lang === 'zh' ? '补充说明或直接输入你的决定' : 'Add notes or enter your decision')}
           className="mt-3 min-h-20 w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-3 py-2 text-xs text-[var(--color-text-primary)] outline-none focus:border-[var(--color-accent)]"
         />
+      )}
+      {counting && (
+        <div role="status" className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-accent)]/30 bg-[var(--color-accent)]/5 px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+          <span>
+            {secondsLeft > 0
+              ? (lang === 'zh'
+                ? `自动模式：${secondsLeft} 秒后自动选择推荐选项「${autoDecide?.label ?? ''}」并继续`
+                : `Auto mode: choosing the recommended "${autoDecide?.label ?? ''}" and continuing in ${secondsLeft}s`)
+              : (lang === 'zh' ? '自动模式：正在选择推荐选项…' : 'Auto mode: choosing the recommended option…')}
+          </span>
+          <button
+            type="button"
+            onClick={takeOver}
+            className="shrink-0 rounded-md border border-[var(--color-border)] px-2 py-1 text-[11px] hover:bg-[var(--color-bg-hover)]"
+          >
+            {lang === 'zh' ? '取消自动选择' : 'Cancel auto-select'}
+          </button>
+        </div>
       )}
       <button
         type="button"

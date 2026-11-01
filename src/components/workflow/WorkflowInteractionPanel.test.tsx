@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/websocket', () => ({ wsClient: { connected: true, send: vi.fn() } }))
 
@@ -99,5 +99,65 @@ describe('WorkflowInteractionPanel', () => {
     expect(screen.getByRole('textbox')).toHaveValue('Overview only')
     expect(screen.getByRole('button', { name: 'Confirm and continue' })).toBeEnabled()
     expect(wsClient.send).not.toHaveBeenCalled()
+  })
+
+  describe('engine auto-decide countdown', () => {
+    const NOW = Date.parse('2026-10-31T10:00:00Z')
+    const choices = [
+      { id: 'small', label: 'Small pilot', value: 'small', recommended: true },
+      { id: 'full', label: 'Full cohort', value: 'full' },
+    ]
+    function autoRun(autoDecide?: WorkflowInteraction['auto_decide']): WorkflowRun {
+      const run = makeRun('gate', { choices, ...(autoDecide ? { auto_decide: autoDecide } : {}) })
+      return { ...run, module_type: 'experiment' }
+    }
+    const deadline = (seconds: number) => new Date(NOW + seconds * 1000).toISOString()
+    const tick = async (ms: number) => {
+      await act(async () => { vi.advanceTimersByTime(ms) })
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(NOW)
+    })
+    afterEach(() => { vi.useRealTimers() })
+
+    it('counts down to the engine deadline and never submits by itself', async () => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({ selection: 'small', label: 'Small pilot', deadline_at: deadline(10) })} />)
+      expect(screen.getByRole('status')).toHaveTextContent('"Small pilot" and continuing in 10s')
+      await tick(3000)
+      expect(screen.getByRole('status')).toHaveTextContent('in 7s')
+      await tick(8000)
+      expect(screen.getByRole('status')).toHaveTextContent('choosing the recommended option…')
+      expect(command).not.toHaveBeenCalled()
+    })
+
+    it('marks the recommended choice', () => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun()} />)
+      expect(screen.getByRole('button', { name: /Small pilot/ })).toHaveTextContent('Recommended')
+      expect(screen.getByRole('button', { name: /Full cohort/ })).not.toHaveTextContent('Recommended')
+    })
+
+    it('shows no countdown without an engine deadline or after it was cancelled', () => {
+      const { unmount } = render(<WorkflowInteractionPanel projectId="project" run={autoRun()} />)
+      expect(screen.queryByRole('status')).toBeNull()
+      unmount()
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({
+        selection: 'small', deadline_at: deadline(10), cancelled_at: deadline(-1),
+      })} />)
+      expect(screen.queryByRole('status')).toBeNull()
+    })
+
+    it.each([
+      ['picking a choice', () => fireEvent.click(screen.getByRole('button', { name: /Full cohort/ }))],
+      ['typing notes', () => fireEvent.change(screen.getByRole('textbox'), { target: { value: 'wait' } })],
+      ['cancelling', () => fireEvent.click(screen.getByRole('button', { name: 'Cancel auto-select' }))],
+    ])('tells the engine when the user takes over by %s', (_name, act) => {
+      render(<WorkflowInteractionPanel projectId="project" run={autoRun({ selection: 'small', deadline_at: deadline(10) })} />)
+      act()
+      expect(screen.queryByRole('status')).toBeNull()
+      expect(command).toHaveBeenCalledTimes(1)
+      expect(command).toHaveBeenCalledWith('project', 'run', 'cancel_auto_decision', { interaction_id: 'gate' })
+    })
   })
 })

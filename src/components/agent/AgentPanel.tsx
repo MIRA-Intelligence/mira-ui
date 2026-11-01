@@ -15,6 +15,8 @@ import { GLOBAL_SKILLS_SESSION_ID, useSkillPluginsStore } from '@/stores/skillPl
 import { useKnowledgeStore } from '@/stores/knowledgeStore'
 import { KnowledgePicker } from '@/components/knowledge/KnowledgePicker'
 import { PIPELINE_STAGES } from '@/components/workflow/PipelineOverview'
+import { WorkflowInteractionPanel } from '@/components/workflow/WorkflowInteractionPanel'
+import { buildWorkflowCandidates, resolveWorkflowCandidate } from '@/lib/workflowCandidates'
 
 function createClientId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
@@ -51,6 +53,20 @@ function deriveWorkflowActivityLabel(activity: string | undefined): string | nul
   return condenseActivity(normalized, 80)
 }
 
+// The engine answered a form with its recommended choice (auto mode timeout).
+function autoDecidedNotice(entry: AgentLogEntry, lang: Language): string | null {
+  const notice = entry.metadata?._auto_decided
+  if (!notice || typeof notice !== 'object') return null
+  const { label, title, seconds } = notice as { label?: unknown; title?: unknown; seconds?: unknown }
+  if (typeof label !== 'string') return null
+  const wait = typeof seconds === 'number' ? seconds : 10
+  const form = typeof title === 'string' && title ? title : null
+  if (lang === 'zh') {
+    return `${wait} 秒内未作答，已自动选择推荐选项「${label}」${form ? `（${form}）` : ''}并继续。`
+  }
+  return `No answer within ${wait}s, so the recommended option "${label}" was selected${form ? ` for "${form}"` : ''}.`
+}
+
 type RenderItem =
   | { kind: 'entry'; entry: AgentLogEntry }
   | { kind: 'activity_group'; id: string; entries: AgentLogEntry[] }
@@ -62,10 +78,12 @@ function ChatComposer({
   lang,
   availableSkills,
   knowledgeScope,
+  placeholder,
   onSend,
   onStop,
 }: {
   sessionId: string | null
+  placeholder?: string
   knowledgeScope: 'project' | 'chat'
   isStreaming: boolean
   isStopping: boolean
@@ -89,6 +107,12 @@ function ChatComposer({
     setSelectedSkills([])
     setSkillPickerOpen(false)
   }, [sessionId])
+
+  // Skills can be installed outside this panel (MIRA Hub via the agent, the
+  // settings modal, a copied folder), so re-read the list whenever it opens.
+  useEffect(() => {
+    if (skillPickerOpen) void useSkillPluginsStore.getState().refresh(GLOBAL_SKILLS_SESSION_ID)
+  }, [skillPickerOpen])
 
   useEffect(() => {
     if (appMode !== 'normal' || !sessionId || draftPrompt === null) return
@@ -229,7 +253,7 @@ function ChatComposer({
               }
             }}
             placeholder={sessionId
-              ? t(sendShortcut === 'enter' ? 'typeMessage' : 'typeMessageShiftEnter', lang)
+              ? placeholder ?? t(sendShortcut === 'enter' ? 'typeMessage' : 'typeMessageShiftEnter', lang)
               : t('selectProjectFirst', lang)}
             disabled={!sessionId || isStopping}
             rows={1}
@@ -447,15 +471,17 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   const conversationId = sessionId && !isChat && selectedWorkflowRunId
     ? `${sessionId}:run:${selectedWorkflowRunId}`
     : sessionId
+  // The engine continues a paused/failed Run, answers a pending interaction and
+  // reopens a completed Run for revision from a chat message; only a cancelled
+  // Run (or none) has nothing to talk to.
   const moduleConversationBlocked = !isChat && activeStage === 'modules' && !!workflowSnapshot && (
-    !selectedWorkflowRun
-    || selectedWorkflowRun.status === 'completed'
-    || selectedWorkflowRun.status === 'cancelled'
-    || selectedWorkflowRun.status === 'failed'
-    || selectedWorkflowRun.status === 'paused'
-    || selectedWorkflowRun.status === 'waiting_input'
+    !selectedWorkflowRun || selectedWorkflowRun.status === 'cancelled'
   )
   const composerSessionId = moduleConversationBlocked ? null : sessionId
+  const composerPlaceholder = isChat ? undefined
+    : selectedWorkflowRun?.status === 'completed' ? t('composerRevisePlaceholder', lang)
+      : selectedWorkflowRun?.status === 'waiting_input' ? t('composerAnswerPlaceholder', lang)
+        : undefined
 
   const logs = useAgentStore((s) => (conversationId ? s.logsByProject[conversationId] : undefined)) ?? EMPTY_LOGS
   // Streaming is tracked per session so a different session's activity never
@@ -541,6 +567,13 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   // otherwise the reply streams in below the fold and looks stalled. Only
   // stick to the bottom when the user has not scrolled up to read.
   const tailLength = lastEntry?.content.length ?? 0
+  // A Run waiting for the user shows its form at the end of the conversation.
+  const pendingInteraction = !isChat && selectedWorkflowRun?.status === 'waiting_input'
+    ? selectedWorkflowRun.module_data.interaction as { interaction_id?: string; response?: unknown } | undefined
+    : undefined
+  const pendingInteractionId = pendingInteraction && pendingInteraction.response == null
+    ? pendingInteraction.interaction_id ?? null
+    : null
   const stickToBottom = useRef(true)
   const handleScroll = () => {
     const el = scrollRef.current
@@ -550,11 +583,11 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
   useEffect(() => {
     // A new message or a session switch always re-anchors to the bottom.
     stickToBottom.current = true
-  }, [logs.length, conversationId])
+  }, [logs.length, conversationId, pendingInteractionId])
   useEffect(() => {
     const el = scrollRef.current
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight
-  }, [logs.length, tailLength, showThinking, conversationId])
+  }, [logs.length, tailLength, showThinking, conversationId, pendingInteractionId])
 
   useEffect(() => {
     setCollapsedProgressGroups({})
@@ -613,6 +646,17 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
     const workflowRun = appMode === 'project'
       ? workflowState.snapshots[sessionId]?.runs.find((run) => run.run_id === workflowRunId)
       : undefined
+    // "Polish this one" needs to know which deliverable is selected.
+    const candidate = workflowRun && workflowState.snapshots[sessionId]
+      ? resolveWorkflowCandidate(
+          buildWorkflowCandidates(workflowState.snapshots[sessionId].runs, workflowRun.module_type),
+          workflowState.selectedCandidateByProject[sessionId]?.[workflowRun.module_type],
+          workflowRun.run_id,
+        )
+      : null
+    const workflowSelection = candidate && candidate.runId === workflowRun?.run_id
+      ? { workflow_selection: { run_id: candidate.runId, item_id: candidate.itemId, label: candidate.label, artifact_ids: candidate.artifactIds } }
+      : {}
     if (workflowRun?.status === 'created') {
       void workflowState.commandRun(sessionId, workflowRun.run_id, 'enqueue').then(() => {
         wsClient.send({
@@ -641,6 +685,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
         ...(workflowRun && {
           workflow_run_id: workflowRun.run_id,
           workflow_module_type: workflowRun.module_type,
+          ...workflowSelection,
         }),
       }),
     })
@@ -801,7 +846,8 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
 
           const entry = item.entry
           const isUser = !!entry.metadata?._user
-          const isAutoMsg = !!entry.metadata?._auto
+          const autoNotice = isUser ? autoDecidedNotice(entry, lang) : null
+          const isAutoMsg = !!entry.metadata?._auto || autoNotice !== null
           const requiresSkillFallback = entry.metadata?._skill_fallback_required === true
           if (isUser) {
             return (
@@ -814,9 +860,9 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
                   {isAutoMsg && (
                     <span className="text-[10px] font-semibold text-[var(--color-success)] uppercase mr-1.5 not-italic">AUTO</span>
                   )}
-                  {entry.content}
+                  {autoNotice ?? entry.content}
                 </div>
-                <div className="flex justify-end mt-1 mr-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                {autoNotice === null && <div className="flex justify-end mt-1 mr-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity">
                   <button
                     onClick={() => handleResend(entry.content)}
                     title={t('resend', lang)}
@@ -827,7 +873,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
                     </svg>
                   </button>
-                </div>
+                </div>}
               </div>
             )
           }
@@ -862,6 +908,12 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
           return <LogEntry key={entry.id} entry={entry} />
         })}
 
+        {pendingInteractionId && selectedTaskId && selectedWorkflowRun && (
+          <div className="mx-4 my-2">
+            <WorkflowInteractionPanel projectId={selectedTaskId} run={selectedWorkflowRun} />
+          </div>
+        )}
+
         {!isStreaming && lastTurnEnd && (
           <TurnEndNotice
             reason={lastTurnEnd.stopReason}
@@ -885,7 +937,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
           </div>
         )}
 
-        {logs.length === 0 && !showThinking && (
+        {logs.length === 0 && !showThinking && !pendingInteractionId && (
           <div className="flex flex-col items-center justify-center h-full text-[var(--color-text-muted)] gap-2">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-30">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -903,6 +955,7 @@ export function AgentPanel({ showHeader = true }: { showHeader?: boolean }) {
         isStopping={isStopping}
         availableSkills={availableSkills}
         knowledgeScope={isChat ? 'chat' : 'project'}
+        placeholder={composerPlaceholder}
         lang={lang}
         onSend={handleSend}
         onStop={handleStop}

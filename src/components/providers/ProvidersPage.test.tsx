@@ -136,7 +136,7 @@ describe('ProvidersPage', () => {
     render(<ProvidersPage />)
     const header = (await screen.findByRole('button', { name: 'Cancel' })).closest('[data-drag-region]')
     expect(header).toHaveAttribute('data-drag-region', 'no-drag')
-    expect(header).toHaveClass('pl-24')
+    expect(screen.getByTestId('title-bar-strip')).toHaveAttribute('data-drag-region', 'drag')
     window.electronAPI = undefined as unknown as typeof window.electronAPI
   })
 

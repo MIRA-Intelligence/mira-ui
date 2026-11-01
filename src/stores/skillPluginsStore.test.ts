@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/services/api', () => ({
   fetchSkillPlugins: vi.fn(),
+  fetchSkillPluginsOrThrow: vi.fn(),
   installSkillPluginFromDirectory: vi.fn(),
   installSkillPluginFromZip: vi.fn(),
   setSkillPluginState: vi.fn(),
@@ -53,6 +54,29 @@ describe('skillPluginsStore', () => {
     await useSkillPluginsStore.getState().load('s1')
     expect(useSkillPluginsStore.getState().error).toBe('load failed')
     expect(useSkillPluginsStore.getState().loading).toBe(false)
+  })
+
+  it('refresh replaces the list quietly and keeps it when the request fails', async () => {
+    useSkillPluginsStore.setState({ plugins: [] })
+    mocked.fetchSkillPluginsOrThrow.mockResolvedValueOnce([plugin])
+    await useSkillPluginsStore.getState().refresh('s1')
+    expect(useSkillPluginsStore.getState().plugins).toEqual([plugin])
+    expect(useSkillPluginsStore.getState().loading).toBe(false)
+
+    mocked.fetchSkillPluginsOrThrow.mockRejectedValueOnce(new Error('offline'))
+    await useSkillPluginsStore.getState().refresh('s1')
+    expect(useSkillPluginsStore.getState().plugins).toEqual([plugin])
+    expect(useSkillPluginsStore.getState().error).toBeNull()
+  })
+
+  it('refresh shares one request between concurrent callers', async () => {
+    mocked.fetchSkillPluginsOrThrow.mockClear()
+    mocked.fetchSkillPluginsOrThrow.mockResolvedValue([plugin])
+    await Promise.all([
+      useSkillPluginsStore.getState().refresh('s1'),
+      useSkillPluginsStore.getState().refresh('s1'),
+    ])
+    expect(mocked.fetchSkillPluginsOrThrow).toHaveBeenCalledTimes(1)
   })
 
   it('installFromDirectory requires a path', async () => {

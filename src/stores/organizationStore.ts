@@ -45,7 +45,7 @@ interface OrganizationState {
   error: string | null
   workspaceKey: string
   load: (cachedChats?: RemoteChat[], workspaceKey?: string) => Promise<OrganizationSnapshot | null>
-  createFolder: (name: string) => Promise<OrganizationFolder>
+  createFolder: (name: string, kind: OrganizationKind) => Promise<OrganizationFolder>
   renameFolder: (folderId: string, name: string) => Promise<void>
   deleteFolder: (folderId: string) => Promise<void>
   moveItem: (kind: OrganizationKind, itemId: string, folderId: string | null) => Promise<void>
@@ -85,8 +85,8 @@ export const useOrganizationStore = create<OrganizationState>((set, get) => ({
     }
   },
 
-  createFolder: async (name) => {
-    const folder = await createOrganizationFolder(name)
+  createFolder: async (name, kind) => {
+    const folder = await createOrganizationFolder(name, kind)
     set((state) => {
       const folders = [...state.folders, folder]
       writeCache(state.workspaceKey, folders, state.assignments)

@@ -135,6 +135,8 @@ export interface RemoteProject {
 export interface OrganizationFolder {
   id: string
   name: string
+  /** Which sidebar list the folder belongs to; null/absent = legacy folder not yet used. */
+  kind?: 'chat' | 'project' | null
   created_at: string
   updated_at: string
 }
@@ -186,8 +188,8 @@ export async function importOrganizationChats(chats: RemoteChat[]): Promise<Remo
   return result.chats
 }
 
-export async function createOrganizationFolder(name: string): Promise<OrganizationFolder> {
-  return organizationRequest<OrganizationFolder>('/folders', jsonInit('POST', { name }))
+export async function createOrganizationFolder(name: string, kind: 'chat' | 'project'): Promise<OrganizationFolder> {
+  return organizationRequest<OrganizationFolder>('/folders', jsonInit('POST', { name, kind }))
 }
 
 export async function renameOrganizationFolder(folderId: string, name: string): Promise<OrganizationFolder> {
@@ -744,12 +746,17 @@ export function getArtifactDownloadUrl(url: string): string {
   return downloadUrl.toString()
 }
 
+// Throws instead of answering [], so a background refresh can keep the list it has.
+export async function fetchSkillPluginsOrThrow(sessionId: string): Promise<SkillPlugin[]> {
+  const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins`)
+  if (!resp.ok) throw new Error(`Failed to load skill plugins (${resp.status})`)
+  const data = await resp.json()
+  return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+}
+
 export async function fetchSkillPlugins(sessionId: string): Promise<SkillPlugin[]> {
   try {
-    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(sessionId)}/skill-plugins`)
-    if (!resp.ok) return []
-    const data = await resp.json()
-    return Array.isArray(data?.plugins) ? (data.plugins as SkillPlugin[]) : []
+    return await fetchSkillPluginsOrThrow(sessionId)
   } catch {
     return []
   }
