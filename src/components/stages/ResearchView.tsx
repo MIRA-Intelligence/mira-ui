@@ -94,6 +94,8 @@ export function ResearchView({ data, coreQuestion }: {
     } | undefined
     : undefined
   const moduleResearchActive = selectedRun?.module_type === 'initiation'
+  // Runs imported from a pre-modular Project never had a literature configuration.
+  const importedFromLegacy = moduleResearchActive && Boolean(selectedRun.module_data.legacy_import)
   const literatureEnabled = literature?.enabled !== false
   const sourceLabels = (literature?.sources ?? []).map(
     (source) => LITERATURE_SOURCE_LABELS[source] ?? source,
@@ -152,7 +154,7 @@ export function ResearchView({ data, coreQuestion }: {
           </div>
         )}
 
-        {moduleResearchActive && (
+        {moduleResearchActive && !importedFromLegacy && (
           <>
             <div className="mb-5">
               <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">

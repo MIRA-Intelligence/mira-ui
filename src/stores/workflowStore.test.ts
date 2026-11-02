@@ -76,6 +76,19 @@ describe('workflowStore', () => {
     expect(useProjectStore.getState().activeStage).toBe('modules')
   })
 
+  it('selects an imported legacy experiment by its own id when it links to the candidate Run', () => {
+    useWorkflowStore.setState({ snapshots: { 'PRJ-1': experimentSnapshot() } })
+    useProjectStore.setState({
+      selectedTaskId: 'PRJ-1', selectedExpId: null, activeStage: 'modules',
+      tasks: [{
+        id: 'PRJ-1',
+        experiments: [{ id: 'Exp002', workflow_run_id: 'run-1', experiment_id: 'Exp002' }],
+      }] as unknown as ReturnType<typeof useProjectStore.getState>['tasks'],
+    })
+    useWorkflowStore.getState().selectCandidate('PRJ-1', 'experiment', { runId: 'run-1', itemId: 'Exp002' })
+    expect(useProjectStore.getState().selectedExpId).toBe('Exp002')
+  })
+
   it('hands off only the selected experiment record and its owned/shared attachments', async () => {
     const source = experimentSnapshot()
     useWorkflowStore.setState({ snapshots: { 'PRJ-1': source } })
