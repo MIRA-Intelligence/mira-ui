@@ -236,7 +236,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     const candidate = buildWorkflowCandidates(get().snapshots[projectId]?.runs ?? [], moduleType)
       .find((item) => item.runId === selection.runId && item.itemId === selection.itemId)
     if (candidate?.kind === 'experiment' && useProjectStore.getState().selectedTaskId === projectId) {
-      useProjectStore.setState({ selectedExpId: workflowExperimentUiId(selection.runId, selection.itemId) })
+      // Experiments imported from a pre-modular Project keep their own id and only link to the Run.
+      const imported = useProjectStore.getState().tasks.find((task) => task.id === projectId)?.experiments
+        .find((item) => item.workflow_run_id === selection.runId && item.experiment_id === selection.itemId)
+      useProjectStore.setState({
+        selectedExpId: imported?.id ?? workflowExperimentUiId(selection.runId, selection.itemId),
+      })
     }
   },
 

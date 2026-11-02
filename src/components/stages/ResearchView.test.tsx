@@ -170,4 +170,41 @@ describe('ResearchView', () => {
     expect(screen.getByRole('heading', { name: 'Evidence synthesis' })).toBeInTheDocument()
     expect(screen.getByText(/Paper A supports/)).toBeInTheDocument()
   })
+  it('shows an imported legacy Run without inventing a literature configuration', () => {
+    const run = {
+      schema_version: 1, workflow_contract_version: 1, run_id: 'run-legacy', project_id: 'PRJ-1',
+      module_type: 'initiation', label: 'Initiation (imported)', status: 'completed', revision: 1,
+      created_at: '2026-05-04T04:22:00Z', updated_at: '2026-05-04T04:22:00Z', inputs: [], outputs: [],
+      attempt: { number: 0 }, attempts: [], conversation_key: 'ui:PRJ-1:run:run-legacy',
+      last_project_sequence: 1, last_run_sequence: 1,
+      module_data: {
+        legacy_import: { version: 1, source: 'task_plan.json', stage: 'initiation' },
+        literature_review: { enabled: true, sources: [] },
+        research_result: {
+          schema_version: 1, survey: 'Imported survey.', notes: ['Imported note.'],
+          references: [{ id: 'R1', title: 'Imported paper' }], searches: [], gaps: [],
+          directions: [{ id: 'legacy-core-question', title: 'Does X improve Y?', rationale: 'r' }],
+        },
+      },
+    } as unknown as WorkflowSnapshot['runs'][number]
+    useProjectStore.setState({ selectedTaskId: 'PRJ-1' })
+    useWorkflowStore.setState({
+      snapshots: { 'PRJ-1': {
+        workflow_contract_version: 1, project_id: 'PRJ-1', project_sequence: 1,
+        workflow: {
+          contract_version: 1, status: 'active', revision: 1, last_project_sequence: 1,
+          selected_run_id: 'run-legacy',
+          handoff_policy: { mode: 'manual', interrupt_grace_seconds: 10, rules: [] },
+        },
+        runs: [run],
+      } as WorkflowSnapshot },
+      selectedRunByProject: { 'PRJ-1': 'run-legacy' },
+    })
+
+    render(<ResearchView data={{ references: [], notes: [] }} />)
+
+    expect(screen.getByText('Imported survey.')).toBeInTheDocument()
+    expect(screen.getByText('Imported paper')).toBeInTheDocument()
+    expect(screen.queryByText(/External literature research|外部文献调研/)).not.toBeInTheDocument()
+  })
 })
