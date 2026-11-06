@@ -5,11 +5,16 @@ import { cn } from '@/lib/utils'
 import { FullScreenPage } from '@/components/layout/FullScreenPage'
 import {
   downloadUsageCsv,
+  fetchPlanUsage,
   fetchQuotas,
   fetchUsageReport,
   formatTokens,
+  parsePercent,
   parseTokens,
   saveQuotas,
+  type PlanCaps,
+  type PlanUsageRow,
+  type PlanWindow,
   type QuotaLimits,
   type QuotaPeriodStatus,
   type QuotaSettings,
@@ -23,11 +28,18 @@ type Lang = ReturnType<typeof useSettingsStore.getState>['language']
 
 interface LimitDraft { daily: string; monthly: string }
 
+interface CapsDraft { five_hour: string; weekly: string }
+
 interface QuotaDraft {
   default: LimitDraft
   warn: string
   users: Record<string, LimitDraft>
+  // null: the server predates subscription quotas (nothing to show or save).
+  plan: { default: CapsDraft; users: Record<string, CapsDraft> } | null
 }
+
+const PLAN_WINDOWS: PlanWindow[] = ['five_hour', 'weekly']
+const NO_CAPS: CapsDraft = { five_hour: '', weekly: '' }
 
 const inputClass = 'w-full h-8 px-2.5 rounded-md border border-[var(--color-border)] bg-[var(--color-input-bg)] text-xs text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]'
 
@@ -35,15 +47,25 @@ function limitText(value: number | null): string {
   return value == null ? '' : value === 0 ? '0' : formatTokens(value)
 }
 
+function capText(value: number | null): string {
+  return value == null ? '' : String(value)
+}
+
 function toDraft(settings: QuotaSettings): QuotaDraft {
   const users: Record<string, LimitDraft> = {}
   for (const [name, limits] of Object.entries(settings.users)) {
     users[name] = { daily: limitText(limits.daily), monthly: limitText(limits.monthly) }
   }
+  const plan = settings.subscription
   return {
     default: { daily: limitText(settings.default.daily || null), monthly: limitText(settings.default.monthly || null) },
     warn: String(settings.warn_percent),
     users,
+    plan: plan ? {
+      default: { five_hour: capText(plan.default.five_hour || null), weekly: capText(plan.default.weekly || null) },
+      users: Object.fromEntries(Object.entries(plan.users).map(([name, caps]) =>
+        [name, { five_hour: capText(caps.five_hour), weekly: capText(caps.weekly) }])),
+    } : null,
   }
 }
 
@@ -66,7 +88,32 @@ function fromDraft(draft: QuotaDraft): QuotaSettings | { invalid: string } {
     if ('invalid' in parsed) return parsed
     if (parsed.daily !== null || parsed.monthly !== null) users[name] = parsed
   }
-  return { default: { daily: defaults.daily || null, monthly: defaults.monthly || null }, users, warn_percent: warn }
+  const settings: QuotaSettings = {
+    default: { daily: defaults.daily || null, monthly: defaults.monthly || null }, users, warn_percent: warn,
+  }
+  if (!draft.plan) return settings
+  const caps = (value: CapsDraft, where: string): PlanCaps | { invalid: string } => {
+    const five_hour = parsePercent(value.five_hour)
+    const weekly = parsePercent(value.weekly)
+    if (five_hour === undefined) return { invalid: `plan:${where}:five_hour` }
+    if (weekly === undefined) return { invalid: `plan:${where}:weekly` }
+    return { five_hour, weekly }
+  }
+  const planDefault = caps(draft.plan.default, 'default')
+  if ('invalid' in planDefault) return planDefault
+  const planUsers: Record<string, PlanCaps> = {}
+  for (const [name, value] of Object.entries(draft.plan.users)) {
+    const parsed = caps(value, name)
+    if ('invalid' in parsed) return parsed
+    if (parsed.five_hour !== null || parsed.weekly !== null) planUsers[name] = parsed
+  }
+  return {
+    ...settings,
+    subscription: {
+      default: { five_hour: planDefault.five_hour || null, weekly: planDefault.weekly || null },
+      users: planUsers,
+    },
+  }
 }
 
 function shiftMonth(day: string, months: number): { from: string; to: string } {
@@ -91,6 +138,7 @@ export function TeamUsagePage() {
   const [models, setModels] = useState<UsageReport | null>(null)
   const [saved, setSaved] = useState<QuotaSettings | null>(null)
   const [draft, setDraft] = useState<QuotaDraft | null>(null)
+  const [planUsage, setPlanUsage] = useState<PlanUsageRow[]>([])
   const [newUser, setNewUser] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -118,15 +166,22 @@ export function TeamUsagePage() {
     }
   }, [origin])
 
+  const loadPlanUsage = useCallback(() => {
+    if (!origin) return
+    fetchPlanUsage(origin).then(setPlanUsage)
+      .catch((error: unknown) => setFeedback({ text: error instanceof Error ? error.message : String(error), error: true }))
+  }, [origin])
+
   useEffect(() => {
     if (!open || !origin || !admin) return
     setFeedback(null)
     void load(null)
+    loadPlanUsage()
     fetchQuotas(origin).then((settings) => {
       setSaved(settings)
       setDraft(toDraft(settings))
     }).catch((error: unknown) => setFeedback({ text: error instanceof Error ? error.message : String(error), error: true }))
-  }, [open, origin, admin, load])
+  }, [open, origin, admin, load, loadPlanUsage])
 
   useEffect(() => {
     if (!feedback) return
@@ -138,10 +193,13 @@ export function TeamUsagePage() {
   const invalid = parsed && 'invalid' in parsed ? parsed.invalid : null
   const dirty = Boolean(parsed && saved && !('invalid' in parsed) && JSON.stringify(parsed) !== JSON.stringify(saved))
   const users = useMemo(() => {
-    const names = new Set([...(report?.rows ?? []).map((row) => row.user ?? ''), ...Object.keys(draft?.users ?? {})])
+    const names = new Set([
+      ...(report?.rows ?? []).map((row) => row.user ?? ''), ...Object.keys(draft?.users ?? {}),
+      ...(draft?.plan ? [...planUsage.map((row) => row.user), ...Object.keys(draft.plan.users)] : []),
+    ])
     names.delete('')
     return [...names].sort()
-  }, [report, draft])
+  }, [report, draft, planUsage])
 
   if (!open || !origin || !admin) return null
 
@@ -159,6 +217,7 @@ export function TeamUsagePage() {
       setDraft(toDraft(settings))
       setFeedback({ text: t('teamUsageSaved', lang), error: false })
       if (range) void load(range)
+      loadPlanUsage()
     } catch (error) {
       setFeedback({ text: error instanceof Error ? error.message : String(error), error: true })
     } finally {
@@ -187,6 +246,17 @@ export function TeamUsagePage() {
       users: { ...current.users, [name]: { ...(current.users[name] ?? { daily: '', monthly: '' }), [period]: value } },
     })
 
+  const setUserCap = (name: string, window: PlanWindow, value: string) =>
+    setDraft((current) => current?.plan ? {
+      ...current,
+      plan: { ...current.plan, users: { ...current.plan.users, [name]: { ...(current.plan.users[name] ?? NO_CAPS), [window]: value } } },
+    } : current)
+
+  const setDefaultCap = (window: PlanWindow, value: string) =>
+    setDraft((current) => current?.plan ? {
+      ...current, plan: { ...current.plan, default: { ...current.plan.default, [window]: value } },
+    } : current)
+
   const addUser = () => {
     const name = newUser.trim()
     if (!name) return
@@ -195,6 +265,9 @@ export function TeamUsagePage() {
   }
 
   const rowsByUser = new Map((report?.rows ?? []).map((row) => [row.user ?? '', row]))
+  const planByUser = new Map(planUsage.map((row) => [row.user, row]))
+  const showPlan = Boolean(draft?.plan)
+  const columns = showPlan ? 10 : 8
   const thisMonth = monthStart ? shiftMonth(monthStart, 0) : null
   const lastMonth = monthStart ? shiftMonth(monthStart, -1) : null
   // This month starts as the 1st until today, so a range ending earlier in the same month still matches.
@@ -264,7 +337,29 @@ export function TeamUsagePage() {
                 </Field>
               </div>
             )}
-            {invalid && <p role="alert" className="text-[11px] text-red-400">{t('teamUsageInvalid', lang)}</p>}
+            {draft?.plan && (
+              <div className="space-y-3 pt-3 border-t border-[var(--color-border)]">
+                <h4 className="text-xs font-semibold">{t('teamUsagePlanTitle', lang)}</h4>
+                <p className="text-[11px] leading-relaxed text-[var(--color-text-muted)]">{t('teamUsagePlanHint', lang)}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-2xl">
+                  <Field label={t('teamUsagePlanDefaultFiveHour', lang)} invalid={invalid === 'plan:default:five_hour'}>
+                    <input aria-label={t('teamUsagePlanDefaultFiveHour', lang)} className={inputClass} inputMode="numeric"
+                      value={draft.plan.default.five_hour} placeholder={t('teamUsageNoCap', lang)}
+                      onChange={(e) => setDefaultCap('five_hour', e.target.value)} />
+                  </Field>
+                  <Field label={t('teamUsagePlanDefaultWeekly', lang)} invalid={invalid === 'plan:default:weekly'}>
+                    <input aria-label={t('teamUsagePlanDefaultWeekly', lang)} className={inputClass} inputMode="numeric"
+                      value={draft.plan.default.weekly} placeholder={t('teamUsageNoCap', lang)}
+                      onChange={(e) => setDefaultCap('weekly', e.target.value)} />
+                  </Field>
+                </div>
+              </div>
+            )}
+            {invalid && (
+              <p role="alert" className="text-[11px] text-red-400">
+                {t(invalid.startsWith('plan:') ? 'teamUsagePlanInvalid' : 'teamUsageInvalid', lang)}
+              </p>
+            )}
           </section>
 
           <section className="space-y-3">
@@ -302,17 +397,20 @@ export function TeamUsagePage() {
                     <Th>{t('teamUsageToday', lang)}</Th>
                     <Th>{t('teamUsageMonth', lang)}</Th>
                     <Th>{t('teamUsageOverride', lang)}</Th>
+                    {showPlan && <Th>{t('teamUsagePlanColumn', lang)}</Th>}
+                    {showPlan && <Th>{t('teamUsagePlanOverride', lang)}</Th>}
                   </tr>
                 </thead>
                 <tbody>
                   {users.length === 0 && (
-                    <tr><td colSpan={8} className="px-3 py-6 text-center text-[var(--color-text-muted)]">
+                    <tr><td colSpan={columns} className="px-3 py-6 text-center text-[var(--color-text-muted)]">
                       {loading ? t('teamUsageLoading', lang) : t('teamUsageEmpty', lang)}
                     </td></tr>
                   )}
                   {users.map((name) => {
                     const row = rowsByUser.get(name)
                     const override = draft?.users[name] ?? { daily: '', monthly: '' }
+                    const capOverride = draft?.plan?.users[name] ?? NO_CAPS
                     return (
                       <tr key={name} className="border-t border-[var(--color-border)]">
                         <td className="px-3 py-2 font-mono">{name}</td>
@@ -341,6 +439,21 @@ export function TeamUsagePage() {
                               onChange={(e) => setUserLimit(name, 'monthly', e.target.value)} />
                           </div>
                         </td>
+                        {showPlan && <td className="px-3 py-2"><PlanCell row={planByUser.get(name)} lang={lang} /></td>}
+                        {showPlan && (
+                          <td className="px-3 py-2">
+                            <div className="flex gap-1.5 w-48">
+                              <input aria-label={t('teamUsagePlanOverrideFiveHourFor', lang, { user: name })}
+                                className={cn(inputClass, invalid === `plan:${name}:five_hour` && 'border-red-500/60')}
+                                inputMode="numeric" value={capOverride.five_hour} placeholder={t('teamUsageFiveHourDefault', lang)}
+                                onChange={(e) => setUserCap(name, 'five_hour', e.target.value)} />
+                              <input aria-label={t('teamUsagePlanOverrideWeeklyFor', lang, { user: name })}
+                                className={cn(inputClass, invalid === `plan:${name}:weekly` && 'border-red-500/60')}
+                                inputMode="numeric" value={capOverride.weekly} placeholder={t('teamUsageWeeklyDefault', lang)}
+                                onChange={(e) => setUserCap(name, 'weekly', e.target.value)} />
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
@@ -353,7 +466,7 @@ export function TeamUsagePage() {
                       <Num value={report.totals.output_tokens} />
                       <Num value={report.totals.total_tokens} strong />
                       <td className="px-3 py-2 text-right tabular-nums">{report.totals.calls.toLocaleString('en-US')}</td>
-                      <td colSpan={3} />
+                      <td colSpan={columns - 5} />
                     </tr>
                   </tfoot>
                 )}
@@ -438,6 +551,41 @@ function RangeButton({ active, onClick, children }: { active: boolean; onClick: 
           : 'border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]')}>
       {children}
     </button>
+  )
+}
+
+const WINDOW_LABELS: Record<PlanWindow, I18nKey> = { five_hour: 'teamUsageFiveHour', weekly: 'teamUsageWeekly' }
+
+// A user's ChatGPT plan windows as their engine last reported them.
+function PlanCell({ row, lang }: { row: PlanUsageRow | undefined; lang: Lang }) {
+  const windows = row?.subscription?.providers.openai_codex?.windows ?? {}
+  const shown = PLAN_WINDOWS.filter((window) => windows[window]?.current)
+  if (!row || shown.length === 0) return <span className="text-[var(--color-text-muted)]">–</span>
+  return (
+    <div className={cn('min-w-[130px] space-y-1.5', !row.engine_running && 'opacity-60')}
+      title={row.engine_running ? undefined : t('teamUsagePlanStopped', lang)}>
+      {shown.map((window) => {
+        const status = windows[window]!
+        const cap = status.limit_percent
+        const resets = status.resets_at != null
+          ? t('teamUsagePlanResets', lang, { time: new Date(status.resets_at * 1000).toLocaleString() }) : undefined
+        return (
+          <div key={window} className="space-y-0.5" title={resets}>
+            <div className={cn('tabular-nums whitespace-nowrap', status.exceeded ? 'text-red-400 font-medium'
+              : status.warn ? 'text-[var(--color-notice-text)] font-medium' : '')}>
+              {t(WINDOW_LABELS[window], lang)} {Math.round(status.used_percent)}%
+              {' / '}{cap != null ? `${cap}%` : t('teamUsageNoCap', lang)}
+              {status.exceeded && ` · ${t('teamUsageExceeded', lang)}`}
+            </div>
+            <div className="h-1 rounded-full bg-[var(--color-bg-tertiary)] overflow-hidden">
+              <div className={cn('h-full rounded-full', status.exceeded ? 'bg-red-500'
+                : status.warn ? 'bg-[var(--color-warning)]' : 'bg-[var(--color-accent)]')}
+                style={{ width: `${Math.min(Math.round(status.used_percent), 100)}%` }} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
