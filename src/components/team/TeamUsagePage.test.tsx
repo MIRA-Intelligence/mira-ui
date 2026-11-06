@@ -4,7 +4,7 @@ import { TeamUsagePage } from './TeamUsagePage'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useTeamServerStore } from '@/stores/teamServerStore'
 import { useUiStore } from '@/stores/uiStore'
-import type { QuotaSettings, UsageReport } from '@/services/teamUsage'
+import type { PlanUsageRow, QuotaSettings, UsageReport } from '@/services/teamUsage'
 
 vi.mock('@/services/teamUsage', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/teamUsage')>()
@@ -12,12 +12,13 @@ vi.mock('@/services/teamUsage', async (importOriginal) => {
     ...actual,
     fetchUsageReport: vi.fn(),
     fetchQuotas: vi.fn(),
+    fetchPlanUsage: vi.fn(),
     saveQuotas: vi.fn(),
     downloadUsageCsv: vi.fn(),
   }
 })
 
-const { fetchUsageReport, fetchQuotas, saveQuotas, downloadUsageCsv } = await import('@/services/teamUsage')
+const { fetchUsageReport, fetchQuotas, fetchPlanUsage, saveQuotas, downloadUsageCsv } = await import('@/services/teamUsage')
 
 const ORIGIN = 'https://mira.example.com'
 const zero = { input_tokens: 0, output_tokens: 0, cached_tokens: 0, total_tokens: 0, calls: 0, unreported_calls: 0 }
@@ -51,11 +52,29 @@ function byModel(): UsageReport {
 const quotas: QuotaSettings = { default: { daily: 2_000_000, monthly: null }, users: { carol: { daily: 0, monthly: null } },
   warn_percent: 80 }
 
+// A server with subscription quotas (ChatGPT plans).
+const planQuotas: QuotaSettings = {
+  ...quotas,
+  subscription: { default: { five_hour: 80, weekly: 90 }, users: { alice: { five_hour: null, weekly: 0 } } },
+}
+
+const planWindow = (used: number, cap: number | null, minutes: number) => ({
+  used_percent: used, window_minutes: minutes, resets_at: 1_900_000_000, current: true, limit_percent: cap,
+  exceeded: cap != null && used >= cap, warn: cap != null && used * 100 >= cap * 80,
+})
+
+const planUsage: PlanUsageRow[] = [
+  { user: 'erin', engine_running: true, subscription_quota: { five_hour: 80, weekly: 90 }, subscription: { providers: {
+    openai_codex: { updated_at: 1, limit_reached: null, limits: { five_hour: 80, weekly: 90 },
+      windows: { five_hour: planWindow(42, 80, 300), weekly: planWindow(91, 90, 10080) } } } } },
+]
+
 describe('TeamUsagePage', () => {
   beforeEach(() => {
     vi.mocked(fetchUsageReport).mockReset().mockImplementation(async (_origin, options) =>
       options?.groupBy?.includes('model') ? byModel() : byUser())
     vi.mocked(fetchQuotas).mockReset().mockResolvedValue(quotas)
+    vi.mocked(fetchPlanUsage).mockReset().mockResolvedValue([])
     vi.mocked(saveQuotas).mockReset().mockImplementation(async (_origin, settings) => settings)
     useSettingsStore.setState({ language: 'en' })
     useTeamServerStore.setState({ phase: 'signedIn', origin: ORIGIN,
@@ -104,6 +123,56 @@ describe('TeamUsagePage', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: 'Daily tokens per user' }), { target: { value: 'lots' } })
     expect(screen.getByRole('alert')).toHaveTextContent('not token amounts')
     expect(screen.getByRole('button', { name: 'Save quotas' })).toBeDisabled()
+  })
+
+  it('hides ChatGPT plan caps on servers without them', async () => {
+    render(<TeamUsagePage />)
+    await screen.findByRole('textbox', { name: 'Daily tokens per user' })
+    expect(screen.queryByText('ChatGPT plan (OpenAI Codex)')).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '5-hour cap for alice' })).not.toBeInTheDocument()
+  })
+
+  it('edits the default and per-user ChatGPT plan caps alongside token quotas', async () => {
+    vi.mocked(fetchQuotas).mockResolvedValue(planQuotas)
+    render(<TeamUsagePage />)
+    const fiveHour = await screen.findByRole('textbox', { name: '5-hour window cap per user (%)' })
+    expect(fiveHour).toHaveValue('80')
+    expect(screen.getByRole('textbox', { name: 'Weekly window cap per user (%)' })).toHaveValue('90')
+    expect(screen.getByRole('textbox', { name: 'Weekly cap for alice' })).toHaveValue('0')
+    expect(screen.getByRole('textbox', { name: '5-hour cap for alice' })).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Save quotas' })).toBeDisabled()
+
+    fireEvent.change(fiveHour, { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '5-hour cap for bob' }), { target: { value: '50%' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Weekly cap for alice' }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save quotas' }))
+
+    await waitFor(() => expect(saveQuotas).toHaveBeenCalled())
+    expect(vi.mocked(saveQuotas).mock.calls[0][1]).toEqual({
+      ...quotas,
+      users: { carol: { daily: 0, monthly: null } },
+      subscription: { default: { five_hour: null, weekly: 90 }, users: { bob: { five_hour: 50, weekly: null } } },
+    })
+    expect(fetchPlanUsage).toHaveBeenCalledTimes(2)  // reloaded after saving
+  })
+
+  it('refuses plan caps that are not percentages', async () => {
+    vi.mocked(fetchQuotas).mockResolvedValue(planQuotas)
+    render(<TeamUsagePage />)
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Weekly window cap per user (%)' }),
+      { target: { value: '120' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('whole percentages from 1 to 100')
+    expect(screen.getByRole('button', { name: 'Save quotas' })).toBeDisabled()
+  })
+
+  it('shows each user\'s ChatGPT plan windows against their caps', async () => {
+    vi.mocked(fetchQuotas).mockResolvedValue(planQuotas)
+    vi.mocked(fetchPlanUsage).mockResolvedValue(planUsage)
+    render(<TeamUsagePage />)
+    const erin = (await screen.findByText('erin')).closest('tr')!  // plan usage only, no team tokens
+    expect(erin).toHaveTextContent('5h 42% / 80%')
+    expect(erin).toHaveTextContent('week 91% / 90% · used up')
+    expect(screen.getByText('alice').closest('tr')).toHaveTextContent('–')
   })
 
   it('switches to last month and exports CSV', async () => {

@@ -58,10 +58,53 @@ export interface QuotaLimits {
   monthly: number | null
 }
 
+// Caps on a ChatGPT plan's usage windows (OpenAI Codex), in percent of the
+// account's window. null: no cap (default) or "follow the team default" (a user
+// override); 0 in an override: no cap for that user.
+export interface PlanCaps {
+  five_hour: number | null
+  weekly: number | null
+}
+
+export interface PlanQuotaSettings {
+  default: PlanCaps
+  users: Record<string, PlanCaps>
+}
+
 export interface QuotaSettings {
   default: QuotaLimits
   users: Record<string, QuotaLimits>
   warn_percent: number
+  // Absent from servers that predate subscription quotas.
+  subscription?: PlanQuotaSettings
+}
+
+export type PlanWindow = 'five_hour' | 'weekly'
+
+export interface PlanWindowStatus {
+  used_percent: number
+  window_minutes: number | null
+  resets_at: number | null  // epoch seconds
+  current: boolean  // false once resets_at has passed
+  limit_percent: number | null
+  exceeded: boolean
+  warn: boolean
+}
+
+export interface PlanUsage {
+  providers: Record<string, {
+    updated_at: number | null
+    limit_reached: string | null
+    windows: Partial<Record<PlanWindow, PlanWindowStatus>>
+    limits: PlanCaps
+  }>
+}
+
+export interface PlanUsageRow {
+  user: string
+  engine_running: boolean
+  subscription: PlanUsage | null
+  subscription_quota: PlanCaps
 }
 
 export class TeamUsageError extends Error {
@@ -112,6 +155,26 @@ export function fetchQuotas(origin: string): Promise<QuotaSettings> {
 
 export function saveQuotas(origin: string, settings: QuotaSettings): Promise<QuotaSettings> {
   return request(origin, '/server/admin/quotas', { method: 'PUT', body: JSON.stringify(settings) })
+}
+
+// Everyone's ChatGPT plan usage; [] from servers without subscription quotas.
+export async function fetchPlanUsage(origin: string): Promise<PlanUsageRow[]> {
+  try {
+    return (await request<{ users: PlanUsageRow[] }>(origin, '/server/admin/subscription-usage')).users
+  } catch (error) {
+    if (error instanceof TeamUsageError && error.status === 404) return []
+    throw error
+  }
+}
+
+// Empty → null; "none" → 0; "80" or "80%" → 80. Returns undefined when the text is not a percentage.
+export function parsePercent(text: string): number | null | undefined {
+  const value = text.trim().toLowerCase().replace(/[%\s]/g, '')
+  if (!value) return null
+  if (UNLIMITED.has(value) || value === '0' || value === '不设上限') return 0
+  if (!/^\d+$/.test(value)) return undefined
+  const percent = Number(value)
+  return percent >= 1 && percent <= 100 ? percent : undefined
 }
 
 // ---------------------------------------------------------------------------
